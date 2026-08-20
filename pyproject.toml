@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,10 +9,16 @@ description = "Open-source reprocessor for IONICON IoniTOF PTR-MS / PTR-TOF .h5 
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
+license-files = ["LICENSE"]
 dependencies = ["h5py>=3.0", "numpy>=1.20"]
 
 [project.scripts]
 ptr = "ptr_ms_analysis.analyze:main"
+
+[project.urls]
+Homepage = "https://github.com/saattrupdan/ptr"
+Repository = "https://github.com/saattrupdan/ptr"
+Issues = "https://github.com/saattrupdan/ptr/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
