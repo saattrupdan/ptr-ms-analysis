@@ -8,7 +8,7 @@ raw mass spectra, transmission-corrects them, converts to concentration (ppb and
 **Agent-driven by design.** The CLI does the deterministic physics and detects
 candidate peaks (with compound assignments + artifact flags) and time segments; an
 agent assigns chemistry and curates segments. Humans talk to the agent, not to this
-CLI. See `SKILL.md` for the agent workflow.
+CLI. The commands below describe the complete package interface.
 
 ## Install / run
 
@@ -33,8 +33,9 @@ py -m pip install --user pipx;  py -m pipx ensurepath         # Windows (PowerSh
 
 `pipx ensurepath` puts pipx's bin dir on PATH — open a new shell afterwards. Alternatives
 that skip pipx entirely: `uv tool install --editable .`, or `pip install --editable .` into
-a venv. Works identically on macOS, Linux, and Windows (pipx makes a real `ptr.exe`). Not
-yet on PyPI — install from a checkout of this directory. Requires Python ≥ 3.9.
+a venv. Works identically on macOS, Linux, and Windows (pipx makes a real `ptr.exe`).
+Version 0.1.0 is not yet published on PyPI, so install it from a source checkout as
+shown above. Requires Python ≥ 3.9.
 
 ## Commands (all discovery output is JSON)
 

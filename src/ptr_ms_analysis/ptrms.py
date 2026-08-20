@@ -29,8 +29,8 @@ def load_rate_constants(path=None):
     try:
         if path is None:
             resource = resources.files("ptr_ms_analysis").joinpath(
-                "reference", "rate_constants.json"
-            )
+                "reference"
+            ).joinpath("rate_constants.json")
             with resource.open("r", encoding="utf-8") as fh:
                 return json.load(fh)
         with open(path, encoding="utf-8") as fh:
