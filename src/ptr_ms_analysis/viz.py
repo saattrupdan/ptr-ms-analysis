@@ -22,6 +22,7 @@ Done is clicked. Changes to primary m/z, physical resolution, or whole-run windo
 mode require re-extraction and are marked stale until that authoritative rerun.
 """
 from __future__ import annotations
+
 import http.server
 import json
 import os
@@ -30,10 +31,10 @@ import subprocess
 import sys
 import threading
 import webbrowser
+
 import numpy as np
 
-import ptrms
-import formula_id
+from . import formula_id, ptrms
 
 
 def _normalise_checklist(items):
@@ -335,7 +336,7 @@ def serve(html, config_path, port=8765, timeout=1800, open_browser=True,
                 if spectrum_fn is None:
                     self._send(404)
                     return
-                from urllib.parse import urlparse, parse_qs
+                from urllib.parse import parse_qs, urlparse
                 q = parse_qs(urlparse(self.path).query)
                 try:
                     lo = int(q.get("lo", ["1"])[0]); hi = int(q.get("hi", ["1"])[0])

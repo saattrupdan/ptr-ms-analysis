@@ -1,13 +1,10 @@
 """Focused tests for analysis-setting authority."""
 
-import sys
 import unittest
 from argparse import Namespace
-from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-import analyze  # noqa: E402
+from ptr_ms_analysis import analyze
 
 _KEYS = {
     "R": None,

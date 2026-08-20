@@ -3,7 +3,6 @@
 import importlib
 import io
 import json
-import sys
 import tempfile
 import unittest
 from argparse import Namespace
@@ -14,9 +13,8 @@ from unittest import mock
 import h5py
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-analyze = importlib.import_module("analyze")
-ptrms = importlib.import_module("ptrms")
+analyze = importlib.import_module("ptr_ms_analysis.analyze")
+ptrms = importlib.import_module("ptr_ms_analysis.ptrms")
 
 
 RATE_TABLE = {

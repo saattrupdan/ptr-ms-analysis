@@ -56,7 +56,7 @@ offer a standards calibration; do not suggest the Viewer as the answer.
   ```
 
   `--editable` means `ptr` tracks the skill's live code — you never reinstall when it's
-  updated. `pipx` gives it an isolated env (h5py+numpy) so its flat module names can't
+  updated. `pipx` gives it an isolated env (h5py+numpy) so its dependencies can't
   collide. First install ~20-30 s; then it's instant. **Do NOT** hand-build a venv or write
   your own HDF5 code — the install is the only setup.
 
@@ -79,7 +79,7 @@ offer a standards calibration; do not suggest the Viewer as the answer.
 - **Cross-platform:** identical on macOS, Linux, and **Windows** — pipx creates a real
   `ptr.exe` on PATH. Everything after install is the same `ptr <cmd>` on every OS (in
   PowerShell use `where ptr` / `Get-Command ptr` instead of `command -v ptr`).
-- **Never read `scripts/*.py`, and never write your own HDF5/parsing/quantification
+- **Never read `src/ptr_ms_analysis/*.py`, and never write your own HDF5/parsing/quantification
   code.** Every operation is a subcommand and every value you need is in its JSON output
   — `peaks` already returns candidate compound assignments, the run's mass-drift, and
   artifact flags; `analyze` reports apex checks, humidity, and the params used. If
@@ -142,7 +142,7 @@ pipx install --editable <SKILL_DIR>     # <SKILL_DIR> = this skill's directory
 ```
 
 Use **`--editable`** so `ptr` runs the skill's live code — when the skill is updated you do
-**not** reinstall. `pipx` isolates it (the flat module names can't collide with anything
+**not** reinstall. `pipx` isolates it (the CLI dependencies can't collide with anything
 else). Alternatives: `uv tool install --editable <SKILL_DIR>`; or `pip install --editable
 <SKILL_DIR>` into a venv. If `pipx` itself is missing: `brew install pipx` or `python3 -m
 pip install --user pipx` (then `pipx ensurepath`). Not yet on PyPI — install from this
@@ -446,7 +446,7 @@ Concentration uses the standard **primary-ion-normalised** model: dividing by th
 per-cycle reagent-ion signal (the configured primary-ion m/z, 21.022 by default) tracks
 reagent-ion drift over the run, and **K** is a single calibration constant. Isolated peaks use apex-centred
 (auto-corrected) windows; closely-spaced clustered peaks are Gaussian/deconvolved fitted
-components at fixed model centres. Full derivation: `reference/ionicon-h5-format.md`.
+components at fixed model centres. Full derivation: `src/ptr_ms_analysis/reference/ionicon-h5-format.md`.
 
 **Per-compound sensitivity (`--kinetic`).** Sensitivity scales with each compound's
 proton-transfer rate constant k (`Conc ∝ 1/k`). By default one k is assumed for all
@@ -454,9 +454,9 @@ compounds (matches a single-sensitivity reference). Passing `--kinetic` scales e
 compound by its own k — physically more accurate but it _diverges from_ a single-k
 reference (e.g. benzaldehyde, k≈3.9, drops to ~half a k=2 reference). k comes from a
 peak's explicit `"k"`, its `"formula"`, or its m/z, looked up in
-`reference/rate_constants.json` (218 compounds from the PTR Library — Pagonis,
+`src/ptr_ms_analysis/reference/rate_constants.json` (218 compounds from the PTR Library — Pagonis,
 Sekimoto & de Gouw 2019; browse with the `rates` command). See
-`reference/ptr-ms-chemistry.md`.
+`src/ptr_ms_analysis/reference/ptr-ms-chemistry.md`.
 
 **Humidity handling (low-proton-affinity compounds).** HCN, formaldehyde, H₂S, formic
 acid and ammonia have proton affinity near water's, so proton transfer is partly
@@ -473,7 +473,7 @@ uncalibrated, the correction only puts _relative_ comparisons on equal-humidity 
 and its magnitude is approximate. HCN is the canonical case — flag it to the user and,
 without an HCN standard, treat its absolute concentration as indicative only. The
 wet-lab calibration that pins HCN (and how to recognise existing calibration data) is
-described in `reference/hcn-calibration.md`.
+described in `src/ptr_ms_analysis/reference/hcn-calibration.md`.
 
 ## Accuracy & concentration calibration
 

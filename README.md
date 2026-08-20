@@ -14,7 +14,7 @@ CLI. See `SKILL.md` for the agent workflow.
 
 It's a proper package (`pyproject.toml`) that ships its own dependencies (h5py + numpy)
 and reference data. Install it **once** and `ptr` is on PATH everywhere. Recommended via
-`pipx` (isolated env — the CLI's flat module names can't collide with anything else):
+`pipx` (isolated environment for the CLI and its dependencies):
 
 ```bash
 pipx install --editable .     # from this directory -> `ptr` on PATH
@@ -99,10 +99,20 @@ Add `--pretty` to any command for indented JSON. `analyze` peak/segment sources:
 backgrounds). `--K` / `--molar-volume`
 override the file-derived calibration to match a specific Viewer project. `--kinetic`
 applies per-compound rate-constant (k) sensitivities (from
-`reference/rate_constants.json`, 218 compounds from the PTR Library) for physically resolved absolute
+`src/ptr_ms_analysis/reference/rate_constants.json`, 218 compounds from the PTR Library) for physically resolved absolute
 concentrations. Low-proton-affinity compounds (HCN, formaldehyde, formic acid…) are
 auto-flagged: `analyze` always reports a humidity diagnostic for them, and
 `--humidity-correct` (with a calibrated `--humidity-p`) normalises the humidity swing.
+
+## Reference data attribution
+
+The bundled `ptrlibrary.csv` is the PTR Library compiled by Demetrios Pagonis,
+Kanako Sekimoto, and Joost de Gouw. It is included with its upstream attribution
+and publication references; individual records cite their own sources. The upstream
+spreadsheet does not state a separate software licence, so the MIT licence for this
+package should not be read as relicensing the CSV or its cited data. Check the PTR
+Library source and cited papers before redistributing the reference data separately.
+The derived `rate_constants.json` is generated from that CSV by the bundled generator.
 
 ## How it works
 
@@ -110,21 +120,22 @@ Everything instrument-specific (mass calibration, transmission, concentration co
 K, molar volume from drift temperature) is read from the `.h5`. Isolated peaks use an
 apex-centred resolution window; overlapping peaks are separated by linear Gaussian
 deconvolution. Time segments are found by log-space plateau detection on a composite VOC
-signal. Compound identification (`scripts/formula_id.py`) enumerates candidate molecular
+signal. Compound identification (`src/ptr_ms_analysis/formula_id.py`) enumerates candidate molecular
 formulas offline (no external database) and ranks them by exact-mass error, the measured
 vs predicted ¹³C(M+1)/heteroatom(M+2, e.g. S/Cl) isotope pattern, and plausibility
 (integer DBE, nitrogen rule, element ratios) — so near-isobars are told apart by
 composition, not "nearest mass". Candidate rankings cannot determine structural isomers;
 names and isomer labels come from the bundled PTR Library mapping. Proton-transfer rate
-constants come from `reference/rate_constants.json` when the formula is known — 218 compounds
+constants come from `src/ptr_ms_analysis/reference/rate_constants.json` when the formula is known — 218 compounds
 compiled from the **PTR Library** (Pagonis, Sekimoto & de Gouw, *J. Am. Soc. Mass Spectrom.*
 2019, doi.org/10.1007/s13361-019-02209-3; tinyurl.com/PTRLibrary), one entry per
 neutral formula with measured k where available (else Su-Chesnavich capture-theory
 k, flagged `k_estimated`), plus proton affinity, isomer names, and fragmentation
-flags. Regenerate from `reference/ptrlibrary.csv` with `scripts/gen_rate_constants.py`.
+flags. Regenerate from `src/ptr_ms_analysis/reference/ptrlibrary.csv` with
+`uv run python -m ptr_ms_analysis.gen_rate_constants`.
 Details:
-`reference/ionicon-h5-format.md`; compound assignment help: `reference/ptr-ms-chemistry.md`;
-HCN/humidity calibration: `reference/hcn-calibration.md`.
+`src/ptr_ms_analysis/reference/ionicon-h5-format.md`; compound assignment help: `src/ptr_ms_analysis/reference/ptr-ms-chemistry.md`;
+HCN/humidity calibration: `src/ptr_ms_analysis/reference/hcn-calibration.md`.
 
 ## Accuracy
 

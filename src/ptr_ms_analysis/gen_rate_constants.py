@@ -17,19 +17,19 @@ molecular formula (PTR cannot separate structural isomers by mass), keeping:
               humidity/temperature dependent) and 'frag' (the protonated parent is
               not the main product ion -> fragments).
   isomers   = the distinct compound names the library lists at that formula.
-Run:  python scripts/gen_rate_constants.py   (writes reference/rate_constants.json)
+Run:  uv run python -m ptr_ms_analysis.gen_rate_constants
 """
 import csv
 import json
-import os
 import re
 import statistics
+from pathlib import Path
 
-import formula_id as F   # MONO, PROTON, formula_str, formula_mass
+from . import formula_id as F  # MONO, PROTON, formula_str, formula_mass
 
-HERE = os.path.dirname(__file__)
-SRC = os.path.join(HERE, "..", "reference", "ptrlibrary.csv")
-OUT = os.path.join(HERE, "..", "reference", "rate_constants.json")
+REFERENCE = Path(__file__).with_name("reference")
+SRC = REFERENCE / "ptrlibrary.csv"
+OUT = REFERENCE / "rate_constants.json"
 
 PA_WATER = 691.0          # kJ/mol
 HUMID_PA_MAX = 750.0      # PA below this -> humidity/temperature-sensitive k
@@ -65,7 +65,7 @@ def neutral_counts(comp):
 
 
 def main():
-    with open(SRC, encoding="utf-8") as fh:
+    with SRC.open(encoding="utf-8") as fh:
         rows = list(csv.reader(fh))
     hdr = rows[2]
     col = {h.strip(): i for i, h in enumerate(hdr)}
@@ -169,10 +169,10 @@ def main():
                    "Spectrom. 2019, doi.org/10.1007/s13361-019-02209-3; "
                    "tinyurl.com/PTRLibrary). One entry per neutral formula; k in "
                    "1e-9 cm3/s (measured median, else Su-Chesnavich kcap flagged "
-                   "k_estimated). Regenerate with scripts/gen_rate_constants.py.",
+                   "k_estimated). Regenerate with `uv run python -m ptr_ms_analysis.gen_rate_constants`.",
         "compounds": compounds,
     }
-    with open(OUT, "w", encoding="utf-8") as fh:
+    with OUT.open("w", encoding="utf-8") as fh:
         json.dump(doc, fh, indent=1)
     n_meas = sum(1 for c in compounds if not c["k_estimated"])
     print(f"wrote {len(compounds)} compounds ({n_meas} with measured k, "

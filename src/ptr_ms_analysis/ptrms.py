@@ -10,9 +10,9 @@ User inputs (experiment-specific, not in the raw file):
   - target peak list (m/z of product ions to quantify)
   - time ranges (labelled cycle windows)
 """
-import os
 import json
-import h5py
+from importlib import resources
+
 import numpy as np
 
 PROTON = 1.007276
@@ -23,23 +23,19 @@ K_ANCHOR_DEFAULT = 2.0   # 1e-9 cm3/s: the single k a non-kinetic calibration as
 def load_rate_constants(path=None):
     """Load the bundled proton-transfer rate-constant table (or None).
 
-    Works both in-place (running from the skill dir, data at ../reference/) and
-    when pip/pipx-installed (data shipped as the `ptrms_reference` data package)."""
-    if path is None:
-        inplace = os.path.join(os.path.dirname(__file__), "..", "reference",
-                               "rate_constants.json")
-        if os.path.exists(inplace):
-            path = inplace
-        else:
-            try:
-                from importlib.resources import files
-                path = str(files("ptrms_reference") / "rate_constants.json")
-            except Exception:
-                path = inplace
+    The table is loaded from package resources when no path is supplied. An
+    explicit path remains available for custom or regenerated tables.
+    """
     try:
+        if path is None:
+            resource = resources.files("ptr_ms_analysis").joinpath(
+                "reference", "rate_constants.json"
+            )
+            with resource.open("r", encoding="utf-8") as fh:
+                return json.load(fh)
         with open(path, encoding="utf-8") as fh:
             return json.load(fh)
-    except Exception:
+    except (OSError, TypeError, ValueError):
         return None
 
 

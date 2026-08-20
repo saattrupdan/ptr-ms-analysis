@@ -35,18 +35,17 @@ Flows:
        ptr analyze FILE --auto-peaks --auto-segments --include-cycle-rows --out results.csv
 """
 from __future__ import annotations
+
 import argparse
 import csv
 import json
 import os
 import sys
-import numpy as np
+
 import h5py
+import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import ptrms  # noqa: E402
-import formula_id  # noqa: E402
-
+from . import formula_id, ptrms
 
 _ANALYSIS_DEFAULTS = {
     "R": 1200.0,
@@ -956,7 +955,7 @@ def cmd_viz(args):
         Done or --timeout. Because it blocks on the browser, run it backgrounded.
       * --html review.html: write a standalone, portable HTML file instead (no
         server, no CSV; edits exported via the page's Download button)."""
-    import viz
+    from . import viz
     config = _load_config(args)
     settings = resolve_analysis_settings(config, args)
     with h5py.File(args.h5, "r") as f:
@@ -1033,7 +1032,7 @@ def cmd_rates(args):
     """Look up / list proton-transfer rate constants."""
     tbl = ptrms.load_rate_constants()
     if not tbl:
-        sys.exit("rate_constants.json not found in the skill's reference/ directory.")
+        sys.exit("bundled rate_constants.json could not be loaded.")
     comps = tbl["compounds"]
     q = args.query
     if q:

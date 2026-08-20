@@ -21,8 +21,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import viz
-
+from ptr_ms_analysis import viz
 
 SESSION = "ptr-ms-viz-regression"
 

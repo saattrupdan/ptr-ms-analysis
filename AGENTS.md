@@ -12,25 +12,24 @@ CLI reference.
 
 - Python 3.9 or newer, packaged with setuptools through `pyproject.toml`.
 - Runtime dependencies: NumPy and h5py.
-- The `ptr` console entry point resolves to `analyze:main`.
+- The `ptr` console entry point resolves to `ptr_ms_analysis.analyze:main`.
 - The review UI is generated and served by Python; there is no separate frontend build.
 
 ## Layout
 
 | Path | Purpose |
 | --- | --- |
-| `scripts/analyze.py` | CLI parsing, command handlers, CSV output, and orchestration. |
-| `scripts/ptrms.py` | HDF5 loading, extraction, segmentation, and quantification. |
-| `scripts/formula_id.py` | Formula enumeration and candidate scoring. |
-| `scripts/viz.py` | Self-contained browser review UI and localhost server. |
-| `scripts/gen_rate_constants.py` | Rebuilds the bundled rate-constant JSON. |
-| `reference/` | Scientific references and package data shipped with the CLI. |
+| `src/ptr_ms_analysis/analyze.py` | CLI parsing, command handlers, CSV output, and orchestration. |
+| `src/ptr_ms_analysis/ptrms.py` | HDF5 loading, extraction, segmentation, and quantification. |
+| `src/ptr_ms_analysis/formula_id.py` | Formula enumeration and candidate scoring. |
+| `src/ptr_ms_analysis/viz.py` | Self-contained browser review UI and localhost server. |
+| `src/ptr_ms_analysis/gen_rate_constants.py` | Rebuilds the bundled rate-constant JSON. |
+| `src/ptr_ms_analysis/reference/` | Scientific references and package data shipped with the CLI. |
 
 ## Running it
 
-Install the checkout in an isolated environment so its deliberately flat module names
-do not collide with other packages:
-
+Install the checkout in an isolated environment so its CLI and dependencies stay
+ isolated from other packages:
 ```bash
 pipx install --editable .
 ptr --help
@@ -49,13 +48,14 @@ about 1 GB, and a full analysis commonly takes about a minute.
 
 ## Validation
 
-There is currently no automated test, lint, or type-check suite. At minimum, run these
-smoke checks after a change (the deterministic `viz` browser regression is especially
-relevant when changing identification display). The browser check requires the
-`agent-browser` CLI (`npm i -g agent-browser` and `agent-browser install`) in addition
-to the package's normal Python dependencies:
+Run the automated tests, lint check, build, and CLI smoke checks after a change. The
+browser regression is especially relevant when changing identification display; it
+requires the `agent-browser` CLI (`npm i -g agent-browser` and `agent-browser install`)
+in addition to the package's normal Python dependencies:
 
 ```bash
+uv run pytest
+uv run ruff check --select F,I src tests scripts
 uv run python scripts/smoke_viz.py
 uvx --from . ptr --help
 uvx --from . ptr inspect --help
@@ -89,16 +89,17 @@ files, generated review HTML, configs, or result CSVs.
 
 ## Gotchas
 
-- `scripts/` contains installable top-level modules, not disposable helper scripts.
-  `pyproject.toml` maps that directory directly into the package. Do not move it to a
-  conventional `src/` layout or change its absolute imports casually.
-- Install with `pipx --editable` or another isolated environment. Names such as
-  `analyze`, `ptrms`, and `viz` are intentionally flat and can collide globally.
-- `reference/rate_constants.json` is generated from `reference/ptrlibrary.csv` by
-  `scripts/gen_rate_constants.py`. Change the source or generator, regenerate the JSON,
-  and review both files together rather than hand-editing generated entries.
-- Reference Markdown, CSV, and JSON files are package data. Keep `pyproject.toml` in
-  sync when adding a new bundled file type.
+- `src/ptr_ms_analysis/` is the installable package. Keep package-internal imports
+  relative and use `importlib.resources` for bundled data; do not reintroduce flat
+  top-level modules.
+- Install with `pipx --editable` or another isolated environment. The public command is
+  `ptr`; package modules are imported as `ptr_ms_analysis.*`.
+- `src/ptr_ms_analysis/reference/rate_constants.json` is generated from
+  `src/ptr_ms_analysis/reference/ptrlibrary.csv` by
+  `uv run python -m ptr_ms_analysis.gen_rate_constants`. Change the source or generator,
+  regenerate the JSON, and review both files together rather than hand-editing entries.
+- Reference Markdown, CSV, and JSON files under `src/ptr_ms_analysis/reference/` are
+  package data. Keep `pyproject.toml` in sync when adding a new bundled file type.
 - `viz` reviews an already curated config; it must not silently perform peak or segment
   detection. The delivered CSV is always produced by the analysis path.
 - Preserve 1-based, inclusive cycle ranges and deterministic chronological labels:
