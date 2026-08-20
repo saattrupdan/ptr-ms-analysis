@@ -8,23 +8,20 @@ version = "0.1.0"
 description = "Open-source reprocessor for IONICON IoniTOF PTR-MS / PTR-TOF .h5 files — a PTR-MS Viewer replacement."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = "MIT"
 dependencies = ["h5py>=3.0", "numpy>=1.20"]
 
 [project.scripts]
-ptr = "analyze:main"
+ptr = "ptr_ms_analysis.analyze:main"
 
-# Flat top-level modules live in scripts/; the reference data (rate-constant
-# table etc.) ships as the `ptrms_reference` data package so it resolves both
-# in-place and when installed. Install into an ISOLATED env (pipx) so the flat
-# module names can't collide with anything else.
-[tool.setuptools]
-py-modules = ["analyze", "ptrms", "formula_id", "viz", "gen_rate_constants"]
-packages = ["ptrms_reference"]
-
-[tool.setuptools.package-dir]
-"" = "scripts"
-ptrms_reference = "reference"
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.setuptools.package-data]
-ptrms_reference = ["*.json", "*.csv", "*.md"]
+ptr_ms_analysis = ["reference/*.json", "reference/*.csv", "reference/*.md"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "ruff>=0.16.4",
+]

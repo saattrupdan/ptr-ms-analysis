@@ -1,15 +1,11 @@
 """Focused tests for runtime calibration provenance."""
 
-import sys
 import unittest
-from pathlib import Path
 
 import h5py
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-import analyze  # noqa: E402
-import ptrms  # noqa: E402
+from ptr_ms_analysis import analyze, ptrms
 
 
 class ProvenanceTest(unittest.TestCase):

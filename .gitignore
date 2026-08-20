@@ -4,3 +4,9 @@ build/
 dist/
 *.egg-info/
 .venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+*.h5
+review*.html
+results*.csv

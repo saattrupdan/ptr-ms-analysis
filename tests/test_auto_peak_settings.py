@@ -1,7 +1,6 @@
 """Regression tests for effective resolutions in automatic peak selection."""
 
 import json
-import sys
 import tempfile
 import unittest
 from argparse import Namespace
@@ -11,8 +10,7 @@ from unittest import mock
 import h5py
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-import analyze  # noqa: E402
+from ptr_ms_analysis import analyze
 
 
 class AutoPeakSettingsTest(unittest.TestCase):

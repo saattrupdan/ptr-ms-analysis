@@ -20,6 +20,7 @@ reference/rate_constants.json when a formula is known; otherwise the formula
 stands on its own with an estimated k.
 """
 from __future__ import annotations
+
 import math
 
 PROTON = 1.007276
@@ -200,7 +201,7 @@ _TABLE = None
 def _table():
     global _TABLE
     if _TABLE is None:
-        import ptrms
+        from . import ptrms
         t = ptrms.load_rate_constants() or {}
         by_formula = {}
         for comp in t.get("compounds", []):
