@@ -24,13 +24,15 @@ _KEYS = {
 class AnalysisSettingsTest(unittest.TestCase):
     def test_curated_values_survive_omitted_cli_options(self):
         settings = analyze.resolve_analysis_settings(
-            {"analyze": {
-                "R": 1500,
-                "R_phys": 3200,
-                "primary_mz": 19.022,
-                "kinetic": True,
-                "whole_run_windows": True,
-            }},
+            {
+                "analyze": {
+                    "R": 1500,
+                    "R_phys": 3200,
+                    "primary_mz": 19.022,
+                    "kinetic": True,
+                    "whole_run_windows": True,
+                }
+            },
             Namespace(**_KEYS),
         )
         self.assertEqual(settings["R"], 1500)
@@ -82,18 +84,28 @@ class AnalysisSettingsTest(unittest.TestCase):
         )
         fake_file = mock.MagicMock()
         fake_file.__enter__.return_value = fake_file
-        with mock.patch.object(analyze, "_load_config", return_value=config), \
-                mock.patch.object(analyze, "_parse_viewer_csv", return_value={
-                    (30.0, "sample"): {"con": 1.0}}), \
-                mock.patch.object(analyze, "_load_peaks", return_value=[{"mz": 30.0}]), \
-                mock.patch.object(analyze, "_resolve_ranges", return_value={
-                    "sample": (1, 2)}), \
-                mock.patch.object(analyze.h5py, "File", return_value=fake_file), \
-                mock.patch.object(analyze.ptrms, "extract_traces", return_value=({30.0: ([], 30.0)}, None)) as extract, \
-                mock.patch.object(analyze.ptrms, "calibrate_K", return_value=(1.0, 0.0, 1)) as calibrate, \
-                mock.patch.object(analyze.ptrms, "extract_primary", return_value=[]), \
-                mock.patch.object(analyze.ptrms, "derive_K", return_value=1.0), \
-                mock.patch.object(analyze, "_emit"):
+        with (
+            mock.patch.object(analyze, "_load_config", return_value=config),
+            mock.patch.object(
+                analyze,
+                "_parse_viewer_csv",
+                return_value={(30.0, "sample"): {"con": 1.0}},
+            ),
+            mock.patch.object(analyze, "_load_peaks", return_value=[{"mz": 30.0}]),
+            mock.patch.object(
+                analyze, "_resolve_ranges", return_value={"sample": (1, 2)}
+            ),
+            mock.patch.object(analyze.h5py, "File", return_value=fake_file),
+            mock.patch.object(
+                analyze.ptrms, "extract_traces", return_value=({30.0: ([], 30.0)}, None)
+            ) as extract,
+            mock.patch.object(
+                analyze.ptrms, "calibrate_K", return_value=(1.0, 0.0, 1)
+            ) as calibrate,
+            mock.patch.object(analyze.ptrms, "extract_primary", return_value=[]),
+            mock.patch.object(analyze.ptrms, "derive_K", return_value=1.0),
+            mock.patch.object(analyze, "_emit"),
+        ):
             analyze.cmd_calibrate(args)
 
         self.assertEqual(extract.call_args.kwargs["R"], 1800)

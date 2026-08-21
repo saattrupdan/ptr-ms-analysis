@@ -10,13 +10,14 @@ User inputs (experiment-specific, not in the raw file):
   - target peak list (m/z of product ions to quantify)
   - time ranges (labelled cycle windows)
 """
+
 import json
 from importlib import resources
 
 import numpy as np
 
 PROTON = 1.007276
-K_ANCHOR_DEFAULT = 2.0   # 1e-9 cm3/s: the single k a non-kinetic calibration assumes
+K_ANCHOR_DEFAULT = 2.0  # 1e-9 cm3/s: the single k a non-kinetic calibration assumes
 
 
 # ---------- per-compound rate constants (kinetic sensitivity) ----------
@@ -28,9 +29,11 @@ def load_rate_constants(path=None):
     """
     try:
         if path is None:
-            resource = resources.files("ptr_ms_analysis").joinpath(
-                "reference"
-            ).joinpath("rate_constants.json")
+            resource = (
+                resources.files("ptr_ms_analysis")
+                .joinpath("reference")
+                .joinpath("rate_constants.json")
+            )
             with resource.open("r", encoding="utf-8") as fh:
                 return json.load(fh)
         with open(path, encoding="utf-8") as fh:
@@ -61,8 +64,7 @@ def resolve_k(peaks, rate_table, mz_tol=0.03):
             by_formula.get(p["formula"].upper()) if p.get("formula") else None
         )
         mz_matches = [
-            c for c in by_mz.get(round(mz, 1), [])
-            if abs(c["mz"] - mz) < mz_tol
+            c for c in by_mz.get(round(mz, 1), []) if abs(c["mz"] - mz) < mz_tol
         ]
         flag_match = formula_match or (mz_matches[0] if len(mz_matches) == 1 else None)
         flags = list(flag_match.get("flags", [])) if flag_match else []
@@ -70,7 +72,7 @@ def resolve_k(peaks, rate_table, mz_tol=0.03):
         k, src, kest = None, None, False
         if p.get("k") is not None:
             k = float(p["k"])
-            k = k / 1e-9 if k < 1e-6 else k   # accept SI or 1e-9 units
+            k = k / 1e-9 if k < 1e-6 else k  # accept SI or 1e-9 units
             src = "explicit"
             kest = bool(p.get("k_estimated", False))
         elif formula_match:
@@ -83,6 +85,7 @@ def resolve_k(peaks, rate_table, mz_tol=0.03):
             src = "ambiguous:" + ",".join(c["name"] for c in mz_matches)
         out[mz] = {"k": k, "source": src, "flags": flags, "k_estimated": kest}
     return out
+
 
 # ---------- calibration read from file ----------
 def load_mass_cal(f):
@@ -106,10 +109,17 @@ def load_mass_cal(f):
                 return float(a), float(b)
     raise ValueError(
         "no mass calibration in file (neither CALdata/Mapping nor a usable "
-        "CALdata/Spectrum)")
+        "CALdata/Spectrum)"
+    )
 
-def m_to_tb(m, a, b): return a * np.sqrt(m) + b
-def tb_to_m(tb, a, b): return ((tb - b) / a) ** 2
+
+def m_to_tb(m, a, b):
+    return a * np.sqrt(m) + b
+
+
+def tb_to_m(tb, a, b):
+    return ((tb - b) / a) ** 2
+
 
 def has_transmission(f):
     """True if the file carries a real transmission curve (some raw exports omit it)."""
@@ -120,6 +130,7 @@ def has_transmission(f):
         return bool((mf[0, 0, :] > 0).any())
     except (IndexError, KeyError, OSError, TypeError, ValueError):
         return False
+
 
 def load_transmission(f):
     """Transmission curve (sorted m/z -> relative transmission).
@@ -138,6 +149,7 @@ def load_transmission(f):
     # no transmission table in file: unit transmission across the full m/z range
     return np.array([1.0, 1000.0]), np.array([1.0, 1.0])
 
+
 def derive_sensitivity_percycle(f, min_corrected=1000.0):
     """Per-cycle ppb-per-corrected-cps from the file's own pre-computed traces.
 
@@ -153,7 +165,8 @@ def derive_sensitivity_percycle(f, min_corrected=1000.0):
     ncyc = cor.shape[0]
     s = np.full(ncyc, np.nan)
     for i in range(ncyc):
-        c = cor[i]; k = con[i]
+        c = cor[i]
+        k = con[i]
         m = (c > min_corrected) & np.isfinite(c) & np.isfinite(k) & (k > 0)
         if m.any():
             s[i] = np.median(k[m] / c[m])
@@ -163,6 +176,7 @@ def derive_sensitivity_percycle(f, min_corrected=1000.0):
         return None
     s[~good] = np.median(s[good])
     return s
+
 
 def extract_primary(f, primary_mz=21.022, R=1200.0, block=400):
     """Per-cycle primary-ion (reagent-ion) signal used to normalise concentration.
@@ -193,6 +207,7 @@ def water_cluster_ratio(f, cluster_mz=37.028, primary_mz=21.022, R=1200.0):
     (m/z 21.022 by default) as the denominator instead. A constant isotope factor
     cancels once the ratio is normalised to a reference. Returns a length-n_cycles
     array, or None."""
+
     def get(mz):
         if "TRACEdata/TraceRaw" in f and "TRACEdata/TraceInfo" in f:
             ti = f["TRACEdata/TraceInfo"][:]
@@ -204,6 +219,7 @@ def water_cluster_ratio(f, cluster_mz=37.028, primary_mz=21.022, R=1200.0):
             return extract_traces(f, [mz], R=R)[0][mz][0]
         except (IndexError, KeyError, OSError, TypeError, ValueError):
             return None
+
     c = get(cluster_mz)
     p = get(primary_mz)
     if c is None or p is None:
@@ -264,8 +280,7 @@ def derive_molar_volume_info(f):
         T_C = float(np.nanmean(data[:, ti]))
         if not np.isfinite(T_C):
             raise ValueError("drift temperature is not finite")
-        return (22.414 * (T_C + 273.15) / 273.15,
-                "file drift temperature")
+        return (22.414 * (T_C + 273.15) / 273.15, "file drift temperature")
     except (IndexError, KeyError, OSError, TypeError, ValueError):
         return (24.465, "25 °C fallback (drift metadata unavailable)")
 
@@ -273,6 +288,7 @@ def derive_molar_volume_info(f):
 def derive_molar_volume(f):
     """Vm [L/mol] at drift temperature, or the documented 25 °C fallback."""
     return derive_molar_volume_info(f)[0]
+
 
 # ---------- peak extraction ----------
 def find_apex(avgspec, a, b, target_m, tol=0.15):
@@ -297,14 +313,15 @@ def refine_apex_local(avgspec, a, b, apex0, tol=0.035):
     hi = min(len(avgspec) - 1, int(np.ceil(m_to_tb(apex0 + tol, a, b))))
     if hi - lo < 2:
         return None
-    bi = lo + int(np.argmax(avgspec[lo:hi + 1]))
+    bi = lo + int(np.argmax(avgspec[lo : hi + 1]))
     bv = float(avgspec[bi])
-    if bi <= lo or bi >= hi:            # max at an edge -> monotonic climb, no clear peak
+    if bi <= lo or bi >= hi:  # max at an edge -> monotonic climb, no clear peak
         return None
     floor = max(float(avgspec[lo]), float(avgspec[hi]))
     if bv >= 3 and bv >= 1.25 * floor:
         return tb_to_m(bi, a, b)
     return None
+
 
 def estimate_mass_scale(avgspec, a, b, target_masses, tol=0.15):
     """Robust global mass-scale correction (apex_m / nominal_m).
@@ -319,11 +336,13 @@ def estimate_mass_scale(avgspec, a, b, target_masses, tol=0.15):
         ratios.append(apex_m / m)
     return float(np.median(ratios)) if ratios else 1.0
 
+
 def peak_window(apex_m, a, b, R):
     hw = apex_m / (2 * R)
     wl = int(np.floor(m_to_tb(apex_m - hw, a, b)))
     wr = int(np.ceil(m_to_tb(apex_m + hw, a, b)))
     return wl, wr
+
 
 def peak_window_lr(apex_m, a, b, hwL, hwR):
     """Integration window from explicit left/right half-widths in m/z (per-peak,
@@ -331,6 +350,7 @@ def peak_window_lr(apex_m, a, b, hwL, hwR):
     wl = int(np.floor(m_to_tb(apex_m - hwL, a, b)))
     wr = int(np.ceil(m_to_tb(apex_m + hwR, a, b)))
     return wl, wr
+
 
 def _hw_for(m, apex_m, R, windows):
     """(left, right) half-widths in m/z for a peak: an explicit per-peak override
@@ -343,6 +363,7 @@ def _hw_for(m, apex_m, R, windows):
     hw = apex_m / (2 * R)
     return hw, hw
 
+
 def _cluster(masses, gap=0.20):
     """Group masses whose neighbours are closer than `gap` (needs deconvolution)."""
     ms = sorted(masses)
@@ -351,18 +372,20 @@ def _cluster(masses, gap=0.20):
         if m - cur[-1] < gap:
             cur.append(m)
         else:
-            groups.append(cur); cur = [m]
+            groups.append(cur)
+            cur = [m]
     groups.append(cur)
     return groups
+
 
 def _sigma_tb(mu_m, a, R_phys):
     """Gaussian sigma in timebins for a peak at mu_m given physical resolution."""
     sigma_m = mu_m / (2.3548 * R_phys)
-    dtb_dm = a / (2 * np.sqrt(mu_m))     # d(timebin)/d(m)
+    dtb_dm = a / (2 * np.sqrt(mu_m))  # d(timebin)/d(m)
     return sigma_m * dtb_dm
 
-def _cluster_design(centers_m, a, b, R=1200.0, R_phys=2400.0, windows=None,
-                    nbin=None):
+
+def _cluster_design(centers_m, a, b, R=1200.0, R_phys=2400.0, windows=None, nbin=None):
     """Precompute the Gaussian-unmixing design for one cluster of overlapping peaks.
 
     Returns (tlo, thi, P, norm): the timebin span to read, the projection matrix P
@@ -381,7 +404,7 @@ def _cluster_design(centers_m, a, b, R=1200.0, R_phys=2400.0, windows=None,
     x = np.arange(tlo, thi)
     # design matrix G (n_tb x K), unit-height Gaussians
     G = np.exp(-0.5 * ((x[:, None] - centers_tb[None, :]) / sig_tb[None, :]) ** 2)
-    P = G @ np.linalg.inv(G.T @ G)        # n_tb x K : A = Y @ P
+    P = G @ np.linalg.inv(G.T @ G)  # n_tb x K : A = Y @ P
     # normalisation: window-sum of each peak's own unit Gaussian (matches isolated)
     norm = np.zeros(len(centers_m))
     for k, m in enumerate(centers_m):
@@ -392,28 +415,40 @@ def _cluster_design(centers_m, a, b, R=1200.0, R_phys=2400.0, windows=None,
     return tlo, thi, P, norm
 
 
-def deconvolve_cluster(f, centers_m, a, b, R=1200.0, R_phys=2400.0, block=400,
-                       windows=None):
+def deconvolve_cluster(
+    f, centers_m, a, b, R=1200.0, R_phys=2400.0, block=400, windows=None
+):
     """Separate overlapping peaks by vectorised linear least-squares Gaussian
     unmixing. Returns dict center_m -> raw_trace (scaled to match the window-sum
     definition so isolated and deconvolved peaks share one Raw scale)."""
     inten = f["SPECdata/Intensities"]
     ncyc = inten.shape[0]
-    tlo, thi, P, norm = _cluster_design(centers_m, a, b, R, R_phys, windows,
-                                        nbin=inten.shape[1])
+    tlo, thi, P, norm = _cluster_design(
+        centers_m, a, b, R, R_phys, windows, nbin=inten.shape[1]
+    )
     traces = np.empty((ncyc, len(centers_m)))
     for i in range(0, ncyc, block):
         j = min(i + block, ncyc)
         Y = np.asarray(inten[i:j, tlo:thi], dtype=np.float64)
         Y[~np.isfinite(Y)] = 0.0
-        A = Y @ P                          # (j-i) x K amplitudes
+        A = Y @ P  # (j-i) x K amplitudes
         np.clip(A, 0, None, out=A)
         traces[i:j, :] = A * norm[None, :]
     return {m: traces[:, k] for k, m in enumerate(centers_m)}
 
-def extract_traces(f, target_masses, R=1200.0, R_phys=2400.0, block=400,
-                   refine_tol=0.02, cluster_gap=0.20, windows=None,
-                   per_range=None, range_refine_tol=0.035):
+
+def extract_traces(
+    f,
+    target_masses,
+    R=1200.0,
+    R_phys=2400.0,
+    block=400,
+    refine_tol=0.02,
+    cluster_gap=0.20,
+    windows=None,
+    per_range=None,
+    range_refine_tol=0.035,
+):
     """Return dict m -> (raw_trace[ncycles], apex_m). One streaming pass.
 
     Peak centring is two-stage: (1) a robust global mass-scale correction aligns
@@ -434,7 +469,7 @@ def extract_traces(f, target_masses, R=1200.0, R_phys=2400.0, block=400,
     inten = f["SPECdata/Intensities"]
     ncyc = inten.shape[0]
     avg = np.asarray(f["SPECdata/AverageSpec"][:], dtype=np.float64)
-    avg = np.where(np.isfinite(avg), avg, 0.0)     # tolerate rare corrupt bins
+    avg = np.where(np.isfinite(avg), avg, 0.0)  # tolerate rare corrupt bins
     nbin = avg.shape[0]
 
     scale = estimate_mass_scale(avg, a, b, target_masses)
@@ -468,8 +503,11 @@ def extract_traces(f, target_masses, R=1200.0, R_phys=2400.0, block=400,
 
     # per-range average-spectrum accumulators, filled during the isolated pass so
     # interval re-centring costs no extra read of the whole run
-    want_ranges = {lbl: (int(lo), int(hi)) for lbl, (lo, hi) in (per_range or {}).items()
-                   if int(hi) >= int(lo)}
+    want_ranges = {
+        lbl: (int(lo), int(hi))
+        for lbl, (lo, hi) in (per_range or {}).items()
+        if int(hi) >= int(lo)
+    }
     rsum = {lbl: np.zeros(nbin, dtype=np.float64) for lbl in want_ranges}
     rcnt = {lbl: 0 for lbl in want_ranges}
 
@@ -479,14 +517,18 @@ def extract_traces(f, target_masses, R=1200.0, R_phys=2400.0, block=400,
     # instead of once per cluster (deconvolve_cluster) — turns an O(n_clusters) set
     # of full-file decompression passes into a single pass (the dominant cost on
     # dense breath spectra: ~15 clusters was ~15x slower).
-    win_tb = {m: peak_window_lr(apexes[m], a, b, *_hw_for(m, apexes[m], R, windows))
-              for m in isolated}
+    win_tb = {
+        m: peak_window_lr(apexes[m], a, b, *_hw_for(m, apexes[m], R, windows))
+        for m in isolated
+    }
     iso_buf = {m: np.empty(ncyc) for m in isolated}
     cluster_apex = [[apexes[m] for m in g] for g in clusters]
     cluster_design = []
     for g, caps in zip(clusters, cluster_apex):
         apex_hw = {ap: _hw_for(m, ap, R, windows) for m, ap in zip(g, caps)}
-        cluster_design.append(_cluster_design(caps, a, b, R, R_phys, apex_hw, nbin=nbin))
+        cluster_design.append(
+            _cluster_design(caps, a, b, R, R_phys, apex_hw, nbin=nbin)
+        )
     cluster_buf = [np.empty((ncyc, len(g))) for g in clusters]
 
     for i in range(0, ncyc, block):
@@ -500,10 +542,10 @@ def extract_traces(f, target_masses, R=1200.0, R_phys=2400.0, block=400,
             A = chunk[:, tlo:thi] @ P
             np.clip(A, 0, None, out=A)
             cluster_buf[ci][i:j, :] = A * norm[None, :]
-        for lbl, (lo, hi) in want_ranges.items():       # cycles are 1-based inclusive
+        for lbl, (lo, hi) in want_ranges.items():  # cycles are 1-based inclusive
             c0, c1 = max(i, lo - 1), min(j, hi)
             if c1 > c0:
-                rsum[lbl] += chunk[c0 - i:c1 - i, :].sum(axis=0)
+                rsum[lbl] += chunk[c0 - i : c1 - i, :].sum(axis=0)
                 rcnt[lbl] += c1 - c0
 
     traces = {}
@@ -523,10 +565,10 @@ def extract_traces(f, target_masses, R=1200.0, R_phys=2400.0, block=400,
         rwin = {}
         for m in isolated:
             if windows and m in windows:
-                continue                       # hand-placed window: keep it everywhere (matches viz winManual)
+                continue  # hand-placed window: keep it everywhere (matches viz winManual)
             ap = refine_apex_local(avg_r, a, b, apexes[m], tol=range_refine_tol)
             if ap is None:
-                continue                       # no clear interval peak -> keep whole-run window
+                continue  # no clear interval peak -> keep whole-run window
             rwin[m] = peak_window_lr(ap, a, b, *_hw_for(m, ap, R, windows))
         if not rwin:
             continue
@@ -538,6 +580,7 @@ def extract_traces(f, target_masses, R=1200.0, R_phys=2400.0, block=400,
                 traces[m][i:j] = chunk[:, wl:wr].sum(axis=1)
 
     return {m: (traces[m], apexes[m]) for m in target_masses}, (a, b)
+
 
 # ---------- automatic segmentation ----------
 def build_discriminator(f, mz_lo=40.0, mz_hi=200.0, block=400):
@@ -574,8 +617,15 @@ def build_discriminator(f, mz_lo=40.0, mz_hi=200.0, block=400):
     return tic / base
 
 
-def detect_segments(f, discriminator=None, min_duration=30, trim=8,
-                    grad_thr=0.02, smooth=9, high_ratio=3.0):
+def detect_segments(
+    f,
+    discriminator=None,
+    min_duration=30,
+    trim=8,
+    grad_thr=0.02,
+    smooth=9,
+    high_ratio=3.0,
+):
     """Detect stable measurement plateaus (candidate time ranges).
 
     Works in log space so the large sample/background dynamic range is handled by
@@ -606,14 +656,20 @@ def detect_segments(f, discriminator=None, min_duration=30, trim=8,
         while j < ncyc and stable[j]:
             j += 1
         if j - i >= min_duration:
-            lo, hi = i + trim, j - trim          # 0-based, trimmed
+            lo, hi = i + trim, j - trim  # 0-based, trimmed
             if hi - lo >= 15:
                 level = float(D[lo:hi].mean() / baseline)
-                segs.append(dict(
-                    start_cycle=lo + 1, end_cycle=hi, n_cycles=hi - lo,
-                    start_s=round(lo * dur, 1), end_s=round((hi - 1) * dur, 1),
-                    level=round(level, 2),
-                    **{"class": "high" if level >= high_ratio else "low"}))
+                segs.append(
+                    dict(
+                        start_cycle=lo + 1,
+                        end_cycle=hi,
+                        n_cycles=hi - lo,
+                        start_s=round(lo * dur, 1),
+                        end_s=round((hi - 1) * dur, 1),
+                        level=round(level, 2),
+                        **{"class": "high" if level >= high_ratio else "low"},
+                    )
+                )
         i = j
     return segs
 
@@ -643,10 +699,7 @@ def merge_adjacent_segments(segments, high_gap=60, low_gap=200):
             previous = merged[-1]
             gap = current["start_cycle"] - previous["end_cycle"] - 1
             cls = current.get("class")
-            if (
-                previous.get("class") == cls
-                and 0 <= gap <= limits.get(cls, 0)
-            ):
+            if previous.get("class") == cls and 0 <= gap <= limits.get(cls, 0):
                 previous_cycles = previous["n_cycles"]
                 current_cycles = current["n_cycles"]
                 stable_cycles = previous_cycles + current_cycles
@@ -685,13 +738,30 @@ def spec_duration_s(f):
 
 # ---------- quantification ----------
 def stats(x):
-    return {"Max": float(x.max()), "Min": float(x.min()),
-                "Average": float(x.mean()), "Deviation": float(x.std(ddof=1))}
+    return {
+        "Max": float(x.max()),
+        "Min": float(x.min()),
+        "Average": float(x.mean()),
+        "Deviation": float(x.std(ddof=1)),
+    }
 
-def quantify(traces, f, ranges, K=None, primary=None, primary_mz=21.022,
-             molar_volume=None, R_used=1200.0, k_map=None,
-             k_anchor=K_ANCHOR_DEFAULT, humid_masses=None,
-             humidity_ratio=None, humidity_ref=None, humidity_p=1.0):
+
+def quantify(
+    traces,
+    f,
+    ranges,
+    K=None,
+    primary=None,
+    primary_mz=21.022,
+    molar_volume=None,
+    R_used=1200.0,
+    k_map=None,
+    k_anchor=K_ANCHOR_DEFAULT,
+    humid_masses=None,
+    humidity_ratio=None,
+    humidity_ref=None,
+    humidity_p=1.0,
+):
     """Turn raw traces into Corrected / Conc / Conc[ug] and per-range statistics.
 
     Concentration uses the standard primary-ion-normalised model
@@ -733,7 +803,9 @@ def quantify(traces, f, ranges, K=None, primary=None, primary_mz=21.022,
     if humid_masses and humidity_ratio is not None:
         if humidity_ref is None:
             good = np.isfinite(humidity_ratio) & (humidity_ratio > 0)
-            humidity_ref = float(np.median(humidity_ratio[good])) if good.any() else None
+            humidity_ref = (
+                float(np.median(humidity_ratio[good])) if good.any() else None
+            )
         if humidity_ref:
             hfac = humidity_factor(humidity_ratio, humidity_ref, humidity_p)
             humid_applied = True
@@ -757,20 +829,37 @@ def quantify(traces, f, ranges, K=None, primary=None, primary_mz=21.022,
             ug = con
         for label, (lo, hi) in ranges.items():
             s = slice(lo - 1, hi)  # 1-based inclusive cycle window
-            rows.append({"mass": m, "apex": apex_m, "range": label, "transmission": T,
-                             "raw": stats(raw[s]), "cor": stats(cor[s]),
-                             "con": stats(con[s]), "ug": stats(ug[s])})
-    return rows, {"K": K, "molar_volume": molar_volume, "R": R_used,
-                      "primary_mz": primary_mz, "kinetic": k_map is not None,
-                      "k_anchor": k_anchor, "concentration_available": norm is not None,
-                      "transmission_available": has_transmission(f),
-                      "humidity_corrected": humid_applied, "humidity_ref": humidity_ref,
-                      "humidity_p": humidity_p if humid_applied else None,
-                      "molar_volume_source": molar_volume_source}
+            rows.append(
+                {
+                    "mass": m,
+                    "apex": apex_m,
+                    "range": label,
+                    "transmission": T,
+                    "raw": stats(raw[s]),
+                    "cor": stats(cor[s]),
+                    "con": stats(con[s]),
+                    "ug": stats(ug[s]),
+                }
+            )
+    return rows, {
+        "K": K,
+        "molar_volume": molar_volume,
+        "R": R_used,
+        "primary_mz": primary_mz,
+        "kinetic": k_map is not None,
+        "k_anchor": k_anchor,
+        "concentration_available": norm is not None,
+        "transmission_available": has_transmission(f),
+        "humidity_corrected": humid_applied,
+        "humidity_ref": humidity_ref,
+        "humidity_p": humidity_p if humid_applied else None,
+        "molar_volume_source": molar_volume_source,
+    }
 
 
-def calibrate_K(f, traces, ref_rows, ranges, primary=None, primary_mz=21.022,
-                R_used=1200.0):
+def calibrate_K(
+    f, traces, ref_rows, ranges, primary=None, primary_mz=21.022, R_used=1200.0
+):
     """Fit the concentration constant K so output matches a reference.
 
     ref_rows: {(round(mz,3), range_label): reference_conc_ppb}. Returns
@@ -784,8 +873,10 @@ def calibrate_K(f, traces, ref_rows, ranges, primary=None, primary_mz=21.022,
         T = float(np.interp(apex_m, tm, tf))
         cor = raw / T
         for label, (lo, hi) in ranges.items():
-            mine_cor[(round(m, 3), label)] = (cor[lo - 1:hi].mean(),
-                                              primary[lo - 1:hi].mean())
+            mine_cor[(round(m, 3), label)] = (
+                cor[lo - 1 : hi].mean(),
+                primary[lo - 1 : hi].mean(),
+            )
     for key, ref_c in ref_rows.items():
         if key in mine_cor and ref_c:
             c, p = mine_cor[key]

@@ -43,16 +43,22 @@ class AutoPeakSettingsTest(unittest.TestCase):
                 encoding="utf-8",
             )
             args = self._args(config=str(config_path))
-            with self._spectrum() as h5, mock.patch.object(
-                analyze.ptrms, "load_mass_cal", return_value=(1.0, 0.0)
-            ), mock.patch.object(
-                analyze, "assess_signal", return_value={"signal_present": True}
-            ), mock.patch.object(
-                analyze, "detect_peaks", return_value=detected
-            ) as detect, mock.patch.object(
-                analyze, "annotate_peaks", return_value=(1.0, [
-                    {**detected[0], "suggested_label": "test"}
-                ])
+            with (
+                self._spectrum() as h5,
+                mock.patch.object(
+                    analyze.ptrms, "load_mass_cal", return_value=(1.0, 0.0)
+                ),
+                mock.patch.object(
+                    analyze, "assess_signal", return_value={"signal_present": True}
+                ),
+                mock.patch.object(
+                    analyze, "detect_peaks", return_value=detected
+                ) as detect,
+                mock.patch.object(
+                    analyze,
+                    "annotate_peaks",
+                    return_value=(1.0, [{**detected[0], "suggested_label": "test"}]),
+                ),
             ):
                 result = analyze._load_peaks(args, h5)
 
@@ -65,22 +71,22 @@ class AutoPeakSettingsTest(unittest.TestCase):
             {"mz": 100.0, "height": 10.0},
             {"mz": 100.05, "height": 8.0},
         ]
-        annotated = [
-            {**peak, "suggested_label": "test"} for peak in detected
-        ]
+        annotated = [{**peak, "suggested_label": "test"} for peak in detected]
 
         def run(r):
-            settings = analyze.resolve_analysis_settings(
-                {"analyze": {"R": r}}, args
-            )
-            with self._spectrum() as h5, mock.patch.object(
-                analyze.ptrms, "load_mass_cal", return_value=(1.0, 0.0)
-            ), mock.patch.object(
-                analyze, "assess_signal", return_value={"signal_present": True}
-            ), mock.patch.object(
-                analyze, "detect_peaks", return_value=detected
-            ), mock.patch.object(
-                analyze, "annotate_peaks", return_value=(1.0, annotated)
+            settings = analyze.resolve_analysis_settings({"analyze": {"R": r}}, args)
+            with (
+                self._spectrum() as h5,
+                mock.patch.object(
+                    analyze.ptrms, "load_mass_cal", return_value=(1.0, 0.0)
+                ),
+                mock.patch.object(
+                    analyze, "assess_signal", return_value={"signal_present": True}
+                ),
+                mock.patch.object(analyze, "detect_peaks", return_value=detected),
+                mock.patch.object(
+                    analyze, "annotate_peaks", return_value=(1.0, annotated)
+                ),
             ):
                 return analyze._load_peaks(args, h5, settings=settings)
 

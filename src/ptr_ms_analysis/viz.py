@@ -21,6 +21,7 @@ window-sum integration (exact for isolated peaks); overlapping peaks are flagged
 Done is clicked. Changes to primary m/z, physical resolution, or whole-run window
 mode require re-extraction and are marked stale until that authoritative rerun.
 """
+
 from __future__ import annotations
 
 import http.server
@@ -45,7 +46,7 @@ def _normalise_checklist(items):
 
     Accepts plain strings or {text, detail} objects; drops anything empty."""
     out = []
-    for it in (items or []):
+    for it in items or []:
         if isinstance(it, str):
             if it.strip():
                 out.append({"text": it.strip()})
@@ -57,9 +58,19 @@ def _normalise_checklist(items):
     return out
 
 
-def build_viz_data(f, peaks_cfg, ranges_cfg, R=1200.0, R_phys=2400.0,
-                   primary_mz=21.022, K=None, molar_volume=None, checklist=None,
-                   analysis_settings=None, config_base=None):
+def build_viz_data(
+    f,
+    peaks_cfg,
+    ranges_cfg,
+    R=1200.0,
+    R_phys=2400.0,
+    primary_mz=21.022,
+    K=None,
+    molar_volume=None,
+    checklist=None,
+    analysis_settings=None,
+    config_base=None,
+):
     """Assemble everything the HTML app needs into one JSON-able dict.
 
     peaks_cfg  : [{mz, label?, formula?, k?}]  (assigned peaks to quantify/tweak)
@@ -67,10 +78,17 @@ def build_viz_data(f, peaks_cfg, ranges_cfg, R=1200.0, R_phys=2400.0,
     checklist  : [str | {text, detail?}]  (agent-authored review points to confirm)
     """
     analysis_settings = analysis_settings or {
-        "R": R, "R_phys": R_phys, "primary_mz": primary_mz, "K": K,
-        "molar_volume": molar_volume, "kinetic": False,
-        "k_anchor": ptrms.K_ANCHOR_DEFAULT, "humidity_correct": False,
-        "humidity_p": 1.0, "humidity_ref": None, "whole_run_windows": False,
+        "R": R,
+        "R_phys": R_phys,
+        "primary_mz": primary_mz,
+        "K": K,
+        "molar_volume": molar_volume,
+        "kinetic": False,
+        "k_anchor": ptrms.K_ANCHOR_DEFAULT,
+        "humidity_correct": False,
+        "humidity_p": 1.0,
+        "humidity_ref": None,
+        "whole_run_windows": False,
         "sources": {},
     }
     R = analysis_settings["R"]
@@ -94,7 +112,8 @@ def build_viz_data(f, peaks_cfg, ranges_cfg, R=1200.0, R_phys=2400.0,
         molar_volume_source = file_molar_volume_source
     else:
         molar_volume_source = analysis_settings["sources"].get(
-            "molar_volume", "configured")
+            "molar_volume", "configured"
+        )
     file_K = ptrms.derive_K(f, primary)
     if K is None:
         K = file_K
@@ -103,19 +122,26 @@ def build_viz_data(f, peaks_cfg, ranges_cfg, R=1200.0, R_phys=2400.0,
         K_source = analysis_settings["sources"].get("K", "configured")
 
     ranges = []
-    for r in (ranges_cfg or []):
+    for r in ranges_cfg or []:
         unit = r.get("unit", "cycle")
         if unit == "second":
             lo = max(1, round(r["start"] / dur) + 1)
             hi = min(ncyc, round(r["end"] / dur) + 1)
         else:
             lo, hi = max(1, int(r["start"])), min(ncyc, int(r["end"]))
-        cls = {"high": "sample", "low": "background"}.get(r.get("class"), r.get("class"))
+        cls = {"high": "sample", "low": "background"}.get(
+            r.get("class"), r.get("class")
+        )
         if cls not in ("sample", "background"):
-            cls = "background" if str(r["label"]).lower().startswith("background") else "sample"
+            cls = (
+                "background"
+                if str(r["label"]).lower().startswith("background")
+                else "sample"
+            )
         ranges.append({"label": r["label"], "start": lo, "end": hi, "class": cls})
 
     masses = [float(p["mz"]) for p in peaks_cfg]
+
     # per-peak integration-window overrides: number (symmetric full width) or
     # {"left":hwL,"right":hwR} half-widths (asymmetric)
     def _winlr(p):
@@ -123,6 +149,7 @@ def build_viz_data(f, peaks_cfg, ranges_cfg, R=1200.0, R_phys=2400.0,
         if isinstance(w, dict):
             return (float(w["left"]), float(w["right"]))
         return (float(w) / 2.0, float(w) / 2.0)
+
     windows = {float(p["mz"]): _winlr(p) for p in peaks_cfg if p.get("window")}
     # per-cycle Raw traces + apexes via the same pass analyze uses. These traces
     # are the EXACT analyze Raw (window-sum for isolated peaks, deconvolution for
@@ -130,16 +157,18 @@ def build_viz_data(f, peaks_cfg, ranges_cfg, R=1200.0, R_phys=2400.0,
     apexes, raw_traces = {}, {}
     if masses:
         real_ranges = not (len(ranges) == 1 and ranges[0]["label"] == "All")
-        per_range = ({r["label"]: (r["start"], r["end"]) for r in ranges}
-                     if real_ranges and not analysis_settings["whole_run_windows"]
-                     else None)
+        per_range = (
+            {r["label"]: (r["start"], r["end"]) for r in ranges}
+            if real_ranges and not analysis_settings["whole_run_windows"]
+            else None
+        )
         traces, (a, b) = ptrms.extract_traces(
-            f, masses, R=R, R_phys=R_phys, windows=windows or None,
-            per_range=per_range)
+            f, masses, R=R, R_phys=R_phys, windows=windows or None, per_range=per_range
+        )
         apexes = {m: ap for m, (_, ap) in traces.items()}
         raw_traces = {m: raw for m, (raw, _) in traces.items()}
     clustered = set()
-    for g in (ptrms._cluster(masses) if masses else []):
+    for g in ptrms._cluster(masses) if masses else []:
         if len(g) > 1:
             clustered.update(g)
 
@@ -155,6 +184,7 @@ def build_viz_data(f, peaks_cfg, ranges_cfg, R=1200.0, R_phys=2400.0,
             wl, wr = ptrms.peak_window(center, a, b, R)
             lo, hi = max(0, wl), min(len(avg), wr)
             return float(avg[lo:hi].sum()) if hi > lo else 0.0
+
         i0 = wsum(apex)
         if i0 <= 0:
             return None
@@ -179,35 +209,57 @@ def build_viz_data(f, peaks_cfg, ranges_cfg, R=1200.0, R_phys=2400.0,
         # scored formula candidates + isotope evidence for the review UI
         cands = formula_id.score_peak(apex, drift, obs_ratios=obs_ratios(apex))
         id_conf = cands[0]["probability"] if cands else None
-        id_amb = bool(cands and (cands[0]["probability"] < 0.6 or
-                      (len(cands) > 1 and cands[0]["probability"] - cands[1]["probability"] < 0.2)))
+        id_amb = bool(
+            cands
+            and (
+                cands[0]["probability"] < 0.6
+                or (
+                    len(cands) > 1
+                    and cands[0]["probability"] - cands[1]["probability"] < 0.2
+                )
+            )
+        )
         overlap = None
         nb = nearest_other(m)
         if nb is not None:
             sep = abs(nb - m)
             if sep < m / R_phys * 1.5:
-                overlap = {"neighbor": round(nb, 4), "sep_mDa": round(sep * 1000, 1), "level": "unresolved"}
+                overlap = {
+                    "neighbor": round(nb, 4),
+                    "sep_mDa": round(sep * 1000, 1),
+                    "level": "unresolved",
+                }
             elif sep < 0.20:
-                overlap = {"neighbor": round(nb, 4), "sep_mDa": round(sep * 1000, 1), "level": "deconvolved"}
-        peaks.append({
-            "id": idx,
-            "mz": round(m, 4),
-            "apex": round(apex, 4),
-            "label": p.get("label") or p.get("formula") or f"m{m:.3f}",
-            "formula": p.get("formula", ""),
-            "k": p.get("k") if p.get("k") is not None else info.get("k"),
-            "k_estimated": (bool(p.get("k_estimated")) if p.get("k") is not None
-                            else bool(info.get("k_estimated"))),
-            "flags": info.get("flags", []),
-            "clustered": m in clustered,
-            "win_l": round(winL, 5), "win_r": round(winR, 5),  # integration half-widths (m/z)
-            "win_manual": win_manual,
-            "candidates": cands,
-            "id_confidence": id_conf,
-            "id_ambiguous": id_amb,
-            "overlap": overlap,
-            "trace": [round(float(x), 1) for x in raw_traces[m]],
-        })
+                overlap = {
+                    "neighbor": round(nb, 4),
+                    "sep_mDa": round(sep * 1000, 1),
+                    "level": "deconvolved",
+                }
+        peaks.append(
+            {
+                "id": idx,
+                "mz": round(m, 4),
+                "apex": round(apex, 4),
+                "label": p.get("label") or p.get("formula") or f"m{m:.3f}",
+                "formula": p.get("formula", ""),
+                "k": p.get("k") if p.get("k") is not None else info.get("k"),
+                "k_estimated": (
+                    bool(p.get("k_estimated"))
+                    if p.get("k") is not None
+                    else bool(info.get("k_estimated"))
+                ),
+                "flags": info.get("flags", []),
+                "clustered": m in clustered,
+                "win_l": round(winL, 5),
+                "win_r": round(winR, 5),  # integration half-widths (m/z)
+                "win_manual": win_manual,
+                "candidates": cands,
+                "id_confidence": id_conf,
+                "id_ambiguous": id_amb,
+                "overlap": overlap,
+                "trace": [round(float(x), 1) for x in raw_traces[m]],
+            }
+        )
 
     def _clean(arr):
         if arr is None:
@@ -223,13 +275,21 @@ def build_viz_data(f, peaks_cfg, ranges_cfg, R=1200.0, R_phys=2400.0,
     return {
         "meta": {
             "file": os.path.abspath(f.filename) if hasattr(f, "filename") else "",
-            "ncyc": ncyc, "dur": dur, "a": a, "b": b,
-            "R": R, "R_phys": R_phys, "primary_mz": primary_mz,
+            "ncyc": ncyc,
+            "dur": dur,
+            "a": a,
+            "b": b,
+            "R": R,
+            "R_phys": R_phys,
+            "primary_mz": primary_mz,
             "preview_initial": {
-                "R": R, "R_phys": R_phys, "primary_mz": primary_mz,
+                "R": R,
+                "R_phys": R_phys,
+                "primary_mz": primary_mz,
                 "whole_run_windows": analysis_settings["whole_run_windows"],
             },
-            "proton": ptrms.PROTON, "k_anchor": analysis_settings["k_anchor"],
+            "proton": ptrms.PROTON,
+            "k_anchor": analysis_settings["k_anchor"],
             "kinetic": analysis_settings["kinetic"],
             "humidity_correct": analysis_settings["humidity_correct"],
             "humidity_p": analysis_settings["humidity_p"],
@@ -245,16 +305,20 @@ def build_viz_data(f, peaks_cfg, ranges_cfg, R=1200.0, R_phys=2400.0,
             "molar_volume_file_source": file_molar_volume_source,
             "humidity_ref_default": href_default,
             "sources": analysis_settings["sources"],
-            "humidity_ref_source": (analysis_settings["sources"].get("humidity_ref")
-                                    if analysis_settings["humidity_ref"] is not None
-                                    else "run median"),
+            "humidity_ref_source": (
+                analysis_settings["sources"].get("humidity_ref")
+                if analysis_settings["humidity_ref"] is not None
+                else "run median"
+            ),
             "transmission_available": ptrms.has_transmission(f),
             "primary_available": primary is not None,
             "concentration_available": primary is not None and K is not None,
         },
         "config_base": config_base or {},
-        "transmission": {"masses": [round(float(x), 4) for x in tm],
-                         "factors": [round(float(x), 5) for x in tf]},
+        "transmission": {
+            "masses": [round(float(x), 4) for x in tm],
+            "factors": [round(float(x), 5) for x in tf],
+        },
         "per_cycle": {
             "primary": _clean(primary),
             "humidity": _clean(humidity),
@@ -267,8 +331,14 @@ def build_viz_data(f, peaks_cfg, ranges_cfg, R=1200.0, R_phys=2400.0,
         "ranges": ranges,
         "checklist": _normalise_checklist(checklist),
         "rate_constants": [
-            {"name": c["name"], "formula": c["formula"], "mz": c["mz"],
-             "k": c["k"], "k_estimated": bool(c.get("k_estimated")), "flags": c["flags"]}
+            {
+                "name": c["name"],
+                "formula": c["formula"],
+                "mz": c["mz"],
+                "k": c["k"],
+                "k_estimated": bool(c.get("k_estimated")),
+                "flags": c["flags"],
+            }
             for c in ((ptrms.load_rate_constants() or {}).get("compounds", []))
         ],
     }
@@ -276,13 +346,20 @@ def build_viz_data(f, peaks_cfg, ranges_cfg, R=1200.0, R_phys=2400.0,
 
 def render_html(data, config_path=None):
     payload = json.dumps(data, separators=(",", ":"))
-    return (_TEMPLATE
-            .replace("/*__DATA__*/", payload)
-            .replace("/*__CFGPATH__*/", json.dumps(config_path or "")))
+    return _TEMPLATE.replace("/*__DATA__*/", payload).replace(
+        "/*__CFGPATH__*/", json.dumps(config_path or "")
+    )
 
 
-def serve(html, config_path, port=8765, timeout=1800, open_browser=True,
-          run_analysis=None, spectrum_fn=None):
+def serve(
+    html,
+    config_path,
+    port=8765,
+    timeout=1800,
+    open_browser=True,
+    run_analysis=None,
+    spectrum_fn=None,
+):
     """Serve the review app on localhost so the page can live-save the config.
 
     The page POSTs the current config to /save on every edit (written to
@@ -293,9 +370,9 @@ def serve(html, config_path, port=8765, timeout=1800, open_browser=True,
     (final_config_or_None, finished_bool, summary_or_None); blocks until the
     analysis finishes (after Done) or until ``timeout`` with no Done.
     Uses only the stdlib — no extra dependencies, keeps the no-install promise."""
-    done = threading.Event()          # expert clicked Done
+    done = threading.Event()  # expert clicked Done
     analysis_done = threading.Event()  # background analysis finished
-    closed = threading.Event()         # page acked the result (can shut down)
+    closed = threading.Event()  # page acked the result (can shut down)
     state = {"config": None, "status": "editing", "summary": None, "error": None}
 
     def write_config(cfg):
@@ -334,18 +411,23 @@ def serve(html, config_path, port=8765, timeout=1800, open_browser=True,
                 self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
             elif self.path == "/status":
                 out = (state["summary"] or {}).get("out") if state["summary"] else None
-                self._json({"status": state["status"], "out": out,
-                            "error": state["error"]})
+                self._json(
+                    {"status": state["status"], "out": out, "error": state["error"]}
+                )
             elif self.path.startswith("/spectrum"):
                 if spectrum_fn is None:
                     self._send(404)
                     return
                 from urllib.parse import parse_qs, urlparse
+
                 q = parse_qs(urlparse(self.path).query)
                 try:
-                    lo = int(q.get("lo", ["1"])[0]); hi = int(q.get("hi", ["1"])[0])
+                    lo = int(q.get("lo", ["1"])[0])
+                    hi = int(q.get("hi", ["1"])[0])
                     spec = spectrum_fn(lo, hi)
-                    self._send(200, json.dumps(spec).encode("utf-8"), "application/json")
+                    self._send(
+                        200, json.dumps(spec).encode("utf-8"), "application/json"
+                    )
                 except (KeyError, OSError, RuntimeError, TypeError, ValueError) as e:
                     self._send(500, str(e).encode("utf-8"))
             else:
@@ -373,7 +455,7 @@ def serve(html, config_path, port=8765, timeout=1800, open_browser=True,
                     analysis_done.set()
                 self._json({"ok": True})
                 done.set()
-            elif self.path == "/open":           # open the results file in the OS default app
+            elif self.path == "/open":  # open the results file in the OS default app
                 out = (state["summary"] or {}).get("out") if state["summary"] else None
                 ok = False
                 if out and os.path.exists(out):
@@ -388,8 +470,8 @@ def serve(html, config_path, port=8765, timeout=1800, open_browser=True,
                     except (OSError, subprocess.SubprocessError):
                         ok = False
                 self._json({"ok": ok})
-                closed.set()                     # user is done — let the server shut down
-            elif self.path == "/ack":            # page displayed the result
+                closed.set()  # user is done — let the server shut down
+            elif self.path == "/ack":  # page displayed the result
                 self._json({"ok": True})
                 closed.set()
             else:
@@ -409,8 +491,11 @@ def serve(html, config_path, port=8765, timeout=1800, open_browser=True,
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{port}/"
     print(f"ptr: review app running at {url}", file=sys.stderr)
-    print("ptr: open it, adjust the analysis, then click 'Done' (changes auto-save "
-          f"to {config_path}).", file=sys.stderr)
+    print(
+        "ptr: open it, adjust the analysis, then click 'Done' (changes auto-save "
+        f"to {config_path}).",
+        file=sys.stderr,
+    )
     if open_browser:
         try:
             webbrowser.open(url)
@@ -418,7 +503,7 @@ def serve(html, config_path, port=8765, timeout=1800, open_browser=True,
             logger.debug("Could not open review browser: %s", exc)
     finished = done.wait(timeout)
     if finished:
-        analysis_done.wait()      # let the background analysis complete
+        analysis_done.wait()  # let the background analysis complete
         # Stay up until the page acks (user clicked 'Open results' / closed the tab).
         # A generous cap so a user who reads the results for a few minutes before
         # clicking 'Open' still gets the file opened — the old 60 s window meant a

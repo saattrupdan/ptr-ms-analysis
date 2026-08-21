@@ -11,7 +11,9 @@ from ptr_ms_analysis import analyze, ptrms
 class ProvenanceTest(unittest.TestCase):
     def test_molar_volume_reports_drift_temperature_source(self):
         with h5py.File("in-memory", "w", driver="core", backing_store=False) as h5:
-            h5.create_dataset("AddTraces/PTR-Reaction/Data", data=np.array([[30.0], [30.0]]))
+            h5.create_dataset(
+                "AddTraces/PTR-Reaction/Data", data=np.array([[30.0], [30.0]])
+            )
             h5.create_dataset(
                 "AddTraces/PTR-Reaction/Info",
                 data=np.array([[b"T-Drift_Act"]]),

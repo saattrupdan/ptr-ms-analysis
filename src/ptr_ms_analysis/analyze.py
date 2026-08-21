@@ -34,6 +34,7 @@ Flows:
   quick deterministic fallback (no agent judgment, no browser — detect + quantify only):
        ptr analyze FILE --auto-peaks --auto-segments --include-cycle-rows --out results.csv
 """
+
 from __future__ import annotations
 
 import argparse
@@ -112,7 +113,9 @@ def _effective_sources(settings, humidity_ref, molar_volume_source=None):
     if settings["molar_volume"] is None:
         sources["molar_volume"] = molar_volume_source or "file drift temperature"
     if settings["humidity_ref"] is None:
-        sources["humidity_ref"] = "run median" if humidity_ref is not None else "unavailable"
+        sources["humidity_ref"] = (
+            "run median" if humidity_ref is not None else "unavailable"
+        )
     return sources
 
 
@@ -123,6 +126,7 @@ def _humidity_proxy_label(primary_mz):
 
 def _peak_windows(peaks):
     """Return curated asymmetric half-widths for peaks that specify windows."""
+
     def _winlr(peak):
         window = peak["window"]
         if isinstance(window, dict):
@@ -138,8 +142,15 @@ def _emit(obj, raw=True):
     sys.stdout.write("\n")
 
 
-def detect_peaks(f, min_rel_height=1e-3, max_peaks=300, mz_min=15.0, mz_max=None,
-                 R_phys=2400.0, noise_sigma=6.0):
+def detect_peaks(
+    f,
+    min_rel_height=1e-3,
+    max_peaks=300,
+    mz_min=15.0,
+    mz_max=None,
+    R_phys=2400.0,
+    noise_sigma=6.0,
+):
     """Untargeted peak detection on the average spectrum.
 
     Local maxima above a height threshold, then merged if closer than one
@@ -190,12 +201,18 @@ def detect_peaks(f, min_rel_height=1e-3, max_peaks=300, mz_min=15.0, mz_max=None
         m = ptrms.tb_to_m(i, a, b)
         w = max(2, round(a * np.sqrt(m) / (2 * R_phys)))
         lo, hiw = max(0, i - w), min(len(avg), i + w + 1)
-        base = max(float(avg[lo:i + 1].min()), float(avg[i:hiw].min()))
+        base = max(float(avg[lo : i + 1].min()), float(avg[i:hiw].min()))
         return float(avg[i]) - base
 
-    peaks = [{"mz": round(m, 4), "height": round(h, 1),
-              "rel_height": round(h / amax, 5) if amax > 0 else 0.0,
-              "prominence": round(prominence(ib), 1)} for m, h, ib in merged]
+    peaks = [
+        {
+            "mz": round(m, 4),
+            "height": round(h, 1),
+            "rel_height": round(h / amax, 5) if amax > 0 else 0.0,
+            "prominence": round(prominence(ib), 1),
+        }
+        for m, h, ib in merged
+    ]
     peaks.sort(key=lambda p: p["mz"])
     return peaks
 
@@ -219,8 +236,11 @@ def assess_signal(f, avg=None, a=None, b=None):
     avg = np.asarray(avg, dtype=np.float64)
     finite = avg[np.isfinite(avg)]
     if finite.size == 0:
-        return {"signal_present": False, "primary_snr": 0.0,
-                    "reason": "average spectrum is entirely non-finite (corrupt file)"}
+        return {
+            "signal_present": False,
+            "primary_snr": 0.0,
+            "reason": "average spectrum is entirely non-finite (corrupt file)",
+        }
     med = float(np.median(finite))
     mad = float(np.median(np.abs(finite - med)))
     sigma = 1.4826 * mad if mad > 0 else (float(finite.std()) or 1e-9)
@@ -229,19 +249,27 @@ def assess_signal(f, avg=None, a=None, b=None):
 
     def local_max(mz):
         tb = int(ptrms.m_to_tb(mz, a, b))
-        w = avg[max(0, tb - 30):tb + 30]
+        w = avg[max(0, tb - 30) : tb + 30]
         w = w[np.isfinite(w)]
         return float(w.max()) if w.size else med
 
     primary_snr = max((local_max(mz) - med) / sigma for mz in _PRIMARY_MZ)
     present = primary_snr >= 20.0
-    reason = "" if present else (
-        "no reagent (primary) ion detectable above the spectral noise "
-        f"(primary-ion S/N {primary_snr:.1f} < 20) — this file appears to be a blank / no-beam / "
-        "aborted acquisition, not a measurement, so no analyte peaks can be "
-        "extracted from it.")
-    return {"signal_present": present, "primary_snr": round(primary_snr, 1),
-                "reason": reason}
+    reason = (
+        ""
+        if present
+        else (
+            "no reagent (primary) ion detectable above the spectral noise "
+            f"(primary-ion S/N {primary_snr:.1f} < 20) — this file appears to be a blank / no-beam / "
+            "aborted acquisition, not a measurement, so no analyte peaks can be "
+            "extracted from it."
+        )
+    )
+    return {
+        "signal_present": present,
+        "primary_snr": round(primary_snr, 1),
+        "reason": reason,
+    }
 
 
 # ----------------------------- commands -----------------------------
@@ -256,24 +284,30 @@ def cmd_inspect(args):
             created = f.attrs["FileCreatedTimeSTR_LOCAL"][0].decode("latin-1")
         except (AttributeError, IndexError, KeyError, OSError, TypeError):
             created = ""
-        _emit({
-            "file": args.h5,
-            "instrument": _attr(f, "InstrumentType"),
-            "created_local": created,
-            "n_cycles": ncyc,
-            "cycle_duration_s": dur,
-            "duration_min": round(ncyc * dur / 60, 1),
-            "n_spectrum_bins": int(f["SPECdata/Intensities"].shape[1]),
-            "mass_cal": {"model": "timebin = a*sqrt(mz) + b", "a": a, "b": b},
-            "transmission_available": ptrms.has_transmission(f),
-            "transmission_masses": [round(x, 3) for x in tm.tolist()],
-            "transmission_factors": [round(x, 4) for x in tf.tolist()],
-            "concentration_K_from_file": ptrms.derive_K(
-                f, ptrms.extract_primary(f)),
-            "molar_volume_L_per_mol": round(ptrms.derive_molar_volume_info(f)[0], 3),
-            "molar_volume_source": ptrms.derive_molar_volume_info(f)[1],
-            "has_precomputed_traces": "TRACEdata/TraceConcentration" in f,
-        }, args.raw)
+        _emit(
+            {
+                "file": args.h5,
+                "instrument": _attr(f, "InstrumentType"),
+                "created_local": created,
+                "n_cycles": ncyc,
+                "cycle_duration_s": dur,
+                "duration_min": round(ncyc * dur / 60, 1),
+                "n_spectrum_bins": int(f["SPECdata/Intensities"].shape[1]),
+                "mass_cal": {"model": "timebin = a*sqrt(mz) + b", "a": a, "b": b},
+                "transmission_available": ptrms.has_transmission(f),
+                "transmission_masses": [round(x, 3) for x in tm.tolist()],
+                "transmission_factors": [round(x, 4) for x in tf.tolist()],
+                "concentration_K_from_file": ptrms.derive_K(
+                    f, ptrms.extract_primary(f)
+                ),
+                "molar_volume_L_per_mol": round(
+                    ptrms.derive_molar_volume_info(f)[0], 3
+                ),
+                "molar_volume_source": ptrms.derive_molar_volume_info(f)[1],
+                "has_precomputed_traces": "TRACEdata/TraceConcentration" in f,
+            },
+            args.raw,
+        )
 
 
 def _attr(f, key):
@@ -285,14 +319,23 @@ def _attr(f, key):
         return None
 
 
-_REAGENT_MZ = {19.018: "H3O+ primary", 21.022: "H3O+ (18O) isotope",
-               37.028: "H3O+·H2O cluster", 55.039: "H3O+·(H2O)2 cluster",
-               73.049: "H3O+·(H2O)3 cluster", 31.989: "O2+", 32.997: "O2+ (17O)",
-               33.994: "O2+ (18O)", 29.997: "NO+", 30.994: "O2+/NO+ region"}
+_REAGENT_MZ = {
+    19.018: "H3O+ primary",
+    21.022: "H3O+ (18O) isotope",
+    37.028: "H3O+·H2O cluster",
+    55.039: "H3O+·(H2O)2 cluster",
+    73.049: "H3O+·(H2O)3 cluster",
+    31.989: "O2+",
+    32.997: "O2+ (17O)",
+    33.994: "O2+ (18O)",
+    29.997: "NO+",
+    30.994: "O2+/NO+ region",
+}
 
 
-def annotate_peaks(peaks, avgspec=None, a=None, b=None, R=1200.0,
-                   R_phys=2400.0, elements=None):
+def annotate_peaks(
+    peaks, avgspec=None, a=None, b=None, R=1200.0, R_phys=2400.0, elements=None
+):
     """Enrich detected peaks with candidate FORMULA assignments (scored by mass +
     isotope pattern + plausibility) and artifact flags, so the agent/expert can
     pick assignments without scripting mass-matching.
@@ -319,19 +362,23 @@ def annotate_peaks(peaks, avgspec=None, a=None, b=None, R=1200.0,
     drift = float(np.median(ratios)) if ratios else 1.0
 
     have_spec = avgspec is not None and a is not None and b is not None
+
     def obs_ratios(mz):
         if not have_spec:
             return None
+
         def wsum(center):
             wl, wr = ptrms.peak_window(center, a, b, R)
             lo, hi = max(0, wl), min(len(avgspec), wr)
             return float(avgspec[lo:hi].sum()) if hi > lo else 0.0
+
         i0 = wsum(mz)
         if i0 <= 0:
             return None
         return (wsum(mz + formula_id.DM1) / i0, wsum(mz + formula_id.DM2) / i0)
 
     all_mz = sorted(q["mz"] for q in peaks)
+
     def nearest_other(mz):
         best = None
         for x in all_mz:
@@ -347,32 +394,47 @@ def annotate_peaks(peaks, avgspec=None, a=None, b=None, R=1200.0,
         e = dict(p)
         e["neutral_mass"] = round(mz - ptrms.PROTON, 4)
         cands = formula_id.score_peak(
-            mz, drift, obs_ratios=obs_ratios(mz), elements=elements)
+            mz, drift, obs_ratios=obs_ratios(mz), elements=elements
+        )
         e["candidates"] = cands
         # normalized top-candidate score / near-isobar ambiguity, surfaced explicitly;
         # conservative assignment gates below require multiple candidates
         if cands:
             e["id_confidence"] = cands[0]["probability"]
-            top2 = (len(cands) > 1 and cands[0]["probability"] - cands[1]["probability"] < 0.2)
+            top2 = (
+                len(cands) > 1
+                and cands[0]["probability"] - cands[1]["probability"] < 0.2
+            )
             if cands[0]["probability"] < 0.6 or top2:
                 e["id_ambiguous"] = [
-                    {"formula": c["formula"], "name": c["name"],
-                     "probability": c["probability"]}
-                    for c in cands[:3] if c["probability"] >= 0.05]
+                    {
+                        "formula": c["formula"],
+                        "name": c["name"],
+                        "probability": c["probability"],
+                    }
+                    for c in cands[:3]
+                    if c["probability"] >= 0.05
+                ]
         # spectral overlap with a neighbouring peak (affects quantification)
         nb = nearest_other(mz)
         if nb is not None:
             sep = abs(nb - mz)
-            if sep < mz / R_phys * 1.5:       # within ~1.5 physical FWHM
-                e["overlap"] = {"neighbor": round(nb, 4), "sep_mDa": round(sep * 1000, 1),
-                                "level": "unresolved",
-                                "note": "closer than the instrument resolution — "
-                                        "Raw is unreliable even after deconvolution"}
+            if sep < mz / R_phys * 1.5:  # within ~1.5 physical FWHM
+                e["overlap"] = {
+                    "neighbor": round(nb, 4),
+                    "sep_mDa": round(sep * 1000, 1),
+                    "level": "unresolved",
+                    "note": "closer than the instrument resolution — "
+                    "Raw is unreliable even after deconvolution",
+                }
             elif sep < 0.20:
-                e["overlap"] = {"neighbor": round(nb, 4), "sep_mDa": round(sep * 1000, 1),
-                                "level": "deconvolved",
-                                "note": "overlaps a neighbour; Raw comes from Gaussian "
-                                        "deconvolution (moderate extra uncertainty)"}
+                e["overlap"] = {
+                    "neighbor": round(nb, 4),
+                    "sep_mDa": round(sep * 1000, 1),
+                    "level": "deconvolved",
+                    "note": "overlaps a neighbour; Raw comes from Gaussian "
+                    "deconvolution (moderate extra uncertainty)",
+                }
         flags = []
         for rmz, rname in _REAGENT_MZ.items():
             if abs(mz - rmz * drift) < 0.03:
@@ -390,8 +452,10 @@ def annotate_peaks(peaks, avgspec=None, a=None, b=None, R=1200.0,
         # height, so a genuinely isolated small peak (which rises from ~0) is kept.
         prom = p.get("prominence")
         if prom is not None and prom < 10.0 and prom < 0.2 * max(h, 1):
-            flags.append(f"low prominence ({prom:.1f} cps above local baseline) — likely a "
-                         "noise ripple / shoulder of a nearby taller peak")
+            flags.append(
+                f"low prominence ({prom:.1f} cps above local baseline) — likely a "
+                "noise ripple / shoulder of a nearby taller peak"
+            )
         # H3O+ reagent saturation skirt: the primary ion at m/z ~19 saturates the
         # detector (the run normally normalises on its configured primary
         # isotope), and its
@@ -400,26 +464,40 @@ def annotate_peaks(peaks, avgspec=None, a=None, b=None, R=1200.0,
         # (ammonia at 18.03 sits BELOW the primary and is untouched), so peaks there
         # — which are high-prominence and thus escape the ripple test — are flagged
         # as reagent-region artifacts, not analytes.
-        if 19.05 < mz < 20.95 and not any(fl.startswith("reagent/cluster") for fl in flags):
-            flags.append("H3O+ primary saturation region (m/z 19–21) — detector "
-                         "ringing of the saturated reagent ion, not an analyte")
+        if 19.05 < mz < 20.95 and not any(
+            fl.startswith("reagent/cluster") for fl in flags
+        ):
+            flags.append(
+                "H3O+ primary saturation region (m/z 19–21) — detector "
+                "ringing of the saturated reagent ion, not an analyte"
+            )
         if flags:
             e["likely_artifact"] = flags
         # A ready-to-use label so you don't hand-format one (and so `unknown`
         # labels carry a clean 3-dp m/z, not a full-precision float). Override it
         # when your chemistry judgment differs — it's a default, not a verdict.
-        reagent = next((fl.split(": ", 1)[1] for fl in flags
-                        if fl.startswith("reagent/cluster: ")), None)
+        reagent = next(
+            (
+                fl.split(": ", 1)[1]
+                for fl in flags
+                if fl.startswith("reagent/cluster: ")
+            ),
+            None,
+        )
         top = cands[0] if cands else None
         if reagent:
             e["suggested_label"] = reagent
         elif top and top.get("name") and e.get("id_confidence", 0) >= 0.6:
             e["suggested_label"] = top["name"]
-        elif (top and top.get("formula")
-              and all(ch in "CHNO0123456789" for ch in top["formula"])
-              and top["formula"].find("C") == 0
-              and not e.get("id_ambiguous") and len(cands) >= 2
-              and e.get("id_confidence", 0) >= 0.9):
+        elif (
+            top
+            and top.get("formula")
+            and all(ch in "CHNO0123456789" for ch in top["formula"])
+            and top["formula"].find("C") == 0
+            and not e.get("id_ambiguous")
+            and len(cands) >= 2
+            and e.get("id_confidence", 0) >= 0.9
+        ):
             # A near-certain plain-CHNO composition with no library name: the FORMULA
             # is the identity — far more useful than a bare "unknown m/z". (A peak
             # that reads 'unknown' while its Identification card shows one formula at
@@ -444,8 +522,13 @@ def _is_noise_artifact(flags):
     skirt. These are never analytes and are dropped from the default `peaks` menu and
     the --auto-peaks panel. A plain reagent/cluster diagnostic ion is NOT noise: it is
     a real ion, kept but labelled, so it stays visible."""
-    return any(("ringing" in x) or ("low prominence" in x) or ("tail" in x)
-               or ("saturation region" in x) for x in (flags or []))
+    return any(
+        ("ringing" in x)
+        or ("low prominence" in x)
+        or ("tail" in x)
+        or ("saturation region" in x)
+        for x in (flags or [])
+    )
 
 
 def _compact_peak(e):
@@ -454,25 +537,35 @@ def _compact_peak(e):
     long tail of low-probability formulas. `ptr peaks --full` keeps everything."""
     cands = e.get("candidates") or []
     top = cands[0] if cands else None
-    out = {"mz": e["mz"], "height": e.get("height"),
-           "rel_height": e.get("rel_height"),
-           "prominence": e.get("prominence"),
-           "neutral_mass": e.get("neutral_mass"),
-           "suggested_label": e.get("suggested_label")}
+    out = {
+        "mz": e["mz"],
+        "height": e.get("height"),
+        "rel_height": e.get("rel_height"),
+        "prominence": e.get("prominence"),
+        "neutral_mass": e.get("neutral_mass"),
+        "suggested_label": e.get("suggested_label"),
+    }
     if e.get("suggested_formula"):
         out["suggested_formula"] = e["suggested_formula"]
     if top:
-        out["top_candidate"] = {"formula": top.get("formula"), "name": top.get("name"),
-                                "delta_mDa": top.get("delta_mDa"), "k": top.get("k"),
-                                "k_estimated": top.get("k_estimated")}
+        out["top_candidate"] = {
+            "formula": top.get("formula"),
+            "name": top.get("name"),
+            "delta_mDa": top.get("delta_mDa"),
+            "k": top.get("k"),
+            "k_estimated": top.get("k_estimated"),
+        }
     if "id_confidence" in e:
         out["id_confidence"] = e["id_confidence"]
     if "id_ambiguous" in e:
         out["id_ambiguous"] = e["id_ambiguous"]
-    if "overlap" in e:                            # keep the facts, drop the prose
-        o = e["overlap"]                          # (explained once in the header note)
-        out["overlap"] = {"neighbor": o.get("neighbor"), "sep_mDa": o.get("sep_mDa"),
-                          "level": o.get("level")}
+    if "overlap" in e:  # keep the facts, drop the prose
+        o = e["overlap"]  # (explained once in the header note)
+        out["overlap"] = {
+            "neighbor": o.get("neighbor"),
+            "sep_mDa": o.get("sep_mDa"),
+            "level": o.get("level"),
+        }
     if "likely_artifact" in e:
         out["likely_artifact"] = e["likely_artifact"]
     return out
@@ -481,23 +574,32 @@ def _compact_peak(e):
 def cmd_peaks(args):
     with h5py.File(args.h5, "r") as f:
         a, b = ptrms.load_mass_cal(f)
-        avg = np.where(np.isfinite(f["SPECdata/AverageSpec"][:]), f["SPECdata/AverageSpec"][:], 0.0)
+        avg = np.where(
+            np.isfinite(f["SPECdata/AverageSpec"][:]), f["SPECdata/AverageSpec"][:], 0.0
+        )
         sig = assess_signal(f, avg=avg, a=a, b=b)
         if not sig["signal_present"]:
-            _emit({"n_peaks": 0, "signal_present": False,
-                   "primary_ion_snr": sig["primary_snr"],
-                   "note": "No significant signal. " + sig["reason"] +
-                           " Report this file as a blank/no-beam capture — do not "
-                           "fabricate an analyte list from the noise.",
-                   "peaks": []}, args.raw)
+            _emit(
+                {
+                    "n_peaks": 0,
+                    "signal_present": False,
+                    "primary_ion_snr": sig["primary_snr"],
+                    "note": "No significant signal. "
+                    + sig["reason"]
+                    + " Report this file as a blank/no-beam capture — do not "
+                    "fabricate an analyte list from the noise.",
+                    "peaks": [],
+                },
+                args.raw,
+            )
             return
         R_phys = getattr(args, "R_phys", None) or 2400.0
         peaks = detect_peaks(
-            f, args.min_height, args.max_peaks, args.mz_min, args.mz_max,
-            R_phys=R_phys)
+            f, args.min_height, args.max_peaks, args.mz_min, args.mz_max, R_phys=R_phys
+        )
     drift, peaks = annotate_peaks(
-        peaks, avgspec=avg, a=a, b=b,
-        R_phys=(getattr(args, "R_phys", None) or 2400.0))
+        peaks, avgspec=avg, a=a, b=b, R_phys=(getattr(args, "R_phys", None) or 2400.0)
+    )
     # By default the menu excludes instrument-noise artifacts (ringing combs,
     # low-prominence ripples, reagent saturation-region skirt) so that copying the
     # list straight into a config can't ship a noise comb; reagent/cluster diagnostic
@@ -512,52 +614,73 @@ def cmd_peaks(args):
     dup_pairs = _window_overlap_pairs(peaks)
     full = getattr(args, "full", False)
     if full:
-        note = ("Each peak lists candidate FORMULAS ranked by `probability` "
-                "(combining exact-mass error, the measured vs predicted "
-                "13C(M+1)/heteroatom(M+2) isotope ratios, and plausibility) — "
-                "use this, not nearest-mass, to resolve isobars. `id_confidence` "
-                "is the top candidate's normalized score/share; a sole candidate is "
-                "not a 100% confidence estimate. `id_ambiguous` lists the "
-                "close rivals when the call is not clear-cut; `overlap` flags a "
-                "neighbouring peak whose spectral overlap adds quantification "
-                "uncertainty (unresolved = worse than deconvolved). `name`/`k` are "
-                "filled when the formula is in the rate table (else k_estimated). "
-                "`iso_pred` vs `iso_obs` = predicted vs observed (M+1,M+2)/M. "
-                "`suggested_label` is a ready-to-use default label. `prominence` is the "
-                "apex's rise above local baseline in cps (real peak ≈ height; noise "
-                "ripple ≈ 0). neutral_mass = mz − proton.")
+        note = (
+            "Each peak lists candidate FORMULAS ranked by `probability` "
+            "(combining exact-mass error, the measured vs predicted "
+            "13C(M+1)/heteroatom(M+2) isotope ratios, and plausibility) — "
+            "use this, not nearest-mass, to resolve isobars. `id_confidence` "
+            "is the top candidate's normalized score/share; a sole candidate is "
+            "not a 100% confidence estimate. `id_ambiguous` lists the "
+            "close rivals when the call is not clear-cut; `overlap` flags a "
+            "neighbouring peak whose spectral overlap adds quantification "
+            "uncertainty (unresolved = worse than deconvolved). `name`/`k` are "
+            "filled when the formula is in the rate table (else k_estimated). "
+            "`iso_pred` vs `iso_obs` = predicted vs observed (M+1,M+2)/M. "
+            "`suggested_label` is a ready-to-use default label. `prominence` is the "
+            "apex's rise above local baseline in cps (real peak ≈ height; noise "
+            "ripple ≈ 0). neutral_mass = mz − proton."
+        )
         out_peaks = peaks
     else:
-        note = ("Compact view (default). Each peak: `suggested_label` (a ready-to-use "
-                "label — drop it into your config's peaks, or override it), "
-                "`top_candidate` (best formula/name/mass-error, chosen by isotope "
-                "pattern + plausibility, NOT nearest-mass), `id_confidence` (a normalized "
-                "top-candidate score used by conservative gates, not a calibrated "
-                "probability), and, when "
-                "relevant, `id_ambiguous` (close rivals), `overlap` (quantification "
-                "uncertainty), and `likely_artifact` (reagent/cluster diagnostic ions "
-                "— real, keep or drop as you like). "
-                "`prominence` is the apex's rise above its local baseline in cps: a "
-                "real peak's ≈ its height, a noise ripple/shoulder's is near 0. "
-                "neutral_mass = mz − proton. Pass `--full` for every candidate + the "
-                "isotope arrays.")
+        note = (
+            "Compact view (default). Each peak: `suggested_label` (a ready-to-use "
+            "label — drop it into your config's peaks, or override it), "
+            "`top_candidate` (best formula/name/mass-error, chosen by isotope "
+            "pattern + plausibility, NOT nearest-mass), `id_confidence` (a normalized "
+            "top-candidate score used by conservative gates, not a calibrated "
+            "probability), and, when "
+            "relevant, `id_ambiguous` (close rivals), `overlap` (quantification "
+            "uncertainty), and `likely_artifact` (reagent/cluster diagnostic ions "
+            "— real, keep or drop as you like). "
+            "`prominence` is the apex's rise above its local baseline in cps: a "
+            "real peak's ≈ its height, a noise ripple/shoulder's is near 0. "
+            "neutral_mass = mz − proton. Pass `--full` for every candidate + the "
+            "isotope arrays."
+        )
         out_peaks = [_compact_peak(p) for p in peaks]
-    note += (f" This list is ALREADY cleaned: {n_noise} instrument-noise peaks (ringing "
-             "combs, low-prominence ripples, reagent saturation-region skirt) were "
-             "dropped — pass --include-artifacts to see them. Any peak here is safe "
-             "to quantify.") if (n_noise and not include_art) else ""
+    note += (
+        (
+            f" This list is ALREADY cleaned: {n_noise} instrument-noise peaks (ringing "
+            "combs, low-prominence ripples, reagent saturation-region skirt) were "
+            "dropped — pass --include-artifacts to see them. Any peak here is safe "
+            "to quantify."
+        )
+        if (n_noise and not include_art)
+        else ""
+    )
     if dup_pairs:
         examples = ", ".join(
-            f"m/z {x['mz']:.4f}≈{y['mz']:.4f}" for x, y, _ in dup_pairs[:4])
-        note += (f" WARNING: {len(dup_pairs)} pair(s) of peaks have integration windows "
-                 "that almost coincide (>60% overlap) — e.g. "
-                 f"{examples}. These double-count the same signal; keep only one m/z "
-                 "from each pair in your config.")
-    _emit({"n_peaks": len(peaks), "n_noise_dropped": (0 if include_art else n_noise),
-           "mass_drift": round(drift, 6),
-           "n_ambiguous": n_amb, "n_overlapping": n_ovl,
-           "n_window_overlap_pairs": len(dup_pairs),
-           "note": note, "peaks": out_peaks}, args.raw)
+            f"m/z {x['mz']:.4f}≈{y['mz']:.4f}" for x, y, _ in dup_pairs[:4]
+        )
+        note += (
+            f" WARNING: {len(dup_pairs)} pair(s) of peaks have integration windows "
+            "that almost coincide (>60% overlap) — e.g. "
+            f"{examples}. These double-count the same signal; keep only one m/z "
+            "from each pair in your config."
+        )
+    _emit(
+        {
+            "n_peaks": len(peaks),
+            "n_noise_dropped": (0 if include_art else n_noise),
+            "mass_drift": round(drift, 6),
+            "n_ambiguous": n_amb,
+            "n_overlapping": n_ovl,
+            "n_window_overlap_pairs": len(dup_pairs),
+            "note": note,
+            "peaks": out_peaks,
+        },
+        args.raw,
+    )
 
 
 def cmd_segments(args):
@@ -565,26 +688,36 @@ def cmd_segments(args):
         ncyc = int(f["SPECdata/Intensities"].shape[0])
         sig = assess_signal(f)
         segs = ptrms.detect_segments(
-            f, min_duration=args.min_duration, grad_thr=args.grad_thr,
-            high_ratio=args.high_ratio)
+            f,
+            min_duration=args.min_duration,
+            grad_thr=args.grad_thr,
+            high_ratio=args.high_ratio,
+        )
         # always consolidate fragmented backgrounds; merge samples only if asked
         segs = ptrms.merge_adjacent_segments(
-            segs, high_gap=args.merge_high_gap or 0, low_gap=200)
-    note = ("class 'high' = elevated signal (likely a sample); 'low' = "
-            "background or pre-run setup. Final outputs use chronological "
-            "sample_01/background_01 labels; do not ask for sample names. "
-            "merged_segments > 1 marks high plateaus joined across a short "
-            "unclassified transition.")
+            segs, high_gap=args.merge_high_gap or 0, low_gap=200
+        )
+    note = (
+        "class 'high' = elevated signal (likely a sample); 'low' = "
+        "background or pre-run setup. Final outputs use chronological "
+        "sample_01/background_01 labels; do not ask for sample names. "
+        "merged_segments > 1 marks high plateaus joined across a short "
+        "unclassified transition."
+    )
     out = {"n_segments": len(segs), "note": note, "segments": segs}
     if not sig["signal_present"]:
         out["signal_present"] = False
-        out["warning"] = ("No significant signal — " + sig["reason"] +
-                          " Segmentation is not meaningful for a blank file.")
+        out["warning"] = (
+            "No significant signal — "
+            + sig["reason"]
+            + " Segmentation is not meaningful for a blank file."
+        )
     elif not segs:
         out["warning"] = (
             f"No stable plateaus found (file has {ncyc} cycles). If the run is very "
             "short, analyse the whole file as one interval (omit ranges); otherwise "
-            "loosen --min-duration / --grad-thr.")
+            "loosen --min-duration / --grad-thr."
+        )
     _emit(out, args.raw)
 
 
@@ -617,7 +750,7 @@ def _merge_overlapping_windows(peaks, R=1200.0, thresh=0.6):
             ov = (q["mz"] + hwq) - (p["mz"] - hwp)
             if ov > 0 and ov / min(2 * hwq, 2 * hwp) > thresh:
                 if p.get("height", 0) > q.get("height", 0):
-                    out[-1] = p                       # keep the taller apex
+                    out[-1] = p  # keep the taller apex
                 continue
         out.append(p)
     return out
@@ -632,17 +765,17 @@ def _auto_peaks(f, args, R=None, R_phys=None):
     config still gives finer chemistry and segment judgment; this is a safe default,
     not a substitute for it."""
     R = R if R is not None else (getattr(args, "R", None) or 1200.0)
-    R_phys = (R_phys if R_phys is not None
-              else (getattr(args, "R_phys", None) or 2400.0))
+    R_phys = R_phys if R_phys is not None else (getattr(args, "R_phys", None) or 2400.0)
     a, b = ptrms.load_mass_cal(f)
-    avg = np.where(np.isfinite(f["SPECdata/AverageSpec"][:]), f["SPECdata/AverageSpec"][:], 0.0)
+    avg = np.where(
+        np.isfinite(f["SPECdata/AverageSpec"][:]), f["SPECdata/AverageSpec"][:], 0.0
+    )
     if not assess_signal(f, avg=avg, a=a, b=b)["signal_present"]:
-        return []                                 # blank/no-beam file: nothing to extract
+        return []  # blank/no-beam file: nothing to extract
     peaks = detect_peaks(
-        f, args.min_height, args.max_peaks, args.mz_min, args.mz_max,
-        R_phys=R_phys)
-    _, peaks = annotate_peaks(
-        peaks, avgspec=avg, a=a, b=b, R=R, R_phys=R_phys)
+        f, args.min_height, args.max_peaks, args.mz_min, args.mz_max, R_phys=R_phys
+    )
+    _, peaks = annotate_peaks(peaks, avgspec=avg, a=a, b=b, R=R, R_phys=R_phys)
     peaks = [p for p in peaks if not _is_noise_artifact(p.get("likely_artifact"))]
     # collapse near-duplicate peaks whose integration windows almost coincide
     peaks = _merge_overlapping_windows(peaks, R=R)
@@ -653,7 +786,7 @@ def _auto_peaks(f, args, R=None, R_phys=None):
         # CSV shows a clean `m<mz>` (the mass is already the variable name)
         lbl = "" if sl.startswith("unknown m/z") else sl
         o = {"mz": p["mz"], "label": lbl}
-        if p.get("suggested_formula"):               # near-certain composition -> carry it
+        if p.get("suggested_formula"):  # near-certain composition -> carry it
             o["formula"] = p["suggested_formula"]
         out.append(o)
     return out
@@ -670,8 +803,7 @@ def _load_peaks(args, f, settings=None):
     if getattr(args, "auto_peaks", False):
         if settings is None:
             settings = resolve_analysis_settings(_load_config(args), args)
-        return _auto_peaks(
-            f, args, R=settings["R"], R_phys=settings["R_phys"])
+        return _auto_peaks(f, args, R=settings["R"], R_phys=settings["R_phys"])
     return None
 
 
@@ -687,7 +819,8 @@ def _load_ranges(args, f):
         segs = ptrms.detect_segments(f)
         # always consolidate fragmented backgrounds; merge samples only if asked
         segs = ptrms.merge_adjacent_segments(
-            segs, high_gap=getattr(args, "merge_high_gap", 0) or 0, low_gap=200)
+            segs, high_gap=getattr(args, "merge_high_gap", 0) or 0, low_gap=200
+        )
         out = []
         counts = {"high": 0, "low": 0}
         for s in segs:
@@ -695,8 +828,14 @@ def _load_ranges(args, f):
             counts[kind] += 1
             prefix = "sample" if kind == "high" else "background"
             lbl = f"{prefix}_{counts[kind]:02d}"
-            out.append({"label": lbl, "start": s["start_cycle"],
-                        "end": s["end_cycle"], "unit": "cycle"})
+            out.append(
+                {
+                    "label": lbl,
+                    "start": s["start_cycle"],
+                    "end": s["end_cycle"],
+                    "unit": "cycle",
+                }
+            )
         return out
     return None
 
@@ -748,19 +887,31 @@ def cmd_analyze(args):
             if getattr(args, "auto_peaks", False):
                 sig = assess_signal(f)
                 if not sig["signal_present"]:
-                    _emit({"out": None, "n_rows": 0, "n_peaks": 0,
-                           "signal_present": False,
-                           "primary_ion_snr": sig["primary_snr"],
-                           "note": "No output written. " + sig["reason"] +
-                                   " Report this file as a blank/no-beam capture."},
-                          args.raw)
+                    _emit(
+                        {
+                            "out": None,
+                            "n_rows": 0,
+                            "n_peaks": 0,
+                            "signal_present": False,
+                            "primary_ion_snr": sig["primary_snr"],
+                            "note": "No output written. "
+                            + sig["reason"]
+                            + " Report this file as a blank/no-beam capture.",
+                        },
+                        args.raw,
+                    )
                     return
-                sys.exit("No analyte peaks cleared the noise threshold (file has "
-                         "signal but no resolvable peaks). Inspect with `ptr peaks`.")
-            sys.exit("No peaks. Pass --peaks-json '[{\"mz\":..}]', --config, or --auto-peaks.")
+                sys.exit(
+                    "No analyte peaks cleared the noise threshold (file has "
+                    "signal but no resolvable peaks). Inspect with `ptr peaks`."
+                )
+            sys.exit(
+                "No peaks. Pass --peaks-json '[{\"mz\":..}]', --config, or --auto-peaks."
+            )
         masses = [float(p["mz"]) for p in peaks]
-        labels = {float(p["mz"]): (p.get("label") or p.get("formula") or "")
-                  for p in peaks}
+        labels = {
+            float(p["mz"]): (p.get("label") or p.get("formula") or "") for p in peaks
+        }
         ranges = _resolve_ranges(f, _load_ranges(args, f))
 
         R = settings["R"]
@@ -770,53 +921,76 @@ def cmd_analyze(args):
         # resolve rate constants once (for kinetic correction and/or humid flags)
         resolved = ptrms.resolve_k(peaks, ptrms.load_rate_constants())
         k_map = resolved if settings["kinetic"] else None
-        humid_masses = {m for m, info in resolved.items() if "humid" in info.get("flags", [])}
+        humid_masses = {
+            m for m, info in resolved.items() if "humid" in info.get("flags", [])
+        }
 
         # humidity proxy (per-cycle water-cluster ratio) — always computed if any
         # humid compound is present, so it can be reported as a diagnostic
-        hum_ratio = (ptrms.water_cluster_ratio(
-            f, primary_mz=primary_mz, R=R) if humid_masses else None)
+        hum_ratio = (
+            ptrms.water_cluster_ratio(f, primary_mz=primary_mz, R=R)
+            if humid_masses
+            else None
+        )
 
         # per-interval windows (default on): re-centre each isolated peak's window
         # on every interval's own spectrum. Disable with --no-per-interval to get
         # one whole-run window per compound (the pre-2026-08 behaviour).
         real_ranges = not (len(ranges) == 1 and "All" in ranges)
-        per_range = ranges if (real_ranges and settings["per_interval_windows"]) else None
+        per_range = (
+            ranges if (real_ranges and settings["per_interval_windows"]) else None
+        )
         traces, _ = ptrms.extract_traces(
-            f, masses, R=R, R_phys=R_phys, windows=_peak_windows(peaks) or None,
-            per_range=per_range)
+            f,
+            masses,
+            R=R,
+            R_phys=R_phys,
+            windows=_peak_windows(peaks) or None,
+            per_range=per_range,
+        )
         rows, params = ptrms.quantify(
-            traces, f, ranges, K=settings["K"], primary_mz=primary_mz,
-            molar_volume=settings["molar_volume"], R_used=R, k_map=k_map,
+            traces,
+            f,
+            ranges,
+            K=settings["K"],
+            primary_mz=primary_mz,
+            molar_volume=settings["molar_volume"],
+            R_used=R,
+            k_map=k_map,
             k_anchor=settings["k_anchor"],
             humid_masses=(humid_masses if settings["humidity_correct"] else None),
-            humidity_ratio=hum_ratio, humidity_ref=settings["humidity_ref"],
-            humidity_p=settings["humidity_p"])
+            humidity_ratio=hum_ratio,
+            humidity_ref=settings["humidity_ref"],
+            humidity_p=settings["humidity_p"],
+        )
         apexes = {m: ap for m, (_, ap) in traces.items()}
         humidity_ref = settings["humidity_ref"]
         if humidity_ref is None and hum_ratio is not None:
             good = np.isfinite(hum_ratio) & (hum_ratio > 0)
             humidity_ref = float(np.median(hum_ratio[good])) if good.any() else None
         sources = _effective_sources(
-            settings, humidity_ref, params.get("molar_volume_source"))
-        params.update({
-            "R_phys": R_phys,
-            "whole_run_windows": settings["whole_run_windows"],
-            "per_interval_windows": settings["per_interval_windows"],
-            "humidity_correct": settings["humidity_correct"],
-            "humidity_p": settings["humidity_p"],
-            "humidity_ref": humidity_ref,
-            "humidity_ref_source": sources["humidity_ref"],
-            "molar_volume_source": sources["molar_volume"],
-            "sources": sources,
-        })
+            settings, humidity_ref, params.get("molar_volume_source")
+        )
+        params.update(
+            {
+                "R_phys": R_phys,
+                "whole_run_windows": settings["whole_run_windows"],
+                "per_interval_windows": settings["per_interval_windows"],
+                "humidity_correct": settings["humidity_correct"],
+                "humidity_p": settings["humidity_p"],
+                "humidity_ref": humidity_ref,
+                "humidity_ref_source": sources["humidity_ref"],
+                "molar_volume_source": sources["molar_volume"],
+                "sources": sources,
+            }
+        )
 
         # per-range humidity proxy + cross-range spread diagnostic
         humidity_report = None
         if humid_masses and hum_ratio is not None:
             per_range = {}
             for label, (lo, hi) in ranges.items():
-                seg = hum_ratio[lo - 1:hi]
+                seg = hum_ratio[lo - 1 : hi]
                 seg = seg[np.isfinite(seg)]
                 per_range[label] = round(float(seg.mean()), 5) if seg.size else None
             vals = [v for v in per_range.values() if v]
@@ -832,12 +1006,18 @@ def cmd_analyze(args):
             }
             if spread > 0.1 and not params.get("humidity_corrected"):
                 humidity_report["warning"] = (
-                    f"Humidity varies {100*spread:.0f}% across ranges — relative "
+                    f"Humidity varies {100 * spread:.0f}% across ranges — relative "
                     "concentrations of the humid compounds are confounded. Add "
-                    "--humidity-correct (needs a calibrated --humidity-p for accuracy).")
+                    "--humidity-correct (needs a calibrated --humidity-p for accuracy)."
+                )
 
     _write_csv(
-        args.out, args.h5, rows, labels, args.sep, ranges=ranges,
+        args.out,
+        args.h5,
+        rows,
+        labels,
+        args.sep,
+        ranges=ranges,
         include_cycle_rows=args.include_cycle_rows,
     )
 
@@ -850,21 +1030,27 @@ def cmd_analyze(args):
     for m in masses:
         resid = apexes[m] / m - drift
         if abs(resid) * m > 0.03:  # residual beyond the shared drift, in Da
-            warn.append(f"m{m:.3f}: apex {apexes[m]:.4f} deviates "
-                        f"{resid * m:+.3f} Da beyond the run's mass drift "
-                        f"(check assignment / possible peak overlap)")
+            warn.append(
+                f"m{m:.3f}: apex {apexes[m]:.4f} deviates "
+                f"{resid * m:+.3f} Da beyond the run's mass drift "
+                f"(check assignment / possible peak overlap)"
+            )
     note = None
     if settings["K"] is None and params.get("concentration_available"):
-        note = ("Concentration uses K derived from the file's own calibration; "
-                "absolute scale may differ from a specific PTR-MS Viewer project. "
-                "Run `calibrate` against a reference CSV, or pass --K, to match exactly.")
+        note = (
+            "Concentration uses K derived from the file's own calibration; "
+            "absolute scale may differ from a specific PTR-MS Viewer project. "
+            "Run `calibrate` against a reference CSV, or pass --K, to match exactly."
+        )
     if not params.get("concentration_available"):
         note = "No primary-ion/pre-computed data: Conc columns are NaN. Pass --K and ensure a primary-ion peak exists."
     trans_note = None
     if not params.get("transmission_available", True):
-        trans_note = ("This file carries no transmission curve, so unit transmission "
-                      "was assumed: Corrected == Raw. Absolute Corrected/Conc values "
-                      "are uncalibrated for mass-dependent transmission.")
+        trans_note = (
+            "This file carries no transmission curve, so unit transmission "
+            "was assumed: Corrected == Raw. Absolute Corrected/Conc values "
+            "are uncalibrated for mass-dependent transmission."
+        )
         note = (note + " " + trans_note) if note else trans_note
 
     # per-compound kinetic reporting + humidity flags
@@ -877,18 +1063,27 @@ def cmd_analyze(args):
                 used[f"{m:.3f}"] = {"k": info["k"], "source": info["source"]}
                 if "humid" in info.get("flags", []):
                     humid.append(f"{m:.3f}")
-            elif info.get("k"):     # k exists but is estimated -> kept on shared K
-                estimated.append(f"{m:.3f}" + (f" ({info['source']})" if info.get("source") else ""))
+            elif info.get("k"):  # k exists but is estimated -> kept on shared K
+                estimated.append(
+                    f"{m:.3f}" + (f" ({info['source']})" if info.get("source") else "")
+                )
             else:
-                missing.append(f"{m:.3f}" + (f" ({info['source']})" if info.get("source") else ""))
-        kinetic_info = {"k_anchor": settings["k_anchor"], "resolved": used,
-                        "estimated_shared_K": estimated, "no_k": missing}
+                missing.append(
+                    f"{m:.3f}" + (f" ({info['source']})" if info.get("source") else "")
+                )
+        kinetic_info = {
+            "k_anchor": settings["k_anchor"],
+            "resolved": used,
+            "estimated_shared_K": estimated,
+            "no_k": missing,
+        }
         if humid:
             kinetic_info["humidity_warning"] = (
                 "These masses have proton affinity near water (HCN/formaldehyde/"
                 "H2S/acids/ammonia): a fixed k is unreliable — sensitivity is "
                 "humidity/temperature dependent. Use a dedicated standard/humidity "
-                f"model for: {humid}")
+                f"model for: {humid}"
+            )
 
     # sample-vs-background diagnostic: flag channels that behave like instrument
     # background / contamination rather than analytes — higher in backgrounds than
@@ -912,16 +1107,23 @@ def cmd_analyze(args):
             smean, bmean = sum(s) / len(s), sum(bg) / len(bg)
             sb = (smean / bmean) if bmean else float("inf")
             bg_series = [per[l] for l in sorted(bg_labels) if l in per]
-            trend = (bg_series[-1] / bg_series[0]) if len(bg_series) >= 2 and bg_series[0] else None
+            trend = (
+                (bg_series[-1] / bg_series[0])
+                if len(bg_series) >= 2 and bg_series[0]
+                else None
+            )
             if sb < 0.9:  # not elevated in samples -> background-like
-                flagged[f"{m:.3f}"] = {"label": labels.get(m, ""),
-                                       "S_over_B": round(sb, 2),
-                                       "bg_trend_last_over_first": round(trend, 2) if trend else None}
+                flagged[f"{m:.3f}"] = {
+                    "label": labels.get(m, ""),
+                    "S_over_B": round(sb, 2),
+                    "bg_trend_last_over_first": round(trend, 2) if trend else None,
+                }
         background_report = {
             "metric": "mean Raw over sample_* vs background_* ranges (S/B); "
-                      "channels with S/B < 0.9 are flagged below; "
-                      "bg_trend = last/first background range (>1 = rising across run)",
-            "n_samples": len(samp_labels), "n_backgrounds": len(bg_labels),
+            "channels with S/B < 0.9 are flagged below; "
+            "bg_trend = last/first background range (>1 = rising across run)",
+            "n_samples": len(samp_labels),
+            "n_backgrounds": len(bg_labels),
             "background_like": flagged,
         }
         if flagged:
@@ -930,20 +1132,28 @@ def cmd_analyze(args):
                 "(S/B < 0.9) — likely instrument background/contamination, not breath "
                 "analytes (real VOCs have S/B >> 1). Relabel these as 'background m/z ...' "
                 "or drop them from an analyte panel. Scrutinise unidentified/high-m/z "
-                "peaks first; reagent/cluster diagnostic ions flagging here is expected.")
+                "peaks first; reagent/cluster diagnostic ions flagging here is expected."
+            )
 
     n_cycle_rows = len(ranges) if args.include_cycle_rows else 0
-    _emit({"out": args.out, "n_rows": len(rows) + n_cycle_rows,
-           "n_quant_rows": len(rows), "n_cycle_rows": n_cycle_rows,
-           "n_peaks": len(masses), "n_ranges": len(ranges),
-           "measured_apexes": {f"{m:.3f}": round(apexes[m], 4) for m in masses},
-           "params": params,
-           "kinetic": kinetic_info,
-           "humidity": humidity_report,
-           "background": background_report,
-           "apex_warnings": warn, "note": note}, args.raw)
-
-
+    _emit(
+        {
+            "out": args.out,
+            "n_rows": len(rows) + n_cycle_rows,
+            "n_quant_rows": len(rows),
+            "n_cycle_rows": n_cycle_rows,
+            "n_peaks": len(masses),
+            "n_ranges": len(ranges),
+            "measured_apexes": {f"{m:.3f}": round(apexes[m], 4) for m in masses},
+            "params": params,
+            "kinetic": kinetic_info,
+            "humidity": humidity_report,
+            "background": background_report,
+            "apex_warnings": warn,
+            "note": note,
+        },
+        args.raw,
+    )
 
 
 def cmd_viz(args):
@@ -959,36 +1169,52 @@ def cmd_viz(args):
       * --html review.html: write a standalone, portable HTML file instead (no
         server, no CSV; edits exported via the page's Download button)."""
     from . import viz
+
     config = _load_config(args)
     settings = resolve_analysis_settings(config, args)
     with h5py.File(args.h5, "r") as f:
         peaks = _load_peaks(args, f, settings=settings)
         ranges_cfg = _load_ranges(args, f)
         if not peaks or not ranges_cfg:
-            sys.exit("viz needs an explicit peak list AND time ranges — it does not "
-                     "detect them. Pass --config with 'peaks' and 'ranges' (or "
-                     "--peaks-json/--ranges-json). Build them with `ptr peaks` and "
-                     "`ptr segments`, then curate into the config.")
+            sys.exit(
+                "viz needs an explicit peak list AND time ranges — it does not "
+                "detect them. Pass --config with 'peaks' and 'ranges' (or "
+                "--peaks-json/--ranges-json). Build them with `ptr peaks` and "
+                "`ptr segments`, then curate into the config."
+            )
         R = settings["R"]
         R_phys = settings["R_phys"]
         # Large files take ~30-90 s to load and pre-compute traces BEFORE the server
         # starts. Announce it so a watching agent waits for "review app running at …"
         # (below) rather than polling the port — which refuses until this finishes.
-        print("ptr: preparing the review (loading the file + computing traces; large "
-              "files take ~30-90 s) — the URL is printed when it's ready…",
-              file=sys.stderr, flush=True)
+        print(
+            "ptr: preparing the review (loading the file + computing traces; large "
+            "files take ~30-90 s) — the URL is printed when it's ready…",
+            file=sys.stderr,
+            flush=True,
+        )
         data = viz.build_viz_data(
-            f, peaks, ranges_cfg, R=R, R_phys=R_phys,
-            primary_mz=settings["primary_mz"], K=settings["K"],
-            molar_volume=settings["molar_volume"], analysis_settings=settings,
-            config_base=config, checklist=_load_checklist(args))
+            f,
+            peaks,
+            ranges_cfg,
+            R=R,
+            R_phys=R_phys,
+            primary_mz=settings["primary_mz"],
+            K=settings["K"],
+            molar_volume=settings["molar_volume"],
+            analysis_settings=settings,
+            config_base=config,
+            checklist=_load_checklist(args),
+        )
 
     serve_mode = args.serve if args.serve is not None else (not args.html)
     if serve_mode:
         cfg_path = args.config or args.save_config
         if not cfg_path:
-            sys.exit("serve mode needs a config path to save to: pass --config PATH "
-                     "(the source) or --save-config PATH.")
+            sys.exit(
+                "serve mode needs a config path to save to: pass --config PATH "
+                "(the source) or --save-config PATH."
+            )
         if not os.path.exists(cfg_path):
             initial = dict(config)
             initial.update({"peaks": peaks, "ranges": ranges_cfg})
@@ -999,13 +1225,19 @@ def cmd_viz(args):
             with open(cfg_path, "w", encoding="utf-8") as fh:
                 json.dump(initial, fh, indent=2)
         html = viz.render_html(data, config_path=cfg_path)
-        run = lambda cfg: analyze_config_to_csv(args.h5, cfg, args.out, args.sep,
-                                                args.include_cycle_rows)
+        run = lambda cfg: analyze_config_to_csv(
+            args.h5, cfg, args.out, args.sep, args.include_cycle_rows
+        )
         spec_fn = lambda lo, hi: interval_spectrum(args.h5, lo, hi)
-        final, finished, summary = viz.serve(html, cfg_path, port=args.port,
-                                             timeout=args.timeout,
-                                             open_browser=not args.no_open,
-                                             run_analysis=run, spectrum_fn=spec_fn)
+        final, finished, summary = viz.serve(
+            html,
+            cfg_path,
+            port=args.port,
+            timeout=args.timeout,
+            open_browser=not args.no_open,
+            run_analysis=run,
+            spectrum_fn=spec_fn,
+        )
         if final is not None:
             cfg = final
         else:
@@ -1013,26 +1245,40 @@ def cmd_viz(args):
                 cfg = json.load(fh)
         if summary is None:
             summary = run(cfg)
-        summary.update({
-            "mode": "served", "config": cfg_path, "review_finished": finished,
-            "note": ("Done: the expert's review was saved to the config and the "
-                     "full-precision analysis was written to the CSV."
-                     if finished else
-                     "Review timed out; the analysis ran on the last auto-saved "
-                     "config. Re-open with the same command to continue editing.")})
+        summary.update(
+            {
+                "mode": "served",
+                "config": cfg_path,
+                "review_finished": finished,
+                "note": (
+                    "Done: the expert's review was saved to the config and the "
+                    "full-precision analysis was written to the CSV."
+                    if finished
+                    else "Review timed out; the analysis ran on the last auto-saved "
+                    "config. Re-open with the same command to continue editing."
+                ),
+            }
+        )
         _emit(summary, args.raw)
     else:
         html = viz.render_html(data)
         with open(args.html, "w", encoding="utf-8") as fh:
             fh.write(html)
-        _emit({"out": args.html, "served": False, "n_peaks": len(data["peaks"]),
-               "n_ranges": len(data["ranges"]), "n_cycles": data["meta"]["ncyc"],
-               "concentration_available": data["meta"]["concentration_available"],
-               "note": "Standalone portable review app written. Open in a browser to "
-                       "sanity-check/tweak and Download config.json to hand back for "
-                       "`ptr analyze`. For a live-saving session that also writes the "
-                       "CSV on Done, drop --html and pass --config cfg.json."},
-              args.raw)
+        _emit(
+            {
+                "out": args.html,
+                "served": False,
+                "n_peaks": len(data["peaks"]),
+                "n_ranges": len(data["ranges"]),
+                "n_cycles": data["meta"]["ncyc"],
+                "concentration_available": data["meta"]["concentration_available"],
+                "note": "Standalone portable review app written. Open in a browser to "
+                "sanity-check/tweak and Download config.json to hand back for "
+                "`ptr analyze`. For a live-saving session that also writes the "
+                "CSV on Done, drop --html and pass --config cfg.json.",
+            },
+            args.raw,
+        )
 
 
 def cmd_rates(args):
@@ -1048,11 +1294,22 @@ def cmd_rates(args):
             comps = [c for c in comps if abs(c["mz"] - target) < 0.3]
         except ValueError:
             ql = q.lower()
-            comps = [c for c in comps
-                     if ql in c["name"].lower() or ql in c["formula"].lower()
-                     or any(ql in n.lower() for n in c.get("isomers", []))]
-    _emit({"units": "1e-9 cm3/s", "n": len(comps),
-           "source": tbl.get("_source", ""), "compounds": comps}, args.raw)
+            comps = [
+                c
+                for c in comps
+                if ql in c["name"].lower()
+                or ql in c["formula"].lower()
+                or any(ql in n.lower() for n in c.get("isomers", []))
+            ]
+    _emit(
+        {
+            "units": "1e-9 cm3/s",
+            "n": len(comps),
+            "source": tbl.get("_source", ""),
+            "compounds": comps,
+        },
+        args.raw,
+    )
 
 
 def cmd_calibrate(args):
@@ -1075,15 +1332,21 @@ def cmd_calibrate(args):
         R = settings["R"]
         R_phys = settings["R_phys"]
         primary_mz = settings["primary_mz"]
-        traces, _ = ptrms.extract_traces(
-            f, masses, R=R, R_phys=R_phys)
+        traces, _ = ptrms.extract_traces(f, masses, R=R, R_phys=R_phys)
         K, resid, n = ptrms.calibrate_K(
-            f, traces, ref_conc, ranges, primary_mz=primary_mz, R_used=R)
-        K_file = ptrms.derive_K(
-            f, ptrms.extract_primary(f, primary_mz, R))
-    _emit({"K_calibrated": K, "K_from_file": K_file,
-           "calibration_points": n, "residual_median_pct": resid,
-           "usage": f"pass --K {K} to analyze to match this reference"}, args.raw)
+            f, traces, ref_conc, ranges, primary_mz=primary_mz, R_used=R
+        )
+        K_file = ptrms.derive_K(f, ptrms.extract_primary(f, primary_mz, R))
+    _emit(
+        {
+            "K_calibrated": K,
+            "K_from_file": K_file,
+            "calibration_points": n,
+            "residual_median_pct": resid,
+            "usage": f"pass --K {K} to analyze to match this reference",
+        },
+        args.raw,
+    )
 
 
 def _ranges_from_reference(path):
@@ -1093,26 +1356,47 @@ def _ranges_from_reference(path):
         for r in csv.reader(fh, delimiter=";"):
             if len(r) < 6 or r[1].strip() != "Cycle":
                 continue
+
             def n(x):
                 return int(float(x.replace(",", ".")))
+
             out[r[2].strip()] = (n(r[4]), n(r[3]))  # (min, max)
     return out
 
 
 def _write_csv(path, src, rows, labels, sep, ranges=None, include_cycle_rows=False):
-    header = ["File", "Variable", "Range",
-              "Max(Raw)", "Min(Raw)", "Average(Raw)", "Deviation(Raw)",
-              "Max(Corrected)", "Min(Corrected)", "Average(Corrected)", "Deviation(Corrected)",
-              "Max(Conc)", "Min(Conc)", "Average(Conc)", "Deviation(Conc)",
-              "Max(Conc [ug])", "Min(Conc [ug])", "Average(Conc [ug])", "Deviation(Conc [ug])"]
+    header = [
+        "File",
+        "Variable",
+        "Range",
+        "Max(Raw)",
+        "Min(Raw)",
+        "Average(Raw)",
+        "Deviation(Raw)",
+        "Max(Corrected)",
+        "Min(Corrected)",
+        "Average(Corrected)",
+        "Deviation(Corrected)",
+        "Max(Conc)",
+        "Min(Conc)",
+        "Average(Conc)",
+        "Deviation(Conc)",
+        "Max(Conc [ug])",
+        "Min(Conc [ug])",
+        "Average(Conc [ug])",
+        "Deviation(Conc [ug])",
+    ]
 
     def fmt(v):
         s = f"{v:.6f}"
         return s.replace(".", ",") if sep == ";" else s
 
     with ExitStack() as stack:
-        fh = (sys.stdout if path == "-" else
-              stack.enter_context(open(path, "w", newline="", encoding="utf-8-sig")))
+        fh = (
+            sys.stdout
+            if path == "-"
+            else stack.enter_context(open(path, "w", newline="", encoding="utf-8-sig"))
+        )
         w = csv.writer(fh, delimiter=sep)
         w.writerow(header)
         for r in rows:
@@ -1122,17 +1406,29 @@ def _write_csv(path, src, rows, labels, sep, ranges=None, include_cycle_rows=Fal
             row = [src, var, r["range"]]
             for q in ("raw", "cor", "con", "ug"):
                 s = r[q]
-                row += [fmt(s["Max"]), fmt(s["Min"]), fmt(s["Average"]),
-                        fmt(s["Deviation"])]
+                row += [
+                    fmt(s["Max"]),
+                    fmt(s["Min"]),
+                    fmt(s["Average"]),
+                    fmt(s["Deviation"]),
+                ]
             w.writerow(row)
         if include_cycle_rows:
             for label, (lo, hi) in (ranges or {}).items():
                 cycles = np.arange(lo, hi + 1, dtype=float)
                 deviation = float(np.std(cycles, ddof=1)) if cycles.size > 1 else 0.0
-                w.writerow([
-                    src, "Cycle", label, str(hi), str(lo), fmt(float(cycles.mean())),
-                    fmt(deviation), *("" for _ in range(12)),
-                ])
+                w.writerow(
+                    [
+                        src,
+                        "Cycle",
+                        label,
+                        str(hi),
+                        str(lo),
+                        fmt(float(cycles.mean())),
+                        fmt(deviation),
+                        *("" for _ in range(12)),
+                    ]
+                )
 
 
 def interval_spectrum(h5_path, lo, hi, block=512):
@@ -1142,15 +1438,16 @@ def interval_spectrum(h5_path, lo, hi, block=512):
     with h5py.File(h5_path, "r") as f:
         inten = f["SPECdata/Intensities"]
         ncyc, nbin = inten.shape
-        lo = max(1, int(lo)); hi = min(int(ncyc), int(hi))
+        lo = max(1, int(lo))
+        hi = min(int(ncyc), int(hi))
         if hi < lo:
             lo, hi = hi, lo
         acc = np.zeros(nbin, dtype=np.float64)
         n = 0
-        for i in range(lo - 1, hi, block):      # 0-based half-open
+        for i in range(lo - 1, hi, block):  # 0-based half-open
             j = min(i + block, hi)
             acc += np.asarray(inten[i:j, :], dtype=np.float64).sum(axis=0)
-            n += (j - i)
+            n += j - i
         avg = acc / max(1, n)
     return [round(x) for x in avg]
 
@@ -1166,16 +1463,24 @@ def analyze_config_to_csv(h5_path, config, out, sep=";", include_cycle_rows=True
     ranges_cfg = config.get("ranges") or []
     with h5py.File(h5_path, "r") as f:
         masses = [float(p["mz"]) for p in peaks]
-        labels = {float(p["mz"]): (p.get("label") or p.get("formula") or "") for p in peaks}
+        labels = {
+            float(p["mz"]): (p.get("label") or p.get("formula") or "") for p in peaks
+        }
         ranges = _resolve_ranges(f, ranges_cfg)
         R = settings["R"]
         R_phys = settings["R_phys"]
         primary_mz = settings["primary_mz"]
         resolved = ptrms.resolve_k(peaks, ptrms.load_rate_constants())
         k_map = resolved if settings["kinetic"] else None
-        humid_masses = {m for m, info in resolved.items() if "humid" in info.get("flags", [])}
-        hum_ratio = (ptrms.water_cluster_ratio(
-            f, primary_mz=primary_mz, R=R) if humid_masses else None)
+        humid_masses = {
+            m for m, info in resolved.items() if "humid" in info.get("flags", [])
+        }
+        hum_ratio = (
+            ptrms.water_cluster_ratio(f, primary_mz=primary_mz, R=R)
+            if humid_masses
+            else None
+        )
+
         # per-peak integration-window overrides: `window` is either a full-width
         # number (symmetric) or {"left":hwL,"right":hwR} half-widths (asymmetric)
         def _winlr(p):
@@ -1183,52 +1488,80 @@ def analyze_config_to_csv(h5_path, config, out, sep=";", include_cycle_rows=True
             if isinstance(w, dict):
                 return (float(w["left"]), float(w["right"]))
             return (float(w) / 2.0, float(w) / 2.0)
+
         windows = {float(p["mz"]): _winlr(p) for p in peaks if p.get("window")}
         # per-interval windows: each interval integrates each isolated peak with an
         # apex/window re-centred on that interval's own spectrum (peaks drift). On
         # by default when real intervals exist; matches the viz per-interval review.
-        per_range = ranges if (ranges_cfg and settings["per_interval_windows"]) else None
+        per_range = (
+            ranges if (ranges_cfg and settings["per_interval_windows"]) else None
+        )
         traces, _ = ptrms.extract_traces(
-            f, masses, R=R, R_phys=R_phys, windows=windows or None,
-            per_range=per_range)
+            f, masses, R=R, R_phys=R_phys, windows=windows or None, per_range=per_range
+        )
         rows, params = ptrms.quantify(
-            traces, f, ranges, K=settings["K"], primary_mz=primary_mz,
-            molar_volume=settings["molar_volume"], R_used=R, k_map=k_map,
+            traces,
+            f,
+            ranges,
+            K=settings["K"],
+            primary_mz=primary_mz,
+            molar_volume=settings["molar_volume"],
+            R_used=R,
+            k_map=k_map,
             k_anchor=settings["k_anchor"],
             humid_masses=(humid_masses if settings["humidity_correct"] else None),
-            humidity_ratio=hum_ratio, humidity_ref=settings["humidity_ref"],
-            humidity_p=settings["humidity_p"])
+            humidity_ratio=hum_ratio,
+            humidity_ref=settings["humidity_ref"],
+            humidity_p=settings["humidity_p"],
+        )
         humidity_ref = settings["humidity_ref"]
         if humidity_ref is None and hum_ratio is not None:
             good = np.isfinite(hum_ratio) & (hum_ratio > 0)
             humidity_ref = float(np.median(hum_ratio[good])) if good.any() else None
         sources = _effective_sources(
-            settings, humidity_ref, params.get("molar_volume_source"))
-        params.update({
-            "R_phys": R_phys,
-            "whole_run_windows": settings["whole_run_windows"],
-            "per_interval_windows": settings["per_interval_windows"],
-            "humidity_correct": settings["humidity_correct"],
-            "humidity_p": settings["humidity_p"],
-            "humidity_ref": humidity_ref,
-            "humidity_ref_source": sources["humidity_ref"],
-            "molar_volume_source": sources["molar_volume"],
-            "sources": sources,
-        })
-    _write_csv(out, h5_path, rows, labels, sep, ranges=ranges,
-               include_cycle_rows=include_cycle_rows)
+            settings, humidity_ref, params.get("molar_volume_source")
+        )
+        params.update(
+            {
+                "R_phys": R_phys,
+                "whole_run_windows": settings["whole_run_windows"],
+                "per_interval_windows": settings["per_interval_windows"],
+                "humidity_correct": settings["humidity_correct"],
+                "humidity_p": settings["humidity_p"],
+                "humidity_ref": humidity_ref,
+                "humidity_ref_source": sources["humidity_ref"],
+                "molar_volume_source": sources["molar_volume"],
+                "sources": sources,
+            }
+        )
+    _write_csv(
+        out,
+        h5_path,
+        rows,
+        labels,
+        sep,
+        ranges=ranges,
+        include_cycle_rows=include_cycle_rows,
+    )
     n_cycle = len(ranges) if include_cycle_rows else 0
-    return {"out": out, "n_rows": len(rows) + n_cycle, "n_peaks": len(masses),
-            "n_ranges": len(ranges), "params": params,
-            "K": params.get("K"), "molar_volume": params.get("molar_volume"),
-            "primary_mz": params.get("primary_mz"),
-            "kinetic": params.get("kinetic"),
-            "concentration_available": params.get("concentration_available")}
+    return {
+        "out": out,
+        "n_rows": len(rows) + n_cycle,
+        "n_peaks": len(masses),
+        "n_ranges": len(ranges),
+        "params": params,
+        "K": params.get("K"),
+        "molar_volume": params.get("molar_volume"),
+        "primary_mz": params.get("primary_mz"),
+        "kinetic": params.get("kinetic"),
+        "concentration_available": params.get("concentration_available"),
+    }
 
 
 def _parse_viewer_csv(path):
     def num(s):
         return float(s.replace(",", ".")) if s.strip() else float("nan")
+
     out = {}
     with open(path, encoding="utf-8-sig") as fh:
         rd = csv.reader(fh, delimiter=";")
@@ -1242,7 +1575,11 @@ def _parse_viewer_csv(path):
             except ValueError:
                 continue
             out[(mz, row[2].strip())] = {
-                "raw": num(row[5]), "cor": num(row[9]), "con": num(row[13]), "ug": num(row[17])}
+                "raw": num(row[5]),
+                "cor": num(row[9]),
+                "con": num(row[13]),
+                "ug": num(row[17]),
+            }
     return out
 
 
@@ -1266,164 +1603,361 @@ def cmd_compare(args):
     summary = {"matched_rows": n}
     for q in ("raw", "cor", "con", "ug"):
         a = np.array(errs[q]) if errs[q] else np.array([np.nan])
-        summary[q] = {"median_pct": round(float(np.nanmedian(a)), 2),
-                      "mean_pct": round(float(np.nanmean(a)), 2),
-                      "p90_pct": round(float(np.nanpercentile(a, 90)), 2),
-                      "max_pct": round(float(np.nanmax(a)), 2)}
+        summary[q] = {
+            "median_pct": round(float(np.nanmedian(a)), 2),
+            "mean_pct": round(float(np.nanmean(a)), 2),
+            "p90_pct": round(float(np.nanpercentile(a, 90)), 2),
+            "max_pct": round(float(np.nanmax(a)), 2),
+        }
     if args.per_mass:
         summary["per_mass_raw_median_pct"] = {
-            f"{m:.3f}": round(float(np.median(per_mass[m])), 2) for m in sorted(per_mass)}
+            f"{m:.3f}": round(float(np.median(per_mass[m])), 2)
+            for m in sorted(per_mass)
+        }
     _emit(summary, args.raw)
 
 
 def main():
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--pretty", dest="raw", action="store_false",
-                        help="Pretty-print JSON (default compact)")
+    common.add_argument(
+        "--pretty",
+        dest="raw",
+        action="store_false",
+        help="Pretty-print JSON (default compact)",
+    )
 
-    p = argparse.ArgumentParser(prog="ptr", description=__doc__, parents=[common],
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        prog="ptr",
+        description=__doc__,
+        parents=[common],
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    pi = sub.add_parser("inspect", parents=[common], help="File metadata & calibration (JSON)")
+    pi = sub.add_parser(
+        "inspect", parents=[common], help="File metadata & calibration (JSON)"
+    )
     pi.add_argument("h5")
     pi.set_defaults(func=cmd_inspect)
 
-    pp = sub.add_parser("peaks", parents=[common], help="Detect peaks (JSON) for chemistry assignment")
+    pp = sub.add_parser(
+        "peaks", parents=[common], help="Detect peaks (JSON) for chemistry assignment"
+    )
     pp.add_argument("h5")
-    pp.add_argument("--full", action="store_true",
-                    help="Emit every candidate formula + isotope arrays per peak "
-                         "(default is a compact top-candidate view)")
-    pp.add_argument("--include-artifacts", action="store_true",
-                    help="Include instrument-noise peaks (ringing combs, "
-                         "low-prominence ripples, reagent saturation skirt) that the "
-                         "default view drops")
-    pp.add_argument("--min-height", type=float, default=1e-3,
-                    help="Threshold as fraction of tallest peak (default 1e-3)")
+    pp.add_argument(
+        "--full",
+        action="store_true",
+        help="Emit every candidate formula + isotope arrays per peak "
+        "(default is a compact top-candidate view)",
+    )
+    pp.add_argument(
+        "--include-artifacts",
+        action="store_true",
+        help="Include instrument-noise peaks (ringing combs, "
+        "low-prominence ripples, reagent saturation skirt) that the "
+        "default view drops",
+    )
+    pp.add_argument(
+        "--min-height",
+        type=float,
+        default=1e-3,
+        help="Threshold as fraction of tallest peak (default 1e-3)",
+    )
     pp.add_argument("--max-peaks", type=int, default=300)
     pp.add_argument("--mz-min", type=float, default=15.0)
     pp.add_argument("--mz-max", type=float, default=None)
-    pp.add_argument("--R-phys", dest="R_phys", type=float, default=None,
-                    help="Physical peak resolution for detection and merging (default 2400)")
+    pp.add_argument(
+        "--R-phys",
+        dest="R_phys",
+        type=float,
+        default=None,
+        help="Physical peak resolution for detection and merging (default 2400)",
+    )
     pp.set_defaults(func=cmd_peaks)
 
-    ps = sub.add_parser("segments", parents=[common], help="Detect time segments (JSON) for labelling")
+    ps = sub.add_parser(
+        "segments", parents=[common], help="Detect time segments (JSON) for labelling"
+    )
     ps.add_argument("h5")
-    ps.add_argument("--min-duration", type=int, default=30, help="Min cycles per segment")
-    ps.add_argument("--grad-thr", type=float, default=0.02,
-                    help="Log-signal gradient threshold for stability")
-    ps.add_argument("--high-ratio", type=float, default=3.0,
-                    help="x-baseline above which a segment is 'high' (sample)")
-    ps.add_argument("--merge-high-gap", type=int, default=0, metavar="CYCLES",
-                    help="Merge consecutive high plateaus across an unclassified gap "
-                         "of at most this many cycles (default: disabled)")
+    ps.add_argument(
+        "--min-duration", type=int, default=30, help="Min cycles per segment"
+    )
+    ps.add_argument(
+        "--grad-thr",
+        type=float,
+        default=0.02,
+        help="Log-signal gradient threshold for stability",
+    )
+    ps.add_argument(
+        "--high-ratio",
+        type=float,
+        default=3.0,
+        help="x-baseline above which a segment is 'high' (sample)",
+    )
+    ps.add_argument(
+        "--merge-high-gap",
+        type=int,
+        default=0,
+        metavar="CYCLES",
+        help="Merge consecutive high plateaus across an unclassified gap "
+        "of at most this many cycles (default: disabled)",
+    )
     ps.set_defaults(func=cmd_segments)
 
     pa = sub.add_parser("analyze", parents=[common], help="Run pipeline -> results CSV")
     pa.add_argument("h5")
-    pa.add_argument("--peaks-json", help="Inline JSON: [{'mz':.., 'label':.., 'formula':..}]")
-    pa.add_argument("--ranges-json",
-                    help="Inline JSON: [{'label':.., 'start':.., 'end':.., 'unit':'cycle|second'}]")
-    pa.add_argument("--config", help="JSON file with 'peaks'/'ranges' (alternative to inline)")
-    pa.add_argument("--auto-peaks", action="store_true", help="Auto-detect peaks if none given")
-    pa.add_argument("--auto-segments", action="store_true",
-                    help="Auto-detect segments if no ranges given (generic labels)")
-    pa.add_argument("--merge-high-gap", type=int, default=0, metavar="CYCLES",
-                    help="With --auto-segments, merge consecutive high plateaus "
-                         "across a short unclassified gap")
-    pa.add_argument("--include-cycle-rows", action="store_true",
-                    help="Append Viewer-style Cycle rows with each range's boundaries")
+    pa.add_argument(
+        "--peaks-json", help="Inline JSON: [{'mz':.., 'label':.., 'formula':..}]"
+    )
+    pa.add_argument(
+        "--ranges-json",
+        help="Inline JSON: [{'label':.., 'start':.., 'end':.., 'unit':'cycle|second'}]",
+    )
+    pa.add_argument(
+        "--config", help="JSON file with 'peaks'/'ranges' (alternative to inline)"
+    )
+    pa.add_argument(
+        "--auto-peaks", action="store_true", help="Auto-detect peaks if none given"
+    )
+    pa.add_argument(
+        "--auto-segments",
+        action="store_true",
+        help="Auto-detect segments if no ranges given (generic labels)",
+    )
+    pa.add_argument(
+        "--merge-high-gap",
+        type=int,
+        default=0,
+        metavar="CYCLES",
+        help="With --auto-segments, merge consecutive high plateaus "
+        "across a short unclassified gap",
+    )
+    pa.add_argument(
+        "--include-cycle-rows",
+        action="store_true",
+        help="Append Viewer-style Cycle rows with each range's boundaries",
+    )
     pa.add_argument("--out", default="-", help="Output CSV path (default stdout)")
-    pa.add_argument("--sep", default=";", help="Delimiter (default ';' + comma decimals = "
-                    "PTR-MS Viewer format; pass ',' for a standard ','-delimited, "
-                    "dot-decimal CSV for other tools)")
+    pa.add_argument(
+        "--sep",
+        default=";",
+        help="Delimiter (default ';' + comma decimals = "
+        "PTR-MS Viewer format; pass ',' for a standard ','-delimited, "
+        "dot-decimal CSV for other tools)",
+    )
     pa.add_argument("--min-height", type=float, default=1e-3)
     pa.add_argument("--max-peaks", type=int, default=300)
     pa.add_argument("--mz-min", type=float, default=15.0)
     pa.add_argument("--mz-max", type=float, default=None)
-    pa.add_argument("--no-per-interval", dest="no_per_interval", action="store_true",
-                     default=None, help="Use one whole-run integration window per compound instead of "
-                          "re-centring each peak's window on every interval's own spectrum "
-                          "(per-interval is the default; peaks drift between intervals)")
-    pa.add_argument("--per-interval", dest="no_per_interval", action="store_false",
-                     help="Explicitly use isolated per-interval windows")
-    pa.add_argument("--R", type=float, default=None, help="Integration-window resolution (default 1200)")
-    pa.add_argument("--R-phys", dest="R_phys", type=float, default=None,
-                    help="Physical peak resolution for deconvolution (default 2400)")
-    pa.add_argument("--K", type=float,
-                    help="Concentration constant (Conc=Corrected*K/primary). "
-                         "Default: derived from file; use `calibrate` to match a Viewer project.")
-    pa.add_argument("--primary-mz", type=float, default=None,
-                     help="Primary-ion m/z for normalisation (default 21.022, H3(18O)+)")
-    pa.add_argument("--kinetic", dest="kinetic", action="store_true", default=None,
-                    help="Apply per-compound rate-constant (k) correction for physically "
-                         "resolved sensitivities (looks up k by peak 'k'/'formula'/m/z). "
-                         "Diverges from a single-k reference but is more accurate.")
-    pa.add_argument("--no-kinetic", dest="kinetic", action="store_false",
-                     help="Disable config kinetic correction")
-    pa.add_argument("--k-anchor", type=float, default=None,
-                    help="Rate constant (1e-9 cm3/s) the baseline K assumes (default 2.0)")
-    pa.add_argument("--humidity-correct", dest="humidity_correct", action="store_true", default=None,
-                    help="Humidity-correct near-thermoneutral compounds (HCN etc.) using "
-                         "the per-cycle water-cluster ratio. Needs a calibrated --humidity-p.")
-    pa.add_argument("--no-humidity-correct", dest="humidity_correct", action="store_false",
-                     help="Disable config humidity correction")
-    pa.add_argument("--humidity-p", type=float, default=None,
-                    help="Humidity exponent in [0,1]: 0=off, 1=equilibrium upper bound "
-                         "(default 1.0). Calibrate from a standard at >=2 humidities.")
-    pa.add_argument("--humidity-ref", type=float, default=None,
-                     help="Reference water-cluster ratio to normalise to (default: run median)")
-    pa.add_argument("--molar-volume", type=float, default=None,
-                    help="Molar volume L/mol (else from drift temperature)")
+    pa.add_argument(
+        "--no-per-interval",
+        dest="no_per_interval",
+        action="store_true",
+        default=None,
+        help="Use one whole-run integration window per compound instead of "
+        "re-centring each peak's window on every interval's own spectrum "
+        "(per-interval is the default; peaks drift between intervals)",
+    )
+    pa.add_argument(
+        "--per-interval",
+        dest="no_per_interval",
+        action="store_false",
+        help="Explicitly use isolated per-interval windows",
+    )
+    pa.add_argument(
+        "--R",
+        type=float,
+        default=None,
+        help="Integration-window resolution (default 1200)",
+    )
+    pa.add_argument(
+        "--R-phys",
+        dest="R_phys",
+        type=float,
+        default=None,
+        help="Physical peak resolution for deconvolution (default 2400)",
+    )
+    pa.add_argument(
+        "--K",
+        type=float,
+        help="Concentration constant (Conc=Corrected*K/primary). "
+        "Default: derived from file; use `calibrate` to match a Viewer project.",
+    )
+    pa.add_argument(
+        "--primary-mz",
+        type=float,
+        default=None,
+        help="Primary-ion m/z for normalisation (default 21.022, H3(18O)+)",
+    )
+    pa.add_argument(
+        "--kinetic",
+        dest="kinetic",
+        action="store_true",
+        default=None,
+        help="Apply per-compound rate-constant (k) correction for physically "
+        "resolved sensitivities (looks up k by peak 'k'/'formula'/m/z). "
+        "Diverges from a single-k reference but is more accurate.",
+    )
+    pa.add_argument(
+        "--no-kinetic",
+        dest="kinetic",
+        action="store_false",
+        help="Disable config kinetic correction",
+    )
+    pa.add_argument(
+        "--k-anchor",
+        type=float,
+        default=None,
+        help="Rate constant (1e-9 cm3/s) the baseline K assumes (default 2.0)",
+    )
+    pa.add_argument(
+        "--humidity-correct",
+        dest="humidity_correct",
+        action="store_true",
+        default=None,
+        help="Humidity-correct near-thermoneutral compounds (HCN etc.) using "
+        "the per-cycle water-cluster ratio. Needs a calibrated --humidity-p.",
+    )
+    pa.add_argument(
+        "--no-humidity-correct",
+        dest="humidity_correct",
+        action="store_false",
+        help="Disable config humidity correction",
+    )
+    pa.add_argument(
+        "--humidity-p",
+        type=float,
+        default=None,
+        help="Humidity exponent in [0,1]: 0=off, 1=equilibrium upper bound "
+        "(default 1.0). Calibrate from a standard at >=2 humidities.",
+    )
+    pa.add_argument(
+        "--humidity-ref",
+        type=float,
+        default=None,
+        help="Reference water-cluster ratio to normalise to (default: run median)",
+    )
+    pa.add_argument(
+        "--molar-volume",
+        type=float,
+        default=None,
+        help="Molar volume L/mol (else from drift temperature)",
+    )
     pa.set_defaults(func=cmd_analyze)
 
-    pv = sub.add_parser("viz", parents=[common],
-                        help="Review app for an existing peak list + ranges (live-save "
-                             "to a config with --serve, or a standalone HTML with --html)")
+    pv = sub.add_parser(
+        "viz",
+        parents=[common],
+        help="Review app for an existing peak list + ranges (live-save "
+        "to a config with --serve, or a standalone HTML with --html)",
+    )
     pv.add_argument("h5")
-    pv.add_argument("--config", help="JSON file with 'peaks'/'ranges' (source; live-save target when serving)")
+    pv.add_argument(
+        "--config",
+        help="JSON file with 'peaks'/'ranges' (source; live-save target when serving)",
+    )
     pv.add_argument("--peaks-json", help="Inline peaks JSON (alternative to --config)")
-    pv.add_argument("--ranges-json", help="Inline ranges JSON (alternative to --config)")
-    pv.add_argument("--save-config", help="Config path to live-save to when serving without --config")
-    pv.add_argument("--serve", dest="serve", action="store_true", default=None,
-                    help="Serve on localhost, live-save edits, and run analysis on 'Done' (the default)")
-    pv.add_argument("--html", help="Instead of serving, write a standalone portable HTML file here")
-    pv.add_argument("--out", default="results.csv",
-                    help="Results CSV written when the expert clicks 'Done' (default results.csv)")
-    pv.add_argument("--sep", default=";", help="CSV delimiter (default ';' with comma decimals)")
-    pv.add_argument("--include-cycle-rows", dest="include_cycle_rows",
-                    action="store_true", default=True, help="Append Viewer-style Cycle rows (default on)")
+    pv.add_argument(
+        "--ranges-json", help="Inline ranges JSON (alternative to --config)"
+    )
+    pv.add_argument(
+        "--save-config",
+        help="Config path to live-save to when serving without --config",
+    )
+    pv.add_argument(
+        "--serve",
+        dest="serve",
+        action="store_true",
+        default=None,
+        help="Serve on localhost, live-save edits, and run analysis on 'Done' (the default)",
+    )
+    pv.add_argument(
+        "--html", help="Instead of serving, write a standalone portable HTML file here"
+    )
+    pv.add_argument(
+        "--out",
+        default="results.csv",
+        help="Results CSV written when the expert clicks 'Done' (default results.csv)",
+    )
+    pv.add_argument(
+        "--sep", default=";", help="CSV delimiter (default ';' with comma decimals)"
+    )
+    pv.add_argument(
+        "--include-cycle-rows",
+        dest="include_cycle_rows",
+        action="store_true",
+        default=True,
+        help="Append Viewer-style Cycle rows (default on)",
+    )
     pv.add_argument("--no-cycle-rows", dest="include_cycle_rows", action="store_false")
-    pv.add_argument("--port", type=int, default=8765, help="Server port (default 8765; scans upward if busy)")
-    pv.add_argument("--timeout", type=int, default=1800, help="Seconds to wait for 'Done' (default 1800)")
-    pv.add_argument("--no-open", action="store_true", help="Do not auto-open the browser")
+    pv.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="Server port (default 8765; scans upward if busy)",
+    )
+    pv.add_argument(
+        "--timeout",
+        type=int,
+        default=1800,
+        help="Seconds to wait for 'Done' (default 1800)",
+    )
+    pv.add_argument(
+        "--no-open", action="store_true", help="Do not auto-open the browser"
+    )
     pv.add_argument("--R", type=float, default=None)
     pv.add_argument("--R-phys", dest="R_phys", type=float, default=None)
-    pv.add_argument("--K", type=float, default=None, help="Initial concentration constant (default from file)")
+    pv.add_argument(
+        "--K",
+        type=float,
+        default=None,
+        help="Initial concentration constant (default from file)",
+    )
     pv.add_argument("--primary-mz", type=float, default=None)
     pv.add_argument("--kinetic", dest="kinetic", action="store_true", default=None)
     pv.add_argument("--no-kinetic", dest="kinetic", action="store_false")
     pv.add_argument("--k-anchor", type=float, default=None)
-    pv.add_argument("--humidity-correct", dest="humidity_correct", action="store_true", default=None)
-    pv.add_argument("--no-humidity-correct", dest="humidity_correct", action="store_false")
+    pv.add_argument(
+        "--humidity-correct", dest="humidity_correct", action="store_true", default=None
+    )
+    pv.add_argument(
+        "--no-humidity-correct", dest="humidity_correct", action="store_false"
+    )
     pv.add_argument("--humidity-p", type=float, default=None)
     pv.add_argument("--humidity-ref", type=float, default=None)
-    pv.add_argument("--no-per-interval", dest="no_per_interval", action="store_true", default=None)
+    pv.add_argument(
+        "--no-per-interval", dest="no_per_interval", action="store_true", default=None
+    )
     pv.add_argument("--per-interval", dest="no_per_interval", action="store_false")
     pv.add_argument("--molar-volume", type=float, default=None)
     pv.set_defaults(func=cmd_viz)
 
-    pr = sub.add_parser("rates", parents=[common],
-                        help="Look up proton-transfer rate constants (k) by name/formula/mz")
-    pr.add_argument("query", nargs="?", help="Substring of name/formula, or an m/z number")
+    pr = sub.add_parser(
+        "rates",
+        parents=[common],
+        help="Look up proton-transfer rate constants (k) by name/formula/mz",
+    )
+    pr.add_argument(
+        "query", nargs="?", help="Substring of name/formula, or an m/z number"
+    )
     pr.set_defaults(func=cmd_rates)
 
-    pk = sub.add_parser("calibrate", parents=[common],
-                        help="Fit concentration constant K to a reference Viewer CSV")
+    pk = sub.add_parser(
+        "calibrate",
+        parents=[common],
+        help="Fit concentration constant K to a reference Viewer CSV",
+    )
     pk.add_argument("h5")
-    pk.add_argument("reference", help="Reference PTR-MS Viewer CSV with known concentrations")
-    pk.add_argument("--peaks-json", help="Restrict calibration to these peaks (else use reference's)")
-    pk.add_argument("--ranges-json", help="Ranges (else recovered from the reference's Cycle rows)")
+    pk.add_argument(
+        "reference", help="Reference PTR-MS Viewer CSV with known concentrations"
+    )
+    pk.add_argument(
+        "--peaks-json",
+        help="Restrict calibration to these peaks (else use reference's)",
+    )
+    pk.add_argument(
+        "--ranges-json", help="Ranges (else recovered from the reference's Cycle rows)"
+    )
     pk.add_argument("--config")
     pk.add_argument("--auto-peaks", action="store_true")
     pk.add_argument("--auto-segments", action="store_true")
@@ -1431,15 +1965,30 @@ def main():
     pk.add_argument("--max-peaks", type=int, default=300)
     pk.add_argument("--mz-min", type=float, default=15.0)
     pk.add_argument("--mz-max", type=float, default=None)
-    pk.add_argument("--primary-mz", type=float, default=None,
-                     help="Primary-ion m/z for normalisation (default 21.022, H3(18O)+)")
-    pk.add_argument("--R", type=float, default=None,
-                    help="Integration-window resolution (default 1200)")
-    pk.add_argument("--R-phys", dest="R_phys", type=float, default=None,
-                    help="Physical peak resolution for deconvolution (default 2400)")
+    pk.add_argument(
+        "--primary-mz",
+        type=float,
+        default=None,
+        help="Primary-ion m/z for normalisation (default 21.022, H3(18O)+)",
+    )
+    pk.add_argument(
+        "--R",
+        type=float,
+        default=None,
+        help="Integration-window resolution (default 1200)",
+    )
+    pk.add_argument(
+        "--R-phys",
+        dest="R_phys",
+        type=float,
+        default=None,
+        help="Physical peak resolution for deconvolution (default 2400)",
+    )
     pk.set_defaults(func=cmd_calibrate)
 
-    pc = sub.add_parser("compare", parents=[common], help="Compare results CSV vs reference Viewer CSV")
+    pc = sub.add_parser(
+        "compare", parents=[common], help="Compare results CSV vs reference Viewer CSV"
+    )
     pc.add_argument("mine")
     pc.add_argument("reference")
     pc.add_argument("--per-mass", action="store_true")

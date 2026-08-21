@@ -141,9 +141,7 @@ class HumidityDiagnosticTest(unittest.TestCase):
                                 "k_estimated": False,
                             }
                         ],
-                        "ranges": [
-                            {"label": "sample_01", "start": 1, "end": 4}
-                        ],
+                        "ranges": [{"label": "sample_01", "start": 1, "end": 4}],
                         "analyze": {"kinetic": True},
                     }
                 ),
@@ -187,24 +185,26 @@ class HumidityDiagnosticTest(unittest.TestCase):
                 "molar_volume_source": "fixture",
             }
             output = io.StringIO()
-            with mock.patch.object(
-                analyze.ptrms,
-                "extract_traces",
-                return_value=({29.0386: (np.ones(4), 29.0386)}, (1.0, 0.0)),
-            ), mock.patch.object(
-                analyze.ptrms,
-                "water_cluster_ratio",
-                return_value=np.array([0.1, 0.1, 0.2, 0.2]),
-            ), mock.patch.object(
-                analyze.ptrms, "quantify", return_value=([], params)
-            ), mock.patch.object(analyze, "_write_csv"), redirect_stdout(output):
+            with (
+                mock.patch.object(
+                    analyze.ptrms,
+                    "extract_traces",
+                    return_value=({29.0386: (np.ones(4), 29.0386)}, (1.0, 0.0)),
+                ),
+                mock.patch.object(
+                    analyze.ptrms,
+                    "water_cluster_ratio",
+                    return_value=np.array([0.1, 0.1, 0.2, 0.2]),
+                ),
+                mock.patch.object(analyze.ptrms, "quantify", return_value=([], params)),
+                mock.patch.object(analyze, "_write_csv"),
+                redirect_stdout(output),
+            ):
                 analyze.cmd_analyze(args)
 
         payload = json.loads(output.getvalue())
         self.assertEqual(payload["humidity"]["humid_compounds"], ["29.039"])
-        self.assertEqual(
-            payload["kinetic"]["resolved"]["29.039"]["source"], "explicit"
-        )
+        self.assertEqual(payload["kinetic"]["resolved"]["29.039"]["source"], "explicit")
         self.assertIn("humidity_warning", payload["kinetic"])
 
 
