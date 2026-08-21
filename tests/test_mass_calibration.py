@@ -11,11 +11,11 @@ from ptr_ms_analysis import ptrms
 # Keeping these values here avoids depending on the external measurement file.
 DATA_10_26_33_MAPPING = np.array(
     [
-        [19.022, 5473.484],
-        [59.049, 9575.845],
-        [181.073, 16701.774],
+        [21.022100, 24299.236],
+        [203.94299, 130446.04],
+        [330.84799, 173231.97],
     ],
-    dtype=np.float64,
+    dtype=np.float32,
 )
 
 
@@ -35,8 +35,8 @@ class MassCalibrationTest(unittest.TestCase):
 
         masses = DATA_10_26_33_MAPPING[:, 0]
         timebins = DATA_10_26_33_MAPPING[:, 1]
-        reconstructed = a * np.sqrt(masses) + b
-        residual_ppm = np.abs(reconstructed - timebins) / timebins * 1e6
+        inferred_masses = ((timebins - b) / a) ** 2
+        residual_ppm = np.abs((inferred_masses - masses) / masses) * 1e6
 
         self.assertLessEqual(float(residual_ppm.max()), 10.0)
         self.assertGreater(a, 0.0)
@@ -58,9 +58,10 @@ class MassCalibrationTest(unittest.TestCase):
         with self._file(mapping=DATA_10_26_33_MAPPING, spectrum=spectrum) as h5:
             a, b = ptrms.load_mass_cal(h5)
 
-        design = np.column_stack((np.sqrt(DATA_10_26_33_MAPPING[:, 0]), np.ones(3)))
+        mapping = DATA_10_26_33_MAPPING.astype(np.float64)
+        design = np.column_stack((np.sqrt(mapping[:, 0]), np.ones(3)))
         expected_a, expected_b = np.linalg.lstsq(
-            design, DATA_10_26_33_MAPPING[:, 1], rcond=None
+            design, mapping[:, 1], rcond=None
         )[0]
         self.assertAlmostEqual(a, expected_a, places=10)
         self.assertAlmostEqual(b, expected_b, places=10)
@@ -84,9 +85,10 @@ class MassCalibrationTest(unittest.TestCase):
         mapping = np.array([[19.0, 500.0], [19.0, 600.0]])
         spectrum = np.array([[0.0, 2.0], [np.nan, 4.0]])
 
-        with self._file(mapping=mapping, spectrum=spectrum) as h5:
-            with self.assertRaisesRegex(ValueError, "no mass calibration"):
-                ptrms.load_mass_cal(h5)
+        with self._file(mapping=mapping, spectrum=spectrum) as h5, self.assertRaisesRegex(
+            ValueError, "no mass calibration"
+        ):
+            ptrms.load_mass_cal(h5)
 
 
 if __name__ == "__main__":
