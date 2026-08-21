@@ -18,6 +18,9 @@ import numpy as np
 
 PROTON = 1.007276
 K_ANCHOR_DEFAULT = 2.0  # 1e-9 cm3/s: the single k a non-kinetic calibration assumes
+# 100 ppm: a deliberately generous corruption/model-consistency ceiling, not an
+# accuracy claim; the real Data_10_26_33 fixture is about 8 ppm.
+MAPPING_MAX_RELATIVE_MASS_ERROR = 100e-6
 
 
 # ---------- per-compound rate constants (kinetic sensitivity) ----------
@@ -94,7 +97,8 @@ def load_mass_cal(f):
     ``CALdata/Mapping`` is preferred when it contains a valid set of anchors.
     Exactly two anchors retain the original scalar calculation; additional anchors
     are sorted and fit by least squares after strict physical and numerical
-    validation.  Raw-acquisition exports omit Mapping but store per-cycle ``[a, b]``
+    validation, including a generous reconstructed-mass residual sanity check.
+    Raw-acquisition exports omit Mapping but store per-cycle ``[a, b]``
     coefficients directly in ``CALdata/Spectrum``; fall back to their median across
     cycles (robust to drift and zero/blank rows).
     """
@@ -154,7 +158,19 @@ def load_mass_cal(f):
                                     design, timebins, rcond=None
                                 )[0]
                                 if np.isfinite(a) and np.isfinite(b) and a > 0:
-                                    return float(a), float(b)
+                                    with np.errstate(over="ignore", invalid="ignore"):
+                                        inferred_masses = ((timebins - b) / a) ** 2
+                                        relative_mass_errors = np.abs(
+                                            (inferred_masses - masses) / masses
+                                        )
+                                    if (
+                                        np.isfinite(relative_mass_errors).all()
+                                        and np.all(
+                                            relative_mass_errors
+                                            <= MAPPING_MAX_RELATIVE_MASS_ERROR
+                                        )
+                                    ):
+                                        return float(a), float(b)
             except (TypeError, ValueError, FloatingPointError, np.linalg.LinAlgError):
                 pass
 
