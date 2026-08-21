@@ -443,12 +443,12 @@ least-squares fit of `timebin = a·√m + b`, then reconstructed anchor masses m
 finite absolute relative errors of at most 100 ppm. This is a deliberately generous
 corruption/model-consistency ceiling, not an accuracy claim. If Mapping is absent or
 unusable, the mass calibration falls back to usable per-cycle `CALdata/Spectrum`
-coefficients. Some raw
-acquisition exports omit both: transmission defaults to unity (so **Corrected == Raw**,
-reported via `transmission_available: false`), and with no pre-computed concentration
-the **Conc columns are NaN** unless you pass `--K`. `inspect`/`analyze` surface these
-flags — report the degradation honestly rather than presenting uncalibrated
-Corrected/Conc as final.
+coefficients. Some raw acquisition exports also omit `PTR-Transmission` and
+pre-computed `TRACEdata`: transmission then defaults to unity (so **Corrected ==
+Raw**, reported via `transmission_available: false`), and with no pre-computed
+concentration the **Conc columns are NaN** unless you pass `--K`. `inspect`/`analyze`
+surface these flags — report the degradation honestly rather than presenting
+uncalibrated Corrected/Conc as final.
 
 Concentration uses the standard **primary-ion-normalised** model: dividing by the
 per-cycle reagent-ion signal (the configured primary-ion m/z, 21.022 by default) tracks
