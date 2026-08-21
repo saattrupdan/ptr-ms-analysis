@@ -16,7 +16,7 @@ Root attributes hold instrument/run metadata: `Single Spec Duration (ms)`
 | `SPECdata/AverageSpec` | (n_bins,) | Run-average spectrum — used for peak detection / apex finding. |
 | `SPECdata/Times` | (n_cyc, 4) | col 0 = 1-based cycle index; col 2 = acquisition time (IONICON epoch). |
 | `SPECdata/PCTime` | (n_cyc, 1) | PC Unix timestamp per cycle. |
-| `CALdata/Mapping` | (2, 2) | Two `(m/z, timebin)` anchor points → mass calibration. |
+| `CALdata/Mapping` | (N, 2), N ≥ 2 | `(m/z, timebin)` anchors for mass calibration. Exactly two anchors are solved directly; three or more are fit by least squares. |
 | `TRACEdata/TraceRaw` | (n_cyc, n_pk) | Acquisition-time pre-computed peak traces (raw cps). |
 | `TRACEdata/TraceCorrected` | (n_cyc, n_pk) | Pre-computed transmission-corrected traces. |
 | `TRACEdata/TraceConcentration` | (n_cyc, n_pk) | Pre-computed concentration traces (ppb). |
@@ -37,20 +37,30 @@ built-in trace centres. So faithful reproduction must start from the raw spectra
 
 ## Mass calibration
 
-TOF relation is `timebin = a·√(m/z) + b`. Solve `a, b` from the two
-`CALdata/Mapping` anchors:
+TOF relation is `timebin = a·√(m/z) + b`. `CALdata/Mapping` is an `(N, 2)`
+array of `(m/z, timebin)` anchors with at least two rows. With exactly two usable
+anchors, solve `a, b` directly:
 
 ```
 a = (tb2 − tb1) / (√m2 − √m1)
 b = tb1 − a·√m1
+```
+
+With three or more usable anchors, fit `a, b` by least squares, minimising the
+residuals of `timebin = a·√m + b` across all anchors. In either case, invert the
+fit as:
+
+```
 m/z = ((timebin − b) / a)²
 ```
 
-**Drift caveat:** a global 2-point calibration drifts over a long run; measured
-peak apexes sit ~0.0007·m above the nominal masses. The pipeline corrects this
-with a robust global mass-scale factor (median apex/nominal over all target
-peaks) and then apex-snaps each isolated peak. Per-cycle `MassCal_a/b` exist in
-`AddTraces/DataCollection` but barely differ from the global fit here.
+If `CALdata/Mapping` is absent or unusable, fall back to usable per-cycle
+`CALdata/Spectrum` coefficients. **Drift caveat:** a global Mapping calibration
+drifts over a long run; measured peak apexes sit ~0.0007·m above the nominal masses.
+The pipeline corrects this with a robust global mass-scale factor (median
+apex/nominal over all target peaks) and then apex-snaps each isolated peak. Per-cycle
+`MassCal_a/b` exist in `AddTraces/DataCollection` but barely differ from the global
+fit here.
 
 ## The four quantities
 
