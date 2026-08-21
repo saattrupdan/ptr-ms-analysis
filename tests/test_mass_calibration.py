@@ -101,6 +101,15 @@ class MassCalibrationTest(unittest.TestCase):
         with self._file(mapping=mapping, spectrum=spectrum) as h5:
             self.assertEqual(ptrms.load_mass_cal(h5), (11.0, 3.0))
 
+    def test_grossly_nonlinear_mapping_falls_back_to_spectrum(self):
+        # The anchors are positive, strictly monotonic, and well-conditioned, but
+        # do not describe the stated square-root time-of-flight model.
+        mapping = np.array([[19.0, 500.0], [59.0, 1000.0], [181.0, 2000.0]])
+        spectrum = np.array([[10.0, 2.0], [12.0, 4.0]])
+
+        with self._file(mapping=mapping, spectrum=spectrum) as h5:
+            self.assertEqual(ptrms.load_mass_cal(h5), (11.0, 3.0))
+
     def test_invalid_multi_mapping_row_falls_back_to_spectrum(self):
         mapping = np.array([[19.0, 500.0], [59.0, np.nan], [181.0, 1500.0]])
         spectrum = np.array([[10.0, 2.0], [12.0, 4.0]])

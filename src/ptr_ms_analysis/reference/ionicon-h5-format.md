@@ -52,7 +52,11 @@ mass, both masses and timebins must be strictly increasing. The two-column desig
 must have rank 2 and condition number no greater than `ε⁻¹/²`, which limits
 float64 round-off amplification to roughly the square root of machine epsilon.
 Only then fit `a, b` by least squares, minimising the residuals of
-`timebin = a·√m + b` across all anchors. In either case, invert the fit as:
+`timebin = a·√m + b` across all anchors. For three or more anchors, reconstruct each
+anchor mass with the inverse below and accept the fit only when every reconstructed
+mass has a finite absolute relative error of at most 100 ppm. This is a deliberately
+generous corruption/model-consistency ceiling, not an accuracy claim. In either
+case, invert the fit as:
 
 ```
 m/z = ((timebin − b) / a)²

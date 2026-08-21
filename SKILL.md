@@ -429,7 +429,7 @@ Corrected, 3.1 % Conc, and 3.2 % Conc[µg].
 
 | Column           | Formula                                     | Constants — all read from the .h5                                                 |
 | ---------------- | ------------------------------------------- | --------------------------------------------------------------------------------- |
-| **Raw** [cps]    | Σ intensities over the peak's m/z window    | validated `CALdata/Mapping` anchors (N ≥ 2), or usable per-cycle `CALdata/Spectrum` coefficients if Mapping is absent or unusable |
+| **Raw** [cps]    | Σ intensities over the peak's m/z window    | residual-checked `CALdata/Mapping` anchors (N ≥ 2), or usable per-cycle `CALdata/Spectrum` coefficients if Mapping is absent or unusable |
 | **Corrected**    | Raw / Transmission(m/z)                     | `PTR-Transmission` curve; if absent, unit transmission (Corrected == Raw, flagged)  |
 | **Conc** [ppb]   | Corrected × K / I_primary(t) × (k_anchor/k) | K from `TRACEdata`; configured primary m/z (21.022 by default); k from rate-constant table (`--kinetic`) |
 | **Conc [µg/m³]** | Conc × (mz − proton) / Vₘ                   | Vₘ from drift temperature                                                         |
@@ -439,8 +439,11 @@ Files vary in what they carry. Standard processed files have usable
 Raw→Corrected→Conc). Mapping has shape `(N, 2)` with at least two `(m/z, timebin)`
 anchors: exactly two determine the calibration directly, while three or more require
 finite positive rows, strictly increasing masses and timebins, and a well-conditioned
-least-squares fit of `timebin = a·√m + b`. If Mapping is absent or unusable, the mass
-calibration falls back to usable per-cycle `CALdata/Spectrum` coefficients. Some raw
+least-squares fit of `timebin = a·√m + b`, then reconstructed anchor masses must have
+finite absolute relative errors of at most 100 ppm. This is a deliberately generous
+corruption/model-consistency ceiling, not an accuracy claim. If Mapping is absent or
+unusable, the mass calibration falls back to usable per-cycle `CALdata/Spectrum`
+coefficients. Some raw
 acquisition exports omit both: transmission defaults to unity (so **Corrected == Raw**,
 reported via `transmission_available: false`), and with no pre-computed concentration
 the **Conc columns are NaN** unless you pass `--K`. `inspect`/`analyze` surface these
