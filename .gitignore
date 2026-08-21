@@ -10,3 +10,4 @@ dist/
 *.h5
 review*.html
 results*.csv
+.env
