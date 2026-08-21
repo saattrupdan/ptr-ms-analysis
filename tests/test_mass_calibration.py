@@ -1,0 +1,93 @@
+"""Regression tests for multi-point mass calibration loading."""
+
+import unittest
+
+import h5py
+import numpy as np
+
+from ptr_ms_analysis import ptrms
+
+# In-memory reproduction of the three-anchor calibration used by Data_10_26_33.
+# Keeping these values here avoids depending on the external measurement file.
+DATA_10_26_33_MAPPING = np.array(
+    [
+        [19.022, 5473.484],
+        [59.049, 9575.845],
+        [181.073, 16701.774],
+    ],
+    dtype=np.float64,
+)
+
+
+class MassCalibrationTest(unittest.TestCase):
+    @staticmethod
+    def _file(mapping=None, spectrum=None):
+        h5 = h5py.File("in-memory", "w", driver="core", backing_store=False)
+        if mapping is not None:
+            h5.create_dataset("CALdata/Mapping", data=mapping)
+        if spectrum is not None:
+            h5.create_dataset("CALdata/Spectrum", data=spectrum)
+        return h5
+
+    def test_three_mapping_anchors_fit_with_low_residual(self):
+        with self._file(mapping=DATA_10_26_33_MAPPING) as h5:
+            a, b = ptrms.load_mass_cal(h5)
+
+        masses = DATA_10_26_33_MAPPING[:, 0]
+        timebins = DATA_10_26_33_MAPPING[:, 1]
+        reconstructed = a * np.sqrt(masses) + b
+        residual_ppm = np.abs(reconstructed - timebins) / timebins * 1e6
+
+        self.assertLessEqual(float(residual_ppm.max()), 10.0)
+        self.assertGreater(a, 0.0)
+        self.assertTrue(np.isfinite([a, b]).all())
+
+    def test_two_mapping_anchors_keep_closed_form_calibration(self):
+        mapping = np.array([[19.0, 500.0], [181.0, 1500.0]])
+        expected_a = (1500.0 - 500.0) / (np.sqrt(181.0) - np.sqrt(19.0))
+        expected_b = 500.0 - expected_a * np.sqrt(19.0)
+
+        with self._file(mapping=mapping) as h5:
+            actual_a, actual_b = ptrms.load_mass_cal(h5)
+
+        self.assertEqual(actual_a, expected_a)
+        self.assertEqual(actual_b, expected_b)
+
+    def test_valid_mapping_is_preferred_over_spectrum_fallback(self):
+        spectrum = np.array([[900.0, 1.0], [901.0, 1.0]])
+        with self._file(mapping=DATA_10_26_33_MAPPING, spectrum=spectrum) as h5:
+            a, b = ptrms.load_mass_cal(h5)
+
+        design = np.column_stack((np.sqrt(DATA_10_26_33_MAPPING[:, 0]), np.ones(3)))
+        expected_a, expected_b = np.linalg.lstsq(
+            design, DATA_10_26_33_MAPPING[:, 1], rcond=None
+        )[0]
+        self.assertAlmostEqual(a, expected_a, places=10)
+        self.assertAlmostEqual(b, expected_b, places=10)
+        self.assertNotEqual((a, b), (900.5, 1.0))
+
+    def test_malformed_mapping_falls_back_to_spectrum(self):
+        mapping = np.ones((3, 3))
+        spectrum = np.array([[10.0, 2.0], [12.0, 4.0]])
+
+        with self._file(mapping=mapping, spectrum=spectrum) as h5:
+            self.assertEqual(ptrms.load_mass_cal(h5), (11.0, 3.0))
+
+    def test_degenerate_mapping_falls_back_to_spectrum(self):
+        mapping = np.array([[19.0, 500.0], [19.0, 600.0], [19.0, 700.0]])
+        spectrum = np.array([[10.0, 2.0], [12.0, 4.0]])
+
+        with self._file(mapping=mapping, spectrum=spectrum) as h5:
+            self.assertEqual(ptrms.load_mass_cal(h5), (11.0, 3.0))
+
+    def test_unusable_calibration_raises_clear_error(self):
+        mapping = np.array([[19.0, 500.0], [19.0, 600.0]])
+        spectrum = np.array([[0.0, 2.0], [np.nan, 4.0]])
+
+        with self._file(mapping=mapping, spectrum=spectrum) as h5:
+            with self.assertRaisesRegex(ValueError, "no mass calibration"):
+                ptrms.load_mass_cal(h5)
+
+
+if __name__ == "__main__":
+    unittest.main()

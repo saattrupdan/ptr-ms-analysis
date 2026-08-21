@@ -89,24 +89,49 @@ def resolve_k(peaks, rate_table, mz_tol=0.03):
 
 # ---------- calibration read from file ----------
 def load_mass_cal(f):
-    """Mass calibration coefficients for timebin = a*sqrt(m) + b.
+    """Mass calibration coefficients for ``timebin = a*sqrt(m) + b``.
 
-    Preferred source is CALdata/Mapping (two (m, timebin) reference points), used
-    by the validated standard-file path. Raw-acquisition exports omit Mapping but
-    store the per-cycle [a, b] coefficients directly in CALdata/Spectrum; fall
-    back to their median across cycles (robust to drift and zero/blank rows)."""
+    ``CALdata/Mapping`` is preferred when it contains at least two usable
+    anchors.  Two anchors retain the original closed-form calculation; additional
+    anchors are fit by least squares.  Raw-acquisition exports omit Mapping but
+    store per-cycle ``[a, b]`` coefficients directly in ``CALdata/Spectrum``;
+    fall back to their median across cycles (robust to drift and zero/blank rows).
+    """
     if "CALdata/Mapping" in f:
-        (m1, tb1), (m2, tb2) = f["CALdata/Mapping"][:]
-        a = (tb2 - tb1) / (np.sqrt(m2) - np.sqrt(m1))
-        b = tb1 - a * np.sqrt(m1)
-        return float(a), float(b)
+        try:
+            mapping = np.asarray(f["CALdata/Mapping"][:], dtype=np.float64)
+        except (TypeError, ValueError, OSError):
+            mapping = None
+
+        if mapping is not None and mapping.ndim == 2 and mapping.shape[1] == 2:
+            valid = np.isfinite(mapping).all(axis=1) & (mapping[:, 0] > 0)
+            anchors = mapping[valid]
+            if anchors.shape[0] >= 2 and np.ptp(anchors[:, 0]) > 0:
+                masses = anchors[:, 0]
+                timebins = anchors[:, 1]
+                sqrt_masses = np.sqrt(masses, dtype=np.float64)
+                if anchors.shape[0] == 2:
+                    # Keep the established two-anchor path bit-for-bit in spirit;
+                    # the validation above prevents zero/negative/non-finite fits.
+                    a = (timebins[1] - timebins[0]) / (sqrt_masses[1] - sqrt_masses[0])
+                    b = timebins[0] - a * sqrt_masses[0]
+                else:
+                    design = np.column_stack((sqrt_masses, np.ones_like(sqrt_masses)))
+                    a, b = np.linalg.lstsq(design, timebins, rcond=None)[0]
+                if np.isfinite(a) and np.isfinite(b) and a > 0:
+                    return float(a), float(b)
+
     if "CALdata/Spectrum" in f:
-        sp = np.asarray(f["CALdata/Spectrum"][:], dtype=np.float64)
-        if sp.ndim == 2 and sp.shape[1] == 2 and sp.shape[0] > 0:
+        try:
+            sp = np.asarray(f["CALdata/Spectrum"][:], dtype=np.float64)
+        except (TypeError, ValueError, OSError):
+            sp = None
+        if sp is not None and sp.ndim == 2 and sp.shape[1] == 2 and sp.shape[0] > 0:
             good = np.isfinite(sp).all(axis=1) & (sp[:, 0] > 0)
             if good.any():
                 a, b = np.median(sp[good], axis=0)
-                return float(a), float(b)
+                if np.isfinite(a) and np.isfinite(b) and a > 0:
+                    return float(a), float(b)
     raise ValueError(
         "no mass calibration in file (neither CALdata/Mapping nor a usable "
         "CALdata/Spectrum)"
