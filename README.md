@@ -12,30 +12,27 @@ CLI. The commands below describe the complete package interface.
 
 ## Install / run
 
-It's a proper package (`pyproject.toml`) that ships its own dependencies (h5py + numpy)
-and reference data. Install it **once** and `ptr` is on PATH everywhere. Recommended via
-`pipx` (isolated environment for the CLI and its dependencies):
+It's a proper package that ships its own dependencies (h5py + numpy) and reference
+data. Install it **once** and `ptr` is on PATH everywhere. Recommended via `pipx`
+(isolated environment for the CLI and its dependencies):
 
 ```bash
-pipx install --editable .     # from this directory -> `ptr` on PATH
+pipx install ptr-ms-analysis
 ptr inspect FILE.h5
 ```
-
-Use `--editable` so `ptr` runs the checkout's live code — no reinstall when it's updated.
 
 **If `pipx` isn't installed yet**, install it first, then re-run the command above:
 
 ```bash
-brew install pipx && pipx ensurepath                          # macOS (Homebrew)
-python3 -m pip install --user pipx && python3 -m pipx ensurepath   # Linux / macOS (no brew)
-py -m pip install --user pipx;  py -m pipx ensurepath         # Windows (PowerShell)
+brew install pipx && pipx ensurepath                              # macOS (Homebrew)
+python3 -m pip install --user pipx && python3 -m pipx ensurepath  # Linux / macOS (no brew)
+py -m pip install --user pipx; py -m pipx ensurepath              # Windows (PowerShell)
 ```
 
 `pipx ensurepath` puts pipx's bin dir on PATH — open a new shell afterwards. Alternatives
-that skip pipx entirely: `uv tool install --editable .`, or `pip install --editable .` into
-a venv. Works identically on macOS, Linux, and Windows (pipx makes a real `ptr.exe`).
-Version 0.1.0 is not yet published on PyPI, so install it from a source checkout as
-shown above. Requires Python ≥ 3.9.
+that skip pipx entirely are `uv tool install ptr-ms-analysis` and
+`python3 -m pip install ptr-ms-analysis` in a virtual environment. Works identically on
+macOS, Linux, and Windows (pipx makes a real `ptr.exe`). Requires Python ≥ 3.9.
 
 ## Commands (all discovery output is JSON)
 
@@ -99,21 +96,20 @@ Add `--pretty` to any command for indented JSON. `analyze` peak/segment sources:
 (zero-curation — auto-labels confident IDs, drops noise artifacts, consolidates
 backgrounds). `--K` / `--molar-volume`
 override the file-derived calibration to match a specific Viewer project. `--kinetic`
-applies per-compound rate-constant (k) sensitivities (from
-`src/ptr_ms_analysis/reference/rate_constants.json`, 218 compounds from the PTR Library) for physically resolved absolute
-concentrations. Low-proton-affinity compounds (HCN, formaldehyde, formic acid…) are
+applies per-compound rate-constant (k) sensitivities from the bundled 218-compound
+PTR Library table for physically resolved absolute concentrations. Low-proton-affinity
+compounds (HCN, formaldehyde, formic acid…) are
 auto-flagged: `analyze` always reports a humidity diagnostic for them, and
 `--humidity-correct` (with a calibrated `--humidity-p`) normalises the humidity swing.
 
 ## Reference data attribution
 
 The bundled `ptrlibrary.csv` is the PTR Library compiled by Demetrios Pagonis,
-Kanako Sekimoto, and Joost de Gouw. It is included with its upstream attribution
-and publication references; individual records cite their own sources. The upstream
-spreadsheet does not state a separate software licence, so the MIT licence for this
-package should not be read as relicensing the CSV or its cited data. Check the PTR
-Library source and cited papers before redistributing the reference data separately.
-The derived `rate_constants.json` is generated from that CSV by the bundled generator.
+Kanako Sekimoto, and Joost de Gouw. It is redistributed with permission, upstream
+attribution, publication references, and the source citations in individual records.
+The MIT licence for this package does not relicense the CSV or its cited data. The
+derived `rate_constants.json` is generated from that CSV by the bundled generator and
+carries the same attribution.
 
 ## How it works
 
@@ -121,22 +117,19 @@ Everything instrument-specific (mass calibration, transmission, concentration co
 K, molar volume from drift temperature) is read from the `.h5`. Isolated peaks use an
 apex-centred resolution window; overlapping peaks are separated by linear Gaussian
 deconvolution. Time segments are found by log-space plateau detection on a composite VOC
-signal. Compound identification (`src/ptr_ms_analysis/formula_id.py`) enumerates candidate molecular
-formulas offline (no external database) and ranks them by exact-mass error, the measured
-vs predicted ¹³C(M+1)/heteroatom(M+2, e.g. S/Cl) isotope pattern, and plausibility
-(integer DBE, nitrogen rule, element ratios) — so near-isobars are told apart by
-composition, not "nearest mass". Candidate rankings cannot determine structural isomers;
-names and isomer labels come from the bundled PTR Library mapping. Proton-transfer rate
-constants come from `src/ptr_ms_analysis/reference/rate_constants.json` when the formula is known — 218 compounds
-compiled from the **PTR Library** (Pagonis, Sekimoto & de Gouw, *J. Am. Soc. Mass Spectrom.*
-2019, doi.org/10.1007/s13361-019-02209-3; tinyurl.com/PTRLibrary), one entry per
-neutral formula with measured k where available (else Su-Chesnavich capture-theory
-k, flagged `k_estimated`), plus proton affinity, isomer names, and fragmentation
-flags. Regenerate from `src/ptr_ms_analysis/reference/ptrlibrary.csv` with
-`uv run python -m ptr_ms_analysis.gen_rate_constants`.
-Details:
-`src/ptr_ms_analysis/reference/ionicon-h5-format.md`; compound assignment help: `src/ptr_ms_analysis/reference/ptr-ms-chemistry.md`;
-HCN/humidity calibration: `src/ptr_ms_analysis/reference/hcn-calibration.md`.
+signal. Compound identification enumerates candidate molecular formulas offline (no
+external database) and ranks them by exact-mass error, the measured vs predicted
+¹³C(M+1)/heteroatom(M+2, e.g. S/Cl) isotope pattern, and plausibility (integer DBE,
+nitrogen rule, element ratios) — so near-isobars are told apart by composition, not
+"nearest mass". Candidate rankings cannot determine structural isomers; names and
+isomer labels come from the bundled PTR Library mapping. Proton-transfer rate constants
+come from the bundled 218-compound table when the formula is known. The entries are
+compiled from the **PTR Library** (Pagonis, Sekimoto & de Gouw, *J. Am. Soc. Mass
+Spectrom.* 2019, doi.org/10.1007/s13361-019-02209-3; tinyurl.com/PTRLibrary), with
+measured k where available (else Su-Chesnavich capture-theory k, flagged
+`k_estimated`), plus proton affinity, isomer names, and fragmentation flags. Use
+`ptr rates` to browse the bundled values. The installed package also includes the
+ionisation, compound-assignment, and HCN/humidity reference documents.
 
 ## Accuracy
 

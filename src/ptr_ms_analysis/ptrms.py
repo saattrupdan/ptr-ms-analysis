@@ -81,7 +81,7 @@ def resolve_k(peaks, rate_table, mz_tol=0.03):
             kest = bool(mz_matches[0].get("k_estimated", False))
         elif len(mz_matches) > 1:
             src = "ambiguous:" + ",".join(c["name"] for c in mz_matches)
-        out[mz] = dict(k=k, source=src, flags=flags, k_estimated=kest)
+        out[mz] = {"k": k, "source": src, "flags": flags, "k_estimated": kest}
     return out
 
 # ---------- calibration read from file ----------
@@ -118,7 +118,7 @@ def has_transmission(f):
     try:
         mf = f["PTR-Transmission/Masses_Factors"][:]
         return bool((mf[0, 0, :] > 0).any())
-    except Exception:
+    except (IndexError, KeyError, OSError, TypeError, ValueError):
         return False
 
 def load_transmission(f):
@@ -181,7 +181,7 @@ def extract_primary(f, primary_mz=21.022, R=1200.0, block=400):
     try:
         (traces, _) = extract_traces(f, [primary_mz], R=R, block=block)
         return traces[primary_mz][0]
-    except Exception:
+    except (IndexError, KeyError, OSError, TypeError, ValueError):
         return None
 
 
@@ -202,7 +202,7 @@ def water_cluster_ratio(f, cluster_mz=37.028, primary_mz=21.022, R=1200.0):
                 return np.asarray(f["TRACEdata/TraceRaw"][:, j], dtype=np.float64)
         try:
             return extract_traces(f, [mz], R=R)[0][mz][0]
-        except Exception:
+        except (IndexError, KeyError, OSError, TypeError, ValueError):
             return None
     c = get(cluster_mz)
     p = get(primary_mz)
@@ -266,7 +266,7 @@ def derive_molar_volume_info(f):
             raise ValueError("drift temperature is not finite")
         return (22.414 * (T_C + 273.15) / 273.15,
                 "file drift temperature")
-    except Exception:
+    except (IndexError, KeyError, OSError, TypeError, ValueError):
         return (24.465, "25 °C fallback (drift metadata unavailable)")
 
 
@@ -679,14 +679,14 @@ def merge_adjacent_high_segments(segments, max_gap_cycles=60):
 def spec_duration_s(f):
     try:
         return float(f.attrs["Single Spec Duration (ms)"][0]) / 1000.0
-    except Exception:
+    except (IndexError, KeyError, OSError, TypeError, ValueError):
         return 1.0
 
 
 # ---------- quantification ----------
 def stats(x):
-    return dict(Max=float(x.max()), Min=float(x.min()),
-                Average=float(x.mean()), Deviation=float(x.std(ddof=1)))
+    return {"Max": float(x.max()), "Min": float(x.min()),
+                "Average": float(x.mean()), "Deviation": float(x.std(ddof=1))}
 
 def quantify(traces, f, ranges, K=None, primary=None, primary_mz=21.022,
              molar_volume=None, R_used=1200.0, k_map=None,
@@ -757,16 +757,16 @@ def quantify(traces, f, ranges, K=None, primary=None, primary_mz=21.022,
             ug = con
         for label, (lo, hi) in ranges.items():
             s = slice(lo - 1, hi)  # 1-based inclusive cycle window
-            rows.append(dict(mass=m, apex=apex_m, range=label, transmission=T,
-                             raw=stats(raw[s]), cor=stats(cor[s]),
-                             con=stats(con[s]), ug=stats(ug[s])))
-    return rows, dict(K=K, molar_volume=molar_volume, R=R_used,
-                      primary_mz=primary_mz, kinetic=k_map is not None,
-                      k_anchor=k_anchor, concentration_available=norm is not None,
-                      transmission_available=has_transmission(f),
-                      humidity_corrected=humid_applied, humidity_ref=humidity_ref,
-                      humidity_p=humidity_p if humid_applied else None,
-                      molar_volume_source=molar_volume_source)
+            rows.append({"mass": m, "apex": apex_m, "range": label, "transmission": T,
+                             "raw": stats(raw[s]), "cor": stats(cor[s]),
+                             "con": stats(con[s]), "ug": stats(ug[s])})
+    return rows, {"K": K, "molar_volume": molar_volume, "R": R_used,
+                      "primary_mz": primary_mz, "kinetic": k_map is not None,
+                      "k_anchor": k_anchor, "concentration_available": norm is not None,
+                      "transmission_available": has_transmission(f),
+                      "humidity_corrected": humid_applied, "humidity_ref": humidity_ref,
+                      "humidity_p": humidity_p if humid_applied else None,
+                      "molar_volume_source": molar_volume_source}
 
 
 def calibrate_K(f, traces, ref_rows, ranges, primary=None, primary_mz=21.022,

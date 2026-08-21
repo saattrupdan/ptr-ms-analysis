@@ -73,9 +73,9 @@ class PackageSmokeTest(unittest.TestCase):
 
     def test_help_command_needs_no_hdf5_fixture(self):
         output = StringIO()
-        with mock.patch.object(sys, "argv", ["ptr", "--help"]), redirect_stdout(output):
-            with self.assertRaises(SystemExit) as raised:
-                analyze.main()
+        with (mock.patch.object(sys, "argv", ["ptr", "--help"]),
+              redirect_stdout(output), self.assertRaises(SystemExit) as raised):
+            analyze.main()
 
         self.assertEqual(raised.exception.code, 0)
         self.assertIn("inspect", output.getvalue())

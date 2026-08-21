@@ -19,14 +19,14 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, ClassVar
 
 from ptr_ms_analysis import viz
 
 SESSION = "ptr-ms-viz-regression"
 
 
-def _candidate(formula: str, name: str, probability: float) -> Dict[str, Any]:
+def _candidate(formula: str, name: str, probability: float) -> dict[str, Any]:
     """Return the smallest candidate record accepted by the review UI."""
     return {
         "formula": formula,
@@ -44,7 +44,7 @@ def _candidate(formula: str, name: str, probability: float) -> Dict[str, Any]:
     }
 
 
-def _synthetic_data() -> Dict[str, Any]:
+def _synthetic_data() -> dict[str, Any]:
     """Build a stable, standalone review payload without an HDF5 fixture."""
     return {
         "meta": {
@@ -233,12 +233,12 @@ class _ReviewHandler(http.server.BaseHTTPRequestHandler):
     html = ""
     spectrum = b"[]"
     interval_spectrum = b"[]"
-    posts = []
+    posts: ClassVar[list[tuple[str, dict[str, Any]]]] = []
 
     def log_message(self, *_args: Any) -> None:
         pass
 
-    def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
+    def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
         body = json.loads(self.rfile.read(length) or b"{}")
         self.posts.append((self.path, body))
@@ -249,7 +249,7 @@ class _ReviewHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+    def do_GET(self) -> None:
         if self.path in ("/", "/index.html"):
             body, content_type = self.html.encode("utf-8"), "text/html; charset=utf-8"
         elif self.path.startswith("/spectrum"):
@@ -264,7 +264,7 @@ class _ReviewHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def _browser(session: str, *args: str, stdin: Optional[str] = None) -> str:
+def _browser(session: str, *args: str, stdin: str | None = None) -> str:
     """Run one agent-browser command and return its stdout."""
     completed = subprocess.run(
         ["agent-browser", "--allow-file-access", "--session", session, *args],
@@ -275,11 +275,11 @@ def _browser(session: str, *args: str, stdin: Optional[str] = None) -> str:
     )
     if completed.returncode:
         detail = (completed.stderr or completed.stdout).strip()
-        raise AssertionError("agent-browser %s failed: %s" % (" ".join(args), detail))
+        raise AssertionError("agent-browser {} failed: {}".format(" ".join(args), detail))
     return completed.stdout.strip()
 
 
-def _eval(session: str, expression: str) -> Dict[str, Any]:
+def _eval(session: str, expression: str) -> dict[str, Any]:
     """Evaluate JSON.stringify(expression) in the actual browser page."""
     raw = _browser(
         session, "eval", "--stdin", stdin="JSON.stringify(" + expression + ")"
@@ -288,7 +288,7 @@ def _eval(session: str, expression: str) -> Dict[str, Any]:
     if isinstance(value, str):
         value = json.loads(value)
     if not isinstance(value, dict):
-        raise AssertionError("browser expression did not return an object")
+        raise TypeError("browser expression did not return an object")
     return value
 
 
@@ -573,11 +573,11 @@ def main() -> int:
     server.daemon_threads = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    session = "%s-%s" % (SESSION, threading.get_ident())
+    session = f"{SESSION}-{threading.get_ident()}"
 
     try:
         port = server.server_address[1]
-        _browser(session, "open", "http://127.0.0.1:%d/" % port)
+        _browser(session, "open", f"http://127.0.0.1:{port}/")
         # The first-visit tour is useful to people but would make this regression
         # nondeterministic; mark it complete before reloading the generated page.
         _browser(session, "eval", "localStorage.setItem('ptrms-onboarded', '1')")
@@ -598,7 +598,7 @@ def main() -> int:
             "humidChecked:document.querySelector('#humid').checked})",
         )
         _assert("R integration windows" in initial_methods["text"],
-                "Methods omits R: %r" % initial_methods["text"][:200])
+                "Methods omits R: {!r}".format(initial_methods["text"][:200]))
         _assert("Rphys" in initial_methods["text"], "Methods omits physical resolution")
         _assert("Kinetic correction: on" in initial_methods["text"], "kinetic state is stale")
         _assert("curated config" in initial_methods["text"], "configured source is missing")
@@ -879,5 +879,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except (AssertionError, json.JSONDecodeError) as exc:
-        print("viz browser identification regression: FAIL: %s" % exc, file=sys.stderr)
+        print(f"viz browser identification regression: FAIL: {exc}", file=sys.stderr)
         raise SystemExit(1)

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import http.server
 import json
+import logging
 import os
 import socketserver
 import subprocess
@@ -35,6 +36,8 @@ import webbrowser
 import numpy as np
 
 from . import formula_id, ptrms
+
+logger = logging.getLogger(__name__)
 
 
 def _normalise_checklist(items):
@@ -103,8 +106,8 @@ def build_viz_data(f, peaks_cfg, ranges_cfg, R=1200.0, R_phys=2400.0,
     for r in (ranges_cfg or []):
         unit = r.get("unit", "cycle")
         if unit == "second":
-            lo = max(1, int(round(r["start"] / dur)) + 1)
-            hi = min(ncyc, int(round(r["end"] / dur)) + 1)
+            lo = max(1, round(r["start"] / dur) + 1)
+            hi = min(ncyc, round(r["end"] / dur) + 1)
         else:
             lo, hi = max(1, int(r["start"])), min(ncyc, int(r["end"]))
         cls = {"high": "sample", "low": "background"}.get(r.get("class"), r.get("class"))
@@ -259,7 +262,7 @@ def build_viz_data(f, peaks_cfg, ranges_cfg, R=1200.0, R_phys=2400.0,
         },
         # full average spectrum (index = timebin; m/z = tb2m(index)); used for the
         # pannable spectrum plot and to rescale Raw when a peak is re-centred.
-        "spectrum": [int(round(x)) for x in avg],
+        "spectrum": [round(x) for x in avg],
         "peaks": peaks,
         "ranges": ranges,
         "checklist": _normalise_checklist(checklist),
@@ -304,7 +307,8 @@ def serve(html, config_path, port=8765, timeout=1800, open_browser=True,
         try:
             state["summary"] = run_analysis(cfg) if run_analysis else None
             state["status"] = "done"
-        except Exception as e:               # surface to the page, don't crash the server
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as e:
+            # Surface expected analysis failures to the page instead of crashing the server.
             state["error"] = str(e)
             state["status"] = "error"
         finally:
@@ -342,7 +346,7 @@ def serve(html, config_path, port=8765, timeout=1800, open_browser=True,
                     lo = int(q.get("lo", ["1"])[0]); hi = int(q.get("hi", ["1"])[0])
                     spec = spectrum_fn(lo, hi)
                     self._send(200, json.dumps(spec).encode("utf-8"), "application/json")
-                except Exception as e:
+                except (KeyError, OSError, RuntimeError, TypeError, ValueError) as e:
                     self._send(500, str(e).encode("utf-8"))
             else:
                 self._send(404)
@@ -352,7 +356,7 @@ def serve(html, config_path, port=8765, timeout=1800, open_browser=True,
             raw = self.rfile.read(n) if n else b"{}"
             try:
                 cfg = json.loads(raw.decode("utf-8"))
-            except Exception:
+            except (UnicodeError, json.JSONDecodeError):
                 cfg = None
             if self.path == "/save":
                 write_config(cfg)
@@ -381,7 +385,7 @@ def serve(html, config_path, port=8765, timeout=1800, open_browser=True,
                         else:
                             subprocess.Popen(["xdg-open", out])
                         ok = True
-                    except Exception:
+                    except (OSError, subprocess.SubprocessError):
                         ok = False
                 self._json({"ok": ok})
                 closed.set()                     # user is done — let the server shut down
@@ -410,8 +414,8 @@ def serve(html, config_path, port=8765, timeout=1800, open_browser=True,
     if open_browser:
         try:
             webbrowser.open(url)
-        except Exception:
-            pass
+        except (OSError, webbrowser.Error) as exc:
+            logger.debug("Could not open review browser: %s", exc)
     finished = done.wait(timeout)
     if finished:
         analysis_done.wait()      # let the background analysis complete
