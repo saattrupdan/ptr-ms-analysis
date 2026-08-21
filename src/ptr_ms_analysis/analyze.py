@@ -41,6 +41,7 @@ import csv
 import json
 import os
 import sys
+from contextlib import ExitStack
 
 import h5py
 import numpy as np
@@ -187,7 +188,7 @@ def detect_peaks(f, min_rel_height=1e-3, max_peaks=300, mz_min=15.0, mz_max=None
     def prominence(i):
         # half-window ≈ 1 FWHM in timebins: d(bin)/d(mz)=a/(2√mz), FWHM_mz=mz/R_phys
         m = ptrms.tb_to_m(i, a, b)
-        w = max(2, int(round(a * np.sqrt(m) / (2 * R_phys))))
+        w = max(2, round(a * np.sqrt(m) / (2 * R_phys)))
         lo, hiw = max(0, i - w), min(len(avg), i + w + 1)
         base = max(float(avg[lo:i + 1].min()), float(avg[i:hiw].min()))
         return float(avg[i]) - base
@@ -218,8 +219,8 @@ def assess_signal(f, avg=None, a=None, b=None):
     avg = np.asarray(avg, dtype=np.float64)
     finite = avg[np.isfinite(avg)]
     if finite.size == 0:
-        return dict(signal_present=False, primary_snr=0.0,
-                    reason="average spectrum is entirely non-finite (corrupt file)")
+        return {"signal_present": False, "primary_snr": 0.0,
+                    "reason": "average spectrum is entirely non-finite (corrupt file)"}
     med = float(np.median(finite))
     mad = float(np.median(np.abs(finite - med)))
     sigma = 1.4826 * mad if mad > 0 else (float(finite.std()) or 1e-9)
@@ -236,11 +237,11 @@ def assess_signal(f, avg=None, a=None, b=None):
     present = primary_snr >= 20.0
     reason = "" if present else (
         "no reagent (primary) ion detectable above the spectral noise "
-        "(primary-ion S/N %.1f < 20) — this file appears to be a blank / no-beam / "
+        f"(primary-ion S/N {primary_snr:.1f} < 20) — this file appears to be a blank / no-beam / "
         "aborted acquisition, not a measurement, so no analyte peaks can be "
-        "extracted from it." % primary_snr)
-    return dict(signal_present=present, primary_snr=round(primary_snr, 1),
-                reason=reason)
+        "extracted from it.")
+    return {"signal_present": present, "primary_snr": round(primary_snr, 1),
+                "reason": reason}
 
 
 # ----------------------------- commands -----------------------------
@@ -253,8 +254,8 @@ def cmd_inspect(args):
         created = ""
         try:
             created = f.attrs["FileCreatedTimeSTR_LOCAL"][0].decode("latin-1")
-        except Exception:
-            pass
+        except (AttributeError, IndexError, KeyError, OSError, TypeError):
+            created = ""
         _emit({
             "file": args.h5,
             "instrument": _attr(f, "InstrumentType"),
@@ -280,7 +281,7 @@ def _attr(f, key):
         v = f.attrs[key]
         v = v[0] if hasattr(v, "__len__") and not isinstance(v, (bytes, str)) else v
         return v.decode("latin-1") if isinstance(v, bytes) else v
-    except Exception:
+    except (AttributeError, IndexError, KeyError, OSError, TypeError, ValueError):
         return None
 
 
@@ -389,8 +390,8 @@ def annotate_peaks(peaks, avgspec=None, a=None, b=None, R=1200.0,
         # height, so a genuinely isolated small peak (which rises from ~0) is kept.
         prom = p.get("prominence")
         if prom is not None and prom < 10.0 and prom < 0.2 * max(h, 1):
-            flags.append("low prominence (%.1f cps above local baseline) — likely a "
-                         "noise ripple / shoulder of a nearby taller peak" % prom)
+            flags.append(f"low prominence ({prom:.1f} cps above local baseline) — likely a "
+                         "noise ripple / shoulder of a nearby taller peak")
         # H3O+ reagent saturation skirt: the primary ion at m/z ~19 saturates the
         # detector (the run normally normalises on its configured primary
         # isotope), and its
@@ -432,7 +433,7 @@ def annotate_peaks(peaks, avgspec=None, a=None, b=None, R=1200.0,
             e["suggested_label"] = top["formula"]
             e["suggested_formula"] = top["formula"]
         else:
-            e["suggested_label"] = "unknown m/z %.3f" % mz
+            e["suggested_label"] = f"unknown m/z {mz:.3f}"
         out.append(e)
     return drift, out
 
@@ -541,17 +542,17 @@ def cmd_peaks(args):
                 "neutral_mass = mz − proton. Pass `--full` for every candidate + the "
                 "isotope arrays.")
         out_peaks = [_compact_peak(p) for p in peaks]
-    note += (" This list is ALREADY cleaned: %d instrument-noise peaks (ringing "
+    note += (f" This list is ALREADY cleaned: {n_noise} instrument-noise peaks (ringing "
              "combs, low-prominence ripples, reagent saturation-region skirt) were "
              "dropped — pass --include-artifacts to see them. Any peak here is safe "
-             "to quantify." % n_noise) if (n_noise and not include_art) else ""
+             "to quantify.") if (n_noise and not include_art) else ""
     if dup_pairs:
-        note += (" WARNING: %d pair(s) of peaks have integration windows that "
-                 "almost coincide (>60%% overlap) — e.g. %s. These double-count the "
-                 "same signal; keep only one m/z from each pair in your config." % (
-                     len(dup_pairs), ", ".join(
-                         "m/z %.4f≈%.4f" % (x["mz"], y["mz"])
-                         for x, y, _ in dup_pairs[:4])))
+        examples = ", ".join(
+            f"m/z {x['mz']:.4f}≈{y['mz']:.4f}" for x, y, _ in dup_pairs[:4])
+        note += (f" WARNING: {len(dup_pairs)} pair(s) of peaks have integration windows "
+                 "that almost coincide (>60% overlap) — e.g. "
+                 f"{examples}. These double-count the same signal; keep only one m/z "
+                 "from each pair in your config.")
     _emit({"n_peaks": len(peaks), "n_noise_dropped": (0 if include_art else n_noise),
            "mass_drift": round(drift, 6),
            "n_ambiguous": n_amb, "n_overlapping": n_ovl,
@@ -678,7 +679,8 @@ def _load_ranges(args, f):
     if args.ranges_json:
         return json.loads(args.ranges_json)
     if args.config:
-        cfg = json.load(open(args.config, encoding="utf-8"))
+        with open(args.config, encoding="utf-8") as fh:
+            cfg = json.load(fh)
         if cfg.get("ranges"):
             return cfg["ranges"]
     if getattr(args, "auto_segments", False):
@@ -710,8 +712,9 @@ def _load_checklist(args):
     if not path or not os.path.exists(path):
         return []
     try:
-        cfg = json.load(open(path, encoding="utf-8"))
-    except Exception:
+        with open(path, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    except (OSError, UnicodeError, json.JSONDecodeError):
         return []
     cl = cfg.get("checklist")
     if cl is None and isinstance(cfg.get("review"), dict):
@@ -727,8 +730,8 @@ def _resolve_ranges(f, ranges_cfg):
     out = {}
     for r in ranges_cfg:
         if r.get("unit", "cycle") == "second":
-            lo = max(1, int(round(r["start"] / dur)) + 1)
-            hi = min(ncyc, int(round(r["end"] / dur)) + 1)
+            lo = max(1, round(r["start"] / dur) + 1)
+            hi = min(ncyc, round(r["end"] / dur) + 1)
         else:
             lo, hi = max(1, int(r["start"])), min(ncyc, int(r["end"]))
         out[r["label"]] = (lo, hi)
@@ -1003,7 +1006,11 @@ def cmd_viz(args):
                                              timeout=args.timeout,
                                              open_browser=not args.no_open,
                                              run_analysis=run, spectrum_fn=spec_fn)
-        cfg = final if final is not None else json.load(open(cfg_path, encoding="utf-8"))
+        if final is not None:
+            cfg = final
+        else:
+            with open(cfg_path, encoding="utf-8") as fh:
+                cfg = json.load(fh)
         if summary is None:
             summary = run(cfg)
         summary.update({
@@ -1103,28 +1110,29 @@ def _write_csv(path, src, rows, labels, sep, ranges=None, include_cycle_rows=Fal
         s = f"{v:.6f}"
         return s.replace(".", ",") if sep == ";" else s
 
-    fh = sys.stdout if path == "-" else open(path, "w", newline="", encoding="utf-8-sig")
-    w = csv.writer(fh, delimiter=sep)
-    w.writerow(header)
-    for r in rows:
-        m = r["mass"]
-        lbl = labels.get(m, "")
-        var = f"m{m:.3f}".replace(".", ",") + (f" ({lbl})" if lbl else "")
-        row = [src, var, r["range"]]
-        for q in ("raw", "cor", "con", "ug"):
-            s = r[q]
-            row += [fmt(s["Max"]), fmt(s["Min"]), fmt(s["Average"]), fmt(s["Deviation"])]
-        w.writerow(row)
-    if include_cycle_rows:
-        for label, (lo, hi) in (ranges or {}).items():
-            cycles = np.arange(lo, hi + 1, dtype=float)
-            deviation = float(np.std(cycles, ddof=1)) if cycles.size > 1 else 0.0
-            w.writerow([
-                src, "Cycle", label, str(hi), str(lo), fmt(float(cycles.mean())),
-                fmt(deviation), *("" for _ in range(12)),
-            ])
-    if fh is not sys.stdout:
-        fh.close()
+    with ExitStack() as stack:
+        fh = (sys.stdout if path == "-" else
+              stack.enter_context(open(path, "w", newline="", encoding="utf-8-sig")))
+        w = csv.writer(fh, delimiter=sep)
+        w.writerow(header)
+        for r in rows:
+            m = r["mass"]
+            lbl = labels.get(m, "")
+            var = f"m{m:.3f}".replace(".", ",") + (f" ({lbl})" if lbl else "")
+            row = [src, var, r["range"]]
+            for q in ("raw", "cor", "con", "ug"):
+                s = r[q]
+                row += [fmt(s["Max"]), fmt(s["Min"]), fmt(s["Average"]),
+                        fmt(s["Deviation"])]
+            w.writerow(row)
+        if include_cycle_rows:
+            for label, (lo, hi) in (ranges or {}).items():
+                cycles = np.arange(lo, hi + 1, dtype=float)
+                deviation = float(np.std(cycles, ddof=1)) if cycles.size > 1 else 0.0
+                w.writerow([
+                    src, "Cycle", label, str(hi), str(lo), fmt(float(cycles.mean())),
+                    fmt(deviation), *("" for _ in range(12)),
+                ])
 
 
 def interval_spectrum(h5_path, lo, hi, block=512):
@@ -1144,7 +1152,7 @@ def interval_spectrum(h5_path, lo, hi, block=512):
             acc += np.asarray(inten[i:j, :], dtype=np.float64).sum(axis=0)
             n += (j - i)
         avg = acc / max(1, n)
-    return [int(round(x)) for x in avg]
+    return [round(x) for x in avg]
 
 
 def analyze_config_to_csv(h5_path, config, out, sep=";", include_cycle_rows=True):
@@ -1233,8 +1241,8 @@ def _parse_viewer_csv(path):
                 mz = round(float(mstr), 3)
             except ValueError:
                 continue
-            out[(mz, row[2].strip())] = dict(
-                raw=num(row[5]), cor=num(row[9]), con=num(row[13]), ug=num(row[17]))
+            out[(mz, row[2].strip())] = {
+                "raw": num(row[5]), "cor": num(row[9]), "con": num(row[13]), "ug": num(row[17])}
     return out
 
 
@@ -1247,10 +1255,10 @@ def cmd_compare(args):
             continue
         n += 1
         mm = mine[key]
-        for q in errs:
+        for q, values in errs.items():
             if rr[q] and np.isfinite(rr[q]) and np.isfinite(mm[q]):
                 e = abs(100 * (mm[q] - rr[q]) / rr[q])
-                errs[q].append(e)
+                values.append(e)
                 if q == "raw":
                     per_mass.setdefault(key[0], []).append(e)
     if n == 0:

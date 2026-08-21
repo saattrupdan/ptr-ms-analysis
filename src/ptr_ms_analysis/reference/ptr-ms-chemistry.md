@@ -71,9 +71,9 @@ compound; the `--kinetic` mode instead scales each compound by its own k, which 
 physically more accurate (a compound with k=4 vs the assumed k=2 is otherwise
 reported at ~2× its true concentration).
 
-A rate-constant database ships as `reference/rate_constants.json` (71 compounds,
-k in 1e-9 cm³/s, from Zhao & Zhang 2004; Cappellin 2012; Sekimoto 2017; de Gouw &
-Warneke 2007). Query it with `analyze.py rates <name|formula|mz>`. Values carry
+The package ships a rate-constant database as `rate_constants.json` (218 compounds,
+k in 1e-9 cm³/s, from the PTR Library and its cited literature). Query it with
+`ptr rates <name|formula|mz>`. Values carry
 ~20–50 % uncertainty and set *relative* sensitivities — they refine, but do not
 replace, calibration with real standards.
 

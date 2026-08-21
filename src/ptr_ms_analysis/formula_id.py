@@ -95,9 +95,7 @@ def _plausible(counts):
     if counts.get("N", 0) / c > 4 or counts.get("O", 0) / c > 3 \
        or counts.get("S", 0) / c > 2:
         return False
-    if d > c + 2:
-        return False
-    return True
+    return not d > c + 2
 
 
 def _prior(counts):
@@ -144,7 +142,7 @@ def enumerate_formulas(neutral_mass, tol_da, elements=None, bounds=None):
             return
         if i == len(elements):
             resid = neutral_mass - mass_so_far
-            nH = int(round(resid / mH))
+            nH = round(resid / mH)
             if nH < 0:
                 return
             c = dict(counts); c["H"] = nH
@@ -155,7 +153,7 @@ def enumerate_formulas(neutral_mass, tol_da, elements=None, bounds=None):
         el = elements[i]
         emass = MONO[el]
         nmax = min(bounds.get(el, 0), int((hi - mass_so_far) / emass))
-        for n in range(0, nmax + 1):
+        for n in range(nmax + 1):
             if n:
                 counts[el] = n
             elif el in counts:
