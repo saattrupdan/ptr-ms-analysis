@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-21
+
 ### Fixed
 
 - Fixed the former too-many-values-to-unpack error when `CALdata/Mapping` contains
