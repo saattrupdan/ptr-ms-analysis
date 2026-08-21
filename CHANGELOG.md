@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the former too-many-values-to-unpack error when `CALdata/Mapping` contains
+  more than two anchors; three or more `(m/z, timebin)` anchors are now supported by
+  a least-squares calibration fit, with fallback to usable per-cycle `CALdata/Spectrum`
+  coefficients when Mapping is absent or unusable.
+
 ## [0.1.0] - 2026-08-21
 
 ### Added

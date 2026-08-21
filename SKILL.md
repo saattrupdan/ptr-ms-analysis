@@ -389,11 +389,12 @@ stale, show preview versus final values, and label their provenance `browser edi
 Reverting to the preview initial value clears the stale state. This remains true in
 standalone HTML; there is no hidden refresh API. The Methods card states R integration
 windows, which settings are live-safe or Done-only, R_phys Gaussian/deconvolution
-resolution, K/Vm sources, primary m/z, k priority and anchor, humidity p/reference,
-transmission fallback, concentration availability, manual-window behaviour, and
-clustered fixed-centre behaviour. **Done** performs the authoritative full-precision
-`analyze` rerun and writes the CSV. The delivered CSV always comes from `analyze`, never
-the browser.
+resolution, mass-calibration provenance (including the Mapping anchor count and
+whether its fit or the per-cycle fallback was used), K/Vm sources, primary m/z, k
+priority and anchor, humidity p/reference, transmission fallback, concentration
+availability, manual-window behaviour, and clustered fixed-centre behaviour. **Done**
+performs the authoritative full-precision `analyze` rerun and writes the CSV. The
+delivered CSV always comes from `analyze`, never the browser.
 
 ### 6. Calibrate concentration when accurate ppb/µg matters
 
@@ -429,18 +430,22 @@ Corrected, 3.1 % Conc, and 3.2 % Conc[µg].
 
 | Column           | Formula                                     | Constants — all read from the .h5                                                 |
 | ---------------- | ------------------------------------------- | --------------------------------------------------------------------------------- |
-| **Raw** [cps]    | Σ intensities over the peak's m/z window    | mass cal `CALdata/Mapping`, or per-cycle `CALdata/Spectrum` if absent (raw exports) |
+| **Raw** [cps]    | Σ intensities over the peak's m/z window    | usable `CALdata/Mapping` anchors (N ≥ 2), or usable per-cycle `CALdata/Spectrum` coefficients if Mapping is absent or unusable |
 | **Corrected**    | Raw / Transmission(m/z)                     | `PTR-Transmission` curve; if absent, unit transmission (Corrected == Raw, flagged)  |
 | **Conc** [ppb]   | Corrected × K / I_primary(t) × (k_anchor/k) | K from `TRACEdata`; configured primary m/z (21.022 by default); k from rate-constant table (`--kinetic`) |
 | **Conc [µg/m³]** | Conc × (mz − proton) / Vₘ                   | Vₘ from drift temperature                                                         |
 
-Files vary in what they carry. Standard processed files have `CALdata/Mapping`,
-`PTR-Transmission`, and pre-computed `TRACEdata` (full Raw→Corrected→Conc). Some raw
-acquisition exports omit these: the mass calibration then comes from the per-cycle
-`CALdata/Spectrum` coefficients, transmission defaults to unity (so **Corrected == Raw**,
-reported via `transmission_available: false`), and with no pre-computed concentration the
-**Conc columns are NaN** unless you pass `--K`. `inspect`/`analyze` surface these flags —
-report the degradation honestly rather than presenting uncalibrated Corrected/Conc as final.
+Files vary in what they carry. Standard processed files have usable
+`CALdata/Mapping` anchors, `PTR-Transmission`, and pre-computed `TRACEdata` (full
+Raw→Corrected→Conc). Mapping has shape `(N, 2)` with at least two `(m/z, timebin)`
+anchors: exactly two determine the calibration directly, while three or more are fit
+by least squares to `timebin = a·√m + b`. If Mapping is absent or unusable, the mass
+calibration falls back to usable per-cycle `CALdata/Spectrum` coefficients. Some raw
+acquisition exports omit both: transmission defaults to unity (so **Corrected == Raw**,
+reported via `transmission_available: false`), and with no pre-computed concentration
+the **Conc columns are NaN** unless you pass `--K`. `inspect`/`analyze` surface these
+flags — report the degradation honestly rather than presenting uncalibrated
+Corrected/Conc as final.
 
 Concentration uses the standard **primary-ion-normalised** model: dividing by the
 per-cycle reagent-ion signal (the configured primary-ion m/z, 21.022 by default) tracks
