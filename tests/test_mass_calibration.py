@@ -53,6 +53,19 @@ class MassCalibrationTest(unittest.TestCase):
         self.assertEqual(actual_a, expected_a)
         self.assertEqual(actual_b, expected_b)
 
+    def test_float32_two_mapping_anchors_match_legacy_expression_exactly(self):
+        mapping = np.array([[19.0, 500.0], [181.0, 1500.0]], dtype=np.float32)
+        expected_a = (mapping[1, 1] - mapping[0, 1]) / (
+            np.sqrt(mapping[1, 0]) - np.sqrt(mapping[0, 0])
+        )
+        expected_b = mapping[0, 1] - expected_a * np.sqrt(mapping[0, 0])
+
+        with self._file(mapping=mapping) as h5:
+            actual_a, actual_b = ptrms.load_mass_cal(h5)
+
+        self.assertEqual(actual_a, float(expected_a))
+        self.assertEqual(actual_b, float(expected_b))
+
     def test_valid_mapping_is_preferred_over_spectrum_fallback(self):
         spectrum = np.array([[900.0, 1.0], [901.0, 1.0]])
         with self._file(mapping=DATA_10_26_33_MAPPING, spectrum=spectrum) as h5:
@@ -69,6 +82,43 @@ class MassCalibrationTest(unittest.TestCase):
 
     def test_malformed_mapping_falls_back_to_spectrum(self):
         mapping = np.ones((3, 3))
+        spectrum = np.array([[10.0, 2.0], [12.0, 4.0]])
+
+        with self._file(mapping=mapping, spectrum=spectrum) as h5:
+            self.assertEqual(ptrms.load_mass_cal(h5), (11.0, 3.0))
+
+    def test_malformed_two_mapping_anchors_fall_back_to_spectrum(self):
+        mapping = np.array([[19.0, np.nan], [181.0, 1500.0]])
+        spectrum = np.array([[10.0, 2.0], [12.0, 4.0]])
+
+        with self._file(mapping=mapping, spectrum=spectrum) as h5:
+            self.assertEqual(ptrms.load_mass_cal(h5), (11.0, 3.0))
+
+    def test_non_monotonic_multi_mapping_falls_back_to_spectrum(self):
+        mapping = np.array([[19.0, 500.0], [59.0, 700.0], [181.0, 650.0]])
+        spectrum = np.array([[10.0, 2.0], [12.0, 4.0]])
+
+        with self._file(mapping=mapping, spectrum=spectrum) as h5:
+            self.assertEqual(ptrms.load_mass_cal(h5), (11.0, 3.0))
+
+    def test_invalid_multi_mapping_row_falls_back_to_spectrum(self):
+        mapping = np.array([[19.0, 500.0], [59.0, np.nan], [181.0, 1500.0]])
+        spectrum = np.array([[10.0, 2.0], [12.0, 4.0]])
+
+        with self._file(mapping=mapping, spectrum=spectrum) as h5:
+            self.assertEqual(ptrms.load_mass_cal(h5), (11.0, 3.0))
+
+    def test_non_positive_multi_mapping_row_falls_back_to_spectrum(self):
+        mapping = np.array([[19.0, 500.0], [59.0, -1.0], [181.0, 1500.0]])
+        spectrum = np.array([[10.0, 2.0], [12.0, 4.0]])
+
+        with self._file(mapping=mapping, spectrum=spectrum) as h5:
+            self.assertEqual(ptrms.load_mass_cal(h5), (11.0, 3.0))
+
+    def test_ill_conditioned_multi_mapping_falls_back_to_spectrum(self):
+        mapping = np.array(
+            [[100.0, 500.0], [100.00001, 501.0], [100.00002, 502.0]]
+        )
         spectrum = np.array([[10.0, 2.0], [12.0, 4.0]])
 
         with self._file(mapping=mapping, spectrum=spectrum) as h5:

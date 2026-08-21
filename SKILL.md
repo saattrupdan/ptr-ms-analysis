@@ -389,10 +389,9 @@ stale, show preview versus final values, and label their provenance `browser edi
 Reverting to the preview initial value clears the stale state. This remains true in
 standalone HTML; there is no hidden refresh API. The Methods card states R integration
 windows, which settings are live-safe or Done-only, R_phys Gaussian/deconvolution
-resolution, mass-calibration provenance (including the Mapping anchor count and
-whether its fit or the per-cycle fallback was used), K/Vm sources, primary m/z, k
-priority and anchor, humidity p/reference, transmission fallback, concentration
-availability, manual-window behaviour, and clustered fixed-centre behaviour. **Done**
+resolution, K/Vm sources, primary m/z, k priority and anchor, humidity p/reference,
+transmission fallback, concentration availability, manual-window behaviour, and
+clustered fixed-centre behaviour. **Done**
 performs the authoritative full-precision `analyze` rerun and writes the CSV. The
 delivered CSV always comes from `analyze`, never the browser.
 
@@ -430,7 +429,7 @@ Corrected, 3.1 % Conc, and 3.2 % Conc[µg].
 
 | Column           | Formula                                     | Constants — all read from the .h5                                                 |
 | ---------------- | ------------------------------------------- | --------------------------------------------------------------------------------- |
-| **Raw** [cps]    | Σ intensities over the peak's m/z window    | usable `CALdata/Mapping` anchors (N ≥ 2), or usable per-cycle `CALdata/Spectrum` coefficients if Mapping is absent or unusable |
+| **Raw** [cps]    | Σ intensities over the peak's m/z window    | validated `CALdata/Mapping` anchors (N ≥ 2), or usable per-cycle `CALdata/Spectrum` coefficients if Mapping is absent or unusable |
 | **Corrected**    | Raw / Transmission(m/z)                     | `PTR-Transmission` curve; if absent, unit transmission (Corrected == Raw, flagged)  |
 | **Conc** [ppb]   | Corrected × K / I_primary(t) × (k_anchor/k) | K from `TRACEdata`; configured primary m/z (21.022 by default); k from rate-constant table (`--kinetic`) |
 | **Conc [µg/m³]** | Conc × (mz − proton) / Vₘ                   | Vₘ from drift temperature                                                         |
@@ -438,8 +437,9 @@ Corrected, 3.1 % Conc, and 3.2 % Conc[µg].
 Files vary in what they carry. Standard processed files have usable
 `CALdata/Mapping` anchors, `PTR-Transmission`, and pre-computed `TRACEdata` (full
 Raw→Corrected→Conc). Mapping has shape `(N, 2)` with at least two `(m/z, timebin)`
-anchors: exactly two determine the calibration directly, while three or more are fit
-by least squares to `timebin = a·√m + b`. If Mapping is absent or unusable, the mass
+anchors: exactly two determine the calibration directly, while three or more require
+finite positive rows, strictly increasing masses and timebins, and a well-conditioned
+least-squares fit of `timebin = a·√m + b`. If Mapping is absent or unusable, the mass
 calibration falls back to usable per-cycle `CALdata/Spectrum` coefficients. Some raw
 acquisition exports omit both: transmission defaults to unity (so **Corrected == Raw**,
 reported via `transmission_available: false`), and with no pre-computed concentration
