@@ -16,7 +16,7 @@ Root attributes hold instrument/run metadata: `Single Spec Duration (ms)`
 | `SPECdata/AverageSpec` | (n_bins,) | Run-average spectrum — used for peak detection / apex finding. |
 | `SPECdata/Times` | (n_cyc, 4) | col 0 = 1-based cycle index; col 2 = acquisition time (IONICON epoch). |
 | `SPECdata/PCTime` | (n_cyc, 1) | PC Unix timestamp per cycle. |
-| `CALdata/Mapping` | (N, 2), N ≥ 2 | `(m/z, timebin)` anchors for mass calibration. Exactly two anchors are solved directly; three or more are fit by least squares. |
+| `CALdata/Mapping` | (N, 2), N ≥ 2 | `(m/z, timebin)` anchors for mass calibration. Exactly two valid anchors are solved directly; three or more valid, well-conditioned anchors are fit by least squares. |
 | `TRACEdata/TraceRaw` | (n_cyc, n_pk) | Acquisition-time pre-computed peak traces (raw cps). |
 | `TRACEdata/TraceCorrected` | (n_cyc, n_pk) | Pre-computed transmission-corrected traces. |
 | `TRACEdata/TraceConcentration` | (n_cyc, n_pk) | Pre-computed concentration traces (ppb). |
@@ -38,17 +38,21 @@ built-in trace centres. So faithful reproduction must start from the raw spectra
 ## Mass calibration
 
 TOF relation is `timebin = a·√(m/z) + b`. `CALdata/Mapping` is an `(N, 2)`
-array of `(m/z, timebin)` anchors with at least two rows. With exactly two usable
-anchors, solve `a, b` directly:
+array of `(m/z, timebin)` anchors with at least two rows. With exactly two valid
+anchors (finite values, positive distinct masses, and a finite positive result),
+solve `a, b` directly:
 
 ```
 a = (tb2 − tb1) / (√m2 − √m1)
 b = tb1 − a·√m1
 ```
 
-With three or more usable anchors, fit `a, b` by least squares, minimising the
-residuals of `timebin = a·√m + b` across all anchors. In either case, invert the
-fit as:
+With three or more anchors, all rows must be finite and positive. After sorting by
+mass, both masses and timebins must be strictly increasing. The two-column design
+must have rank 2 and condition number no greater than `ε⁻¹/²`, which limits
+float64 round-off amplification to roughly the square root of machine epsilon.
+Only then fit `a, b` by least squares, minimising the residuals of
+`timebin = a·√m + b` across all anchors. In either case, invert the fit as:
 
 ```
 m/z = ((timebin − b) / a)²

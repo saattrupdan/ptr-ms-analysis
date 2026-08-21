@@ -91,35 +91,72 @@ def resolve_k(peaks, rate_table, mz_tol=0.03):
 def load_mass_cal(f):
     """Mass calibration coefficients for ``timebin = a*sqrt(m) + b``.
 
-    ``CALdata/Mapping`` is preferred when it contains at least two usable
-    anchors.  Two anchors retain the original closed-form calculation; additional
-    anchors are fit by least squares.  Raw-acquisition exports omit Mapping but
-    store per-cycle ``[a, b]`` coefficients directly in ``CALdata/Spectrum``;
-    fall back to their median across cycles (robust to drift and zero/blank rows).
+    ``CALdata/Mapping`` is preferred when it contains a valid set of anchors.
+    Exactly two anchors retain the original scalar calculation; additional anchors
+    are sorted and fit by least squares after strict physical and numerical
+    validation.  Raw-acquisition exports omit Mapping but store per-cycle ``[a, b]``
+    coefficients directly in ``CALdata/Spectrum``; fall back to their median across
+    cycles (robust to drift and zero/blank rows).
     """
     if "CALdata/Mapping" in f:
         try:
-            mapping = np.asarray(f["CALdata/Mapping"][:], dtype=np.float64)
+            raw_mapping = np.asarray(f["CALdata/Mapping"][:])
         except (TypeError, ValueError, OSError):
-            mapping = None
+            raw_mapping = None
 
-        if mapping is not None and mapping.ndim == 2 and mapping.shape[1] == 2:
-            valid = np.isfinite(mapping).all(axis=1) & (mapping[:, 0] > 0)
-            anchors = mapping[valid]
-            if anchors.shape[0] >= 2 and np.ptp(anchors[:, 0]) > 0:
-                masses = anchors[:, 0]
-                timebins = anchors[:, 1]
-                sqrt_masses = np.sqrt(masses, dtype=np.float64)
-                if anchors.shape[0] == 2:
-                    # Keep the established two-anchor path bit-for-bit in spirit;
-                    # the validation above prevents zero/negative/non-finite fits.
-                    a = (timebins[1] - timebins[0]) / (sqrt_masses[1] - sqrt_masses[0])
-                    b = timebins[0] - a * sqrt_masses[0]
-                else:
-                    design = np.column_stack((sqrt_masses, np.ones_like(sqrt_masses)))
-                    a, b = np.linalg.lstsq(design, timebins, rcond=None)[0]
-                if np.isfinite(a) and np.isfinite(b) and a > 0:
-                    return float(a), float(b)
+        if raw_mapping is not None and raw_mapping.shape == (2, 2):
+            try:
+                (m1, tb1), (m2, tb2) = raw_mapping
+                if (
+                    np.isfinite(raw_mapping).all()
+                    and m1 > 0
+                    and m2 > 0
+                    and m1 != m2
+                ):
+                    # This is intentionally the original expression on the raw
+                    # scalar dtype.  Some valid files use float32 and changing the
+                    # order or precision changes their legacy calibration exactly.
+                    a = (tb2 - tb1) / (np.sqrt(m2) - np.sqrt(m1))
+                    b = tb1 - a * np.sqrt(m1)
+                    if np.isfinite(a) and np.isfinite(b) and a > 0:
+                        return float(a), float(b)
+            except (TypeError, ValueError, FloatingPointError):
+                pass
+
+        if (
+            raw_mapping is not None
+            and raw_mapping.ndim == 2
+            and raw_mapping.shape[1] == 2
+            and raw_mapping.shape[0] > 2
+        ):
+            try:
+                # Do not filter individual rows: one bad anchor invalidates the
+                # Mapping rather than making an inconsistent fit look plausible.
+                if np.isfinite(raw_mapping).all() and (raw_mapping > 0).all():
+                    anchors = np.asarray(raw_mapping, dtype=np.float64)
+                    anchors = anchors[np.argsort(anchors[:, 0])]
+                    masses = anchors[:, 0]
+                    timebins = anchors[:, 1]
+                    if np.all(np.diff(masses) > 0) and np.all(np.diff(timebins) > 0):
+                        sqrt_masses = np.sqrt(masses)
+                        design = np.column_stack(
+                            (sqrt_masses, np.ones_like(sqrt_masses))
+                        )
+                        if np.linalg.matrix_rank(design) == 2:
+                            condition = np.linalg.cond(design)
+                            # Limit round-off amplification to sqrt(epsilon), a
+                            # standard useful-digit criterion for a float64 fit.
+                            condition_limit = 1.0 / np.sqrt(
+                                np.finfo(np.float64).eps
+                            )
+                            if np.isfinite(condition) and condition <= condition_limit:
+                                a, b = np.linalg.lstsq(
+                                    design, timebins, rcond=None
+                                )[0]
+                                if np.isfinite(a) and np.isfinite(b) and a > 0:
+                                    return float(a), float(b)
+            except (TypeError, ValueError, FloatingPointError, np.linalg.LinAlgError):
+                pass
 
     if "CALdata/Spectrum" in f:
         try:
