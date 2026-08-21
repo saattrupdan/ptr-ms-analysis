@@ -19,6 +19,7 @@ Human names + measured proton-transfer rate constants are attached from
 reference/rate_constants.json when a formula is known; otherwise the formula
 stands on its own with an estimated k.
 """
+
 from __future__ import annotations
 
 import math
@@ -26,20 +27,27 @@ import math
 PROTON = 1.007276
 
 # monoisotopic masses of the most abundant isotope
-MONO = {"C": 12.0, "H": 1.0078250319, "N": 14.0030740052, "O": 15.9949146221,
-        "S": 31.97207069, "P": 30.97376151, "F": 18.99840322,
-        "Cl": 34.96885271, "Br": 78.9183376}
-VALENCE = {"C": 4, "H": 1, "N": 3, "O": 2, "S": 2, "P": 3,
-           "F": 1, "Cl": 1, "Br": 1}
+MONO = {
+    "C": 12.0,
+    "H": 1.0078250319,
+    "N": 14.0030740052,
+    "O": 15.9949146221,
+    "S": 31.97207069,
+    "P": 30.97376151,
+    "F": 18.99840322,
+    "Cl": 34.96885271,
+    "Br": 78.9183376,
+}
+VALENCE = {"C": 4, "H": 1, "N": 3, "O": 2, "S": 2, "P": 3, "F": 1, "Cl": 1, "Br": 1}
 # isotopes as {element: [(nucleon_shift, abundance), ...]} (truncated to +2)
 ISO = {
-    "C":  [(0, 0.9893), (1, 0.0107)],
-    "H":  [(0, 0.999885), (1, 0.000115)],
-    "N":  [(0, 0.99636), (1, 0.00364)],
-    "O":  [(0, 0.99757), (1, 0.00038), (2, 0.00205)],
-    "S":  [(0, 0.9499), (1, 0.0075), (2, 0.0425)],
-    "P":  [(0, 1.0)],
-    "F":  [(0, 1.0)],
+    "C": [(0, 0.9893), (1, 0.0107)],
+    "H": [(0, 0.999885), (1, 0.000115)],
+    "N": [(0, 0.99636), (1, 0.00364)],
+    "O": [(0, 0.99757), (1, 0.00038), (2, 0.00205)],
+    "S": [(0, 0.9499), (1, 0.0075), (2, 0.0425)],
+    "P": [(0, 1.0)],
+    "F": [(0, 1.0)],
     "Cl": [(0, 0.7576), (2, 0.2424)],
     "Br": [(0, 0.5069), (2, 0.4931)],
 }
@@ -48,8 +56,7 @@ DM1 = 1.003355
 DM2 = 2.005
 
 # default element bounds for breath / ambient VOCs (halogens allowed but rare)
-DEFAULT_BOUNDS = {"C": 40, "N": 8, "O": 20, "S": 4, "P": 2,
-                  "Cl": 4, "Br": 2, "F": 6}
+DEFAULT_BOUNDS = {"C": 40, "N": 8, "O": 20, "S": 4, "P": 2, "Cl": 4, "Br": 2, "F": 6}
 
 
 def formula_mass(counts):
@@ -72,7 +79,9 @@ def formula_str(counts):
 
 def dbe(counts):
     """Rings + double-bond equivalents of the neutral formula."""
-    c = counts.get("C", 0); n = counts.get("N", 0); p = counts.get("P", 0)
+    c = counts.get("C", 0)
+    n = counts.get("N", 0)
+    p = counts.get("P", 0)
     h = counts.get("H", 0)
     x = counts.get("F", 0) + counts.get("Cl", 0) + counts.get("Br", 0)
     return 1 + c + (n + p) / 2.0 - (h + x) / 2.0
@@ -83,17 +92,21 @@ def _plausible(counts):
     bounds H via valence) plus loose extremes. Small VOCs (methanol H/C=4, formic
     acid O/C=2) must survive, so the typical Kind-Fiehn ranges live in _prior, not
     here."""
-    c = counts.get("C", 0); h = counts.get("H", 0)
+    c = counts.get("C", 0)
+    h = counts.get("H", 0)
     d = dbe(counts)
-    if d < -0.0001 or abs(d - round(d)) > 1e-6:   # integer, non-negative DBE
+    if d < -0.0001 or abs(d - round(d)) > 1e-6:  # integer, non-negative DBE
         return False
-    if c == 0:                                     # tiny inorganics (NH3, ...)
+    if c == 0:  # tiny inorganics (NH3, ...)
         return (h + counts.get("N", 0) + counts.get("O", 0)) > 0 and d <= 1
     hc = h / c
-    if hc < 0.05 or hc > 6.0:                       # absurd only
+    if hc < 0.05 or hc > 6.0:  # absurd only
         return False
-    if counts.get("N", 0) / c > 4 or counts.get("O", 0) / c > 3 \
-       or counts.get("S", 0) / c > 2:
+    if (
+        counts.get("N", 0) / c > 4
+        or counts.get("O", 0) / c > 3
+        or counts.get("S", 0) / c > 2
+    ):
         return False
     return not d > c + 2
 
@@ -116,10 +129,15 @@ def _prior(counts):
         nc = counts.get("N", 0) / c
         if nc > 1.0:
             p *= 0.7 ** (nc - 1.0)
-    het = counts.get("S", 0) + counts.get("P", 0) + counts.get("Cl", 0) \
-        + counts.get("Br", 0) + counts.get("F", 0)
-    p *= 0.72 ** het                       # each rare heteroatom costs a bit
-    p *= 0.85 ** counts.get("N", 0)        # N less common than O in VOCs
+    het = (
+        counts.get("S", 0)
+        + counts.get("P", 0)
+        + counts.get("Cl", 0)
+        + counts.get("Br", 0)
+        + counts.get("F", 0)
+    )
+    p *= 0.72**het  # each rare heteroatom costs a bit
+    p *= 0.85 ** counts.get("N", 0)  # N less common than O in VOCs
     d = dbe(counts)
     if d > 6:
         p *= 0.9 ** (d - 6)
@@ -138,14 +156,15 @@ def enumerate_formulas(neutral_mass, tol_da, elements=None, bounds=None):
     out = []
 
     def rec(i, counts, mass_so_far):
-        if mass_so_far > hi + mH:            # even one more atom overshoots
+        if mass_so_far > hi + mH:  # even one more atom overshoots
             return
         if i == len(elements):
             resid = neutral_mass - mass_so_far
             nH = round(resid / mH)
             if nH < 0:
                 return
-            c = dict(counts); c["H"] = nH
+            c = dict(counts)
+            c["H"] = nH
             m = mass_so_far + nH * mH
             if abs(m - neutral_mass) <= tol_da and _plausible(c):
                 out.append((c, m))
@@ -172,9 +191,9 @@ def _elem_pattern(shift_ab, n):
     p2 = dict(shift_ab).get(2, 0.0)
     if n == 0 or p0 == 0:
         return [1.0, 0.0, 0.0]
-    P0 = p0 ** n
+    P0 = p0**n
     P1 = n * p0 ** (n - 1) * p1
-    P2 = n * p0 ** (n - 1) * p2 + (n * (n - 1) / 2.0) * p0 ** (n - 2) * p1 ** 2
+    P2 = n * p0 ** (n - 1) * p2 + (n * (n - 1) / 2.0) * p0 ** (n - 2) * p1**2
     return [P0, P1, P2]
 
 
@@ -182,13 +201,15 @@ def isotope_ratios(counts, protonated=True):
     """Predicted (M+1)/M and (M+2)/M intensity ratios for the [M+H]+ ion."""
     c = dict(counts)
     if protonated:
-        c["H"] = c.get("H", 0) + 1          # the extra proton is an H atom
+        c["H"] = c.get("H", 0) + 1  # the extra proton is an H atom
     acc = [1.0, 0.0, 0.0]
     for el, n in c.items():
         d = _elem_pattern(ISO.get(el, [(0, 1.0)]), n)
-        acc = [acc[0] * d[0],
-               acc[0] * d[1] + acc[1] * d[0],
-               acc[0] * d[2] + acc[1] * d[1] + acc[2] * d[0]]
+        acc = [
+            acc[0] * d[0],
+            acc[0] * d[1] + acc[1] * d[0],
+            acc[0] * d[2] + acc[1] * d[1] + acc[2] * d[0],
+        ]
     if acc[0] <= 0:
         return 0.0, 0.0
     return acc[1] / acc[0], acc[2] / acc[0]
@@ -196,10 +217,13 @@ def isotope_ratios(counts, protonated=True):
 
 # ---- name / rate-constant lookup from the curated table (by formula) ----
 _TABLE = None
+
+
 def _table():
     global _TABLE
     if _TABLE is None:
         from . import ptrms
+
         t = ptrms.load_rate_constants() or {}
         by_formula = {}
         for comp in t.get("compounds", []):
@@ -225,11 +249,14 @@ def _iso_factor(pred, obs, floor, contam):
         return 1.0
     s = 0.3 * pred + floor
     d = obs - pred
-    return math.exp(-0.5 * (d / s) ** 2) if d < 0 else math.exp(-0.5 * (d / (3 * s)) ** 2)
+    return (
+        math.exp(-0.5 * (d / s) ** 2) if d < 0 else math.exp(-0.5 * (d / (3 * s)) ** 2)
+    )
 
 
-def score_peak(mz, drift, obs_ratios=None, tol_mDa=12.0, max_candidates=5,
-               elements=None):
+def score_peak(
+    mz, drift, obs_ratios=None, tol_mDa=12.0, max_candidates=5, elements=None
+):
     """Rank candidate formulas for a detected product ion at m/z.
 
     drift       : run mass-scale (measured apex / true mass) to undo before matching
@@ -248,7 +275,7 @@ def score_peak(mz, drift, obs_ratios=None, tol_mDa=12.0, max_candidates=5,
     for counts, m in cands:
         ion_mz = m + PROTON
         delta_mDa = (mz / drift - ion_mz) * 1000.0
-        p_mass = math.exp(-0.5 * (delta_mDa / 5.0) ** 2)        # ~5 mDa accuracy
+        p_mass = math.exp(-0.5 * (delta_mDa / 5.0) ** 2)  # ~5 mDa accuracy
         r1p, r2p = isotope_ratios(counts)
         p_iso = 1.0
         iso_used = False
@@ -260,26 +287,32 @@ def score_peak(mz, drift, obs_ratios=None, tol_mDa=12.0, max_candidates=5,
             # observed ratio far ABOVE prediction is contamination (no info), while
             # a deficit (observed BELOW prediction) is real evidence against the
             # formula (e.g. it predicts a sulfur M+2 that simply isn't there).
-            p_iso = _iso_factor(r1p, r1o, 0.015, 0.50) * \
-                    _iso_factor(r2p, r2o, 0.008, 0.60)
+            p_iso = _iso_factor(r1p, r1o, 0.015, 0.50) * _iso_factor(
+                r2p, r2o, 0.008, 0.60
+            )
         prior = _prior(counts)
         score = p_mass * p_iso * prior
         known = _known(formula_str(counts))
-        scored.append({
-            "formula": formula_str(counts),
-            "name": known["name"] if known else None,
-            "ion_mz": round(ion_mz, 4),
-            "delta_mDa": round(delta_mDa, 1),
-            "dbe": round(dbe(counts), 1),
-            "k": known.get("k") if known else None,
-            "k_estimated": (known.get("k_estimated", False) if known else True),
-            "flags": known.get("flags", []) if known else [],
-            "iso_pred": [round(r1p, 4), round(r2p, 4)],
-            "iso_obs": ([round(obs_ratios[0], 4), round(obs_ratios[1], 4)]
-                        if obs_ratios is not None else None),
-            "iso_used": iso_used,
-            "score": score,
-        })
+        scored.append(
+            {
+                "formula": formula_str(counts),
+                "name": known["name"] if known else None,
+                "ion_mz": round(ion_mz, 4),
+                "delta_mDa": round(delta_mDa, 1),
+                "dbe": round(dbe(counts), 1),
+                "k": known.get("k") if known else None,
+                "k_estimated": (known.get("k_estimated", False) if known else True),
+                "flags": known.get("flags", []) if known else [],
+                "iso_pred": [round(r1p, 4), round(r2p, 4)],
+                "iso_obs": (
+                    [round(obs_ratios[0], 4), round(obs_ratios[1], 4)]
+                    if obs_ratios is not None
+                    else None
+                ),
+                "iso_used": iso_used,
+                "score": score,
+            }
+        )
     scored.sort(key=lambda c: c["score"], reverse=True)
     top = scored[:max_candidates]
     tot = sum(c["score"] for c in top) or 1.0

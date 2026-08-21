@@ -64,11 +64,16 @@ def _synthetic_data() -> dict[str, Any]:
             "humidity_ref": 1.3,
             "whole_run_windows": False,
             "sources": {
-                "R": "config.analyze", "R_phys": "config.analyze",
-                "primary_mz": "config.analyze", "whole_run_windows": "config.analyze",
-                "K": "config.analyze", "molar_volume": "config.analyze",
-                "kinetic": "config.analyze", "k_anchor": "config.analyze",
-                "humidity_correct": "config.analyze", "humidity_p": "config.analyze",
+                "R": "config.analyze",
+                "R_phys": "config.analyze",
+                "primary_mz": "config.analyze",
+                "whole_run_windows": "config.analyze",
+                "K": "config.analyze",
+                "molar_volume": "config.analyze",
+                "kinetic": "config.analyze",
+                "k_anchor": "config.analyze",
+                "humidity_correct": "config.analyze",
+                "humidity_p": "config.analyze",
                 "humidity_ref": "config.analyze",
             },
             "K_source": "config.analyze",
@@ -175,7 +180,11 @@ def _synthetic_data() -> dict[str, Any]:
                 "candidates": [],
                 "id_confidence": None,
                 "id_ambiguous": False,
-                "overlap": {"neighbor": 130.05, "sep_mDa": 50.0, "level": "deconvolved"},
+                "overlap": {
+                    "neighbor": 130.05,
+                    "sep_mDa": 50.0,
+                    "level": "deconvolved",
+                },
             },
             {
                 "id": 4,
@@ -220,8 +229,10 @@ def _synthetic_data() -> dict[str, Any]:
             {"label": "sample_01", "start": 1, "end": 2, "class": "sample"},
             {"label": "sample_02", "start": 3, "end": 4, "class": "sample"},
         ],
-        "config_base": {"unknown_top_level": {"keep": True},
-                        "analyze": {"unknown_setting": "keep"}},
+        "config_base": {
+            "unknown_top_level": {"keep": True},
+            "analyze": {"unknown_setting": "keep"},
+        },
         "checklist": [],
         "rate_constants": [],
     }
@@ -275,7 +286,9 @@ def _browser(session: str, *args: str, stdin: str | None = None) -> str:
     )
     if completed.returncode:
         detail = (completed.stderr or completed.stdout).strip()
-        raise AssertionError("agent-browser {} failed: {}".format(" ".join(args), detail))
+        raise AssertionError(
+            "agent-browser {} failed: {}".format(" ".join(args), detail)
+        )
     return completed.stdout.strip()
 
 
@@ -299,25 +312,35 @@ def _assert(condition: bool, message: str) -> None:
 
 def _assert_complete_posts(expected: dict[str, Any], path: str, start: int) -> int:
     """Require every new request body to equal the browser's full config snapshot."""
-    recent = [body for posted_path, body in _ReviewHandler.posts[start:] if posted_path == path]
+    recent = [
+        body
+        for posted_path, body in _ReviewHandler.posts[start:]
+        if posted_path == path
+    ]
     _assert(recent, f"browser did not POST {path} after the edit")
-    _assert(all(body == expected for body in recent),
-            f"{path} body differs from the browser's complete buildConfig()")
+    _assert(
+        all(body == expected for body in recent),
+        f"{path} body differs from the browser's complete buildConfig()",
+    )
     return len(_ReviewHandler.posts)
 
 
 def _assert_config_round_trip(config: dict[str, Any]) -> None:
     """Check fields whose loss would make a saved review non-reproducible."""
     _assert(config["unknown_top_level"]["keep"], "unknown top-level field was dropped")
-    _assert(config["analyze"]["unknown_setting"] == "keep",
-            "unknown analyze field was dropped")
-    _assert([peak["mz"] for peak in config["peaks"]]
-            == [100, 110, 120, 130, 130.05, 140],
-            "peaks did not round-trip")
-    _assert([(item["label"], item["start"], item["end"])
-              for item in config["ranges"]]
-            == [("sample_01", 1, 2), ("sample_02", 3, 4)],
-            "ranges did not round-trip")
+    _assert(
+        config["analyze"]["unknown_setting"] == "keep",
+        "unknown analyze field was dropped",
+    )
+    _assert(
+        [peak["mz"] for peak in config["peaks"]] == [100, 110, 120, 130, 130.05, 140],
+        "peaks did not round-trip",
+    )
+    _assert(
+        [(item["label"], item["start"], item["end"]) for item in config["ranges"]]
+        == [("sample_01", 1, 2), ("sample_02", 3, 4)],
+        "ranges did not round-trip",
+    )
     _assert(config["checklist"] == [], "checklist did not round-trip")
 
 
@@ -341,14 +364,23 @@ def _standalone_browser_pass(data: dict[str, Any]) -> None:
                 "buttons:Array.from(document.querySelectorAll('button')).map(b=>b.innerText), "
                 "served:SERVED, protocol:location.protocol})",
             )
-            _assert(not initial["served"] and initial["protocol"] == "file:",
-                    "standalone smoke did not open through file:")
-            _assert("Download config" in initial["body"] and "Done" not in initial["body"],
-                    "standalone controls still use served-mode wording")
-            _assert("Download config" in initial["text"] and "Done" not in initial["text"],
-                    "standalone Methods still use served-mode wording")
-            _assert("Download config" in initial["buttons"] and "Done" not in initial["buttons"],
-                    "standalone export control is wrong")
+            _assert(
+                not initial["served"] and initial["protocol"] == "file:",
+                "standalone smoke did not open through file:",
+            )
+            _assert(
+                "Download config" in initial["body"] and "Done" not in initial["body"],
+                "standalone controls still use served-mode wording",
+            )
+            _assert(
+                "Download config" in initial["text"] and "Done" not in initial["text"],
+                "standalone Methods still use served-mode wording",
+            )
+            _assert(
+                "Download config" in initial["buttons"]
+                and "Done" not in initial["buttons"],
+                "standalone export control is wrong",
+            )
 
             _browser(
                 session,
@@ -368,29 +400,48 @@ def _standalone_browser_pass(data: dict[str, Any]) -> None:
                 "banner:document.querySelector('#stalebanner').innerText, "
                 "config:buildConfig(), stale:staleSettings()})",
             )
-            _assert("R = 1700 (browser edit)" in edited["text"],
-                    "standalone Methods did not mark R as edited")
-            _assert("K: 2.50 (browser edit)" in edited["text"]
-                    and "molar volume: 25.50 L/mol (browser edit)" in edited["text"],
-                    "standalone Methods did not mark calibration edits")
-            _assert("Kinetic correction: off (browser edit)" in edited["text"],
-                    "standalone Methods did not mark kinetic edits")
-            _assert("Humidity correction: off (browser edit)" in edited["text"],
-                    "standalone Methods did not mark humidity edits")
-            _assert("k_anchor = 2.2" in edited["text"] and "(browser edit)" in edited["text"],
-                    "standalone Methods did not mark k_anchor as edited")
-            _assert("p = 0.8 (browser edit)" in edited["text"],
-                    "standalone Methods did not mark humidity p as edited")
-            _assert("reference = 1.7 (browser edit)" in edited["text"],
-                    "standalone Methods did not mark humidity reference as edited")
-            _assert("export and re-extraction" in edited["text"]
-                    and "Download config" in edited["text"]
-                    and "Done" not in edited["text"],
-                    "standalone stale Methods wording is inaccurate")
-            _assert("export and re-extraction" in edited["banner"]
-                    and "Download config" in edited["banner"]
-                    and "Done" not in edited["banner"],
-                    "standalone stale banner wording is inaccurate")
+            _assert(
+                "R = 1700 (browser edit)" in edited["text"],
+                "standalone Methods did not mark R as edited",
+            )
+            _assert(
+                "K: 2.50 (browser edit)" in edited["text"]
+                and "molar volume: 25.50 L/mol (browser edit)" in edited["text"],
+                "standalone Methods did not mark calibration edits",
+            )
+            _assert(
+                "Kinetic correction: off (browser edit)" in edited["text"],
+                "standalone Methods did not mark kinetic edits",
+            )
+            _assert(
+                "Humidity correction: off (browser edit)" in edited["text"],
+                "standalone Methods did not mark humidity edits",
+            )
+            _assert(
+                "k_anchor = 2.2" in edited["text"]
+                and "(browser edit)" in edited["text"],
+                "standalone Methods did not mark k_anchor as edited",
+            )
+            _assert(
+                "p = 0.8 (browser edit)" in edited["text"],
+                "standalone Methods did not mark humidity p as edited",
+            )
+            _assert(
+                "reference = 1.7 (browser edit)" in edited["text"],
+                "standalone Methods did not mark humidity reference as edited",
+            )
+            _assert(
+                "export and re-extraction" in edited["text"]
+                and "Download config" in edited["text"]
+                and "Done" not in edited["text"],
+                "standalone stale Methods wording is inaccurate",
+            )
+            _assert(
+                "export and re-extraction" in edited["banner"]
+                and "Download config" in edited["banner"]
+                and "Done" not in edited["banner"],
+                "standalone stale banner wording is inaccurate",
+            )
             _assert_config_round_trip(edited["config"])
 
             _browser(
@@ -409,12 +460,19 @@ def _standalone_browser_pass(data: dict[str, Any]) -> None:
                 "({text:document.querySelector('#methodlive').innerText, "
                 "banner:document.querySelector('#stalebanner').innerText, stale:staleSettings()})",
             )
-            _assert(reverted["stale"] == {"primary": False, "Rphys": False, "windows": False},
-                    "standalone revert left stale state behind")
-            _assert(not reverted["banner"] and "PREVIEW STALE" not in reverted["text"],
-                    "standalone revert left a stale warning behind")
-            _assert("browser edit" not in reverted["text"],
-                    "standalone revert did not restore initial provenance")
+            _assert(
+                reverted["stale"]
+                == {"primary": False, "Rphys": False, "windows": False},
+                "standalone revert left stale state behind",
+            )
+            _assert(
+                not reverted["banner"] and "PREVIEW STALE" not in reverted["text"],
+                "standalone revert left a stale warning behind",
+            )
+            _assert(
+                "browser edit" not in reverted["text"],
+                "standalone revert did not restore initial provenance",
+            )
 
             _browser(
                 session,
@@ -439,16 +497,30 @@ def _standalone_browser_pass(data: dict[str, Any]) -> None:
                 # agent-browser daemon versions. Verify the real button handler still
                 # built the complete payload before accepting that limitation.
                 detail = str(error).lower()
-                _assert("resource temporarily unavailable" in detail
-                        or "allow-file-access ignored" in detail,
-                        f"standalone download failed unexpectedly: {error}")
-                _browser(session, "eval", "document.querySelector('#exportrow button').click()")
-                _assert(_eval(session, "({config:window.__downloadSnapshot})")["config"] == payload,
-                        "standalone download handler did not use buildConfig()")
+                _assert(
+                    "resource temporarily unavailable" in detail
+                    or "allow-file-access ignored" in detail,
+                    f"standalone download failed unexpectedly: {error}",
+                )
+                _browser(
+                    session,
+                    "eval",
+                    "document.querySelector('#exportrow button').click()",
+                )
+                _assert(
+                    _eval(session, "({config:window.__downloadSnapshot})")["config"]
+                    == payload,
+                    "standalone download handler did not use buildConfig()",
+                )
             else:
-                _assert(download_path.exists(), "standalone Download config did not create a file")
-                _assert(json.loads(download_path.read_text(encoding="utf-8")) == payload,
-                        "downloaded config differs from buildConfig()")
+                _assert(
+                    download_path.exists(),
+                    "standalone Download config did not create a file",
+                )
+                _assert(
+                    json.loads(download_path.read_text(encoding="utf-8")) == payload,
+                    "downloaded config differs from buildConfig()",
+                )
         finally:
             _browser(session, "close")
 
@@ -525,7 +597,9 @@ def _provenance_browser_pass() -> None:
                 "set('K','2.5'); set('Vm','25.5'); })()",
             )
             _browser(session, "wait", "700")
-            edited = _eval(session, "({text:document.querySelector('#methodlive').innerText})")
+            edited = _eval(
+                session, "({text:document.querySelector('#methodlive').innerText})"
+            )
             _assert(
                 "K: 2.50 (browser edit)" in edited["text"]
                 and "molar volume: 25.50 L/mol (browser edit)" in edited["text"],
@@ -540,7 +614,8 @@ def _provenance_browser_pass() -> None:
             )
             _assert(
                 "K: 1.00 (file acquisition calibration)" in reset["text"]
-                and "molar volume: 24.50 L/mol (file drift temperature)" in reset["text"],
+                and "molar volume: 24.50 L/mol (file drift temperature)"
+                in reset["text"],
                 "reset-to-file provenance was hidden by equal initial values",
             )
             _assert_config_round_trip(reset["config"])
@@ -597,15 +672,26 @@ def main() -> int:
             "R:cfg.R, Rphys:cfg.Rphys, primary:cfg.primarymz, humid:cfg.humid, "
             "humidChecked:document.querySelector('#humid').checked})",
         )
-        _assert("R integration windows" in initial_methods["text"],
-                "Methods omits R: {!r}".format(initial_methods["text"][:200]))
+        _assert(
+            "R integration windows" in initial_methods["text"],
+            "Methods omits R: {!r}".format(initial_methods["text"][:200]),
+        )
         _assert("Rphys" in initial_methods["text"], "Methods omits physical resolution")
-        _assert("Kinetic correction: on" in initial_methods["text"], "kinetic state is stale")
-        _assert("curated config" in initial_methods["text"], "configured source is missing")
-        _assert(initial_methods["humid"] and initial_methods["humidChecked"],
-                "humidity checkbox did not initialise from the effective config")
-        _assert(initial_methods["R"] == 1500 and initial_methods["primary"] == 19.022,
-                "curated Methods settings did not initialise the browser")
+        _assert(
+            "Kinetic correction: on" in initial_methods["text"],
+            "kinetic state is stale",
+        )
+        _assert(
+            "curated config" in initial_methods["text"], "configured source is missing"
+        )
+        _assert(
+            initial_methods["humid"] and initial_methods["humidChecked"],
+            "humidity checkbox did not initialise from the effective config",
+        )
+        _assert(
+            initial_methods["R"] == 1500 and initial_methods["primary"] == 19.022,
+            "curated Methods settings did not initialise the browser",
+        )
         _browser(
             session,
             "eval",
@@ -625,82 +711,151 @@ def main() -> int:
             "stale:staleSettings(), served:SERVED, protocol:location.protocol})",
         )
         _assert(edited["served"], "browser did not recognise the HTTP review server")
-        _assert("Kinetic correction: off" in edited["text"], "Methods did not update kinetic state")
-        _assert("browser edit" in edited["text"], "Methods did not update calibration provenance")
-        _assert("PREVIEW STALE" in edited["text"] and "PREVIEW STALE" in edited["banner"],
-                "re-extraction edits were not prominently marked stale")
-        _assert("Done-only" in edited["text"] and "preview 19.022" in edited["text"]
-                and "final 20.022" in edited["text"],
-                "stale Methods wording did not distinguish preview and final values")
-        _assert(edited["stale"] == {"primary": True, "Rphys": True, "windows": True},
-                "stale settings did not track the edited re-extraction values")
-        _assert("m/z 37 / m/z 20.022" in edited["text"],
-                "Methods did not update humidity denominator")
+        _assert(
+            "Kinetic correction: off" in edited["text"],
+            "Methods did not update kinetic state",
+        )
+        _assert(
+            "browser edit" in edited["text"],
+            "Methods did not update calibration provenance",
+        )
+        _assert(
+            "PREVIEW STALE" in edited["text"] and "PREVIEW STALE" in edited["banner"],
+            "re-extraction edits were not prominently marked stale",
+        )
+        _assert(
+            "Done-only" in edited["text"]
+            and "preview 19.022" in edited["text"]
+            and "final 20.022" in edited["text"],
+            "stale Methods wording did not distinguish preview and final values",
+        )
+        _assert(
+            edited["stale"] == {"primary": True, "Rphys": True, "windows": True},
+            "stale settings did not track the edited re-extraction values",
+        )
+        _assert(
+            "m/z 37 / m/z 20.022" in edited["text"],
+            "Methods did not update humidity denominator",
+        )
         _assert(not edited["humidChecked"], "humidity checkbox did not update")
-        _assert(edited["config"]["analyze"]["R_phys"] == 3300,
-                "R_phys control was not exported")
-        _assert(edited["config"]["analyze"]["primary_mz"] == 20.022,
-                "primary m/z control was not exported")
-        _assert(edited["config"]["analyze"]["whole_run_windows"],
-                "window mode control was not exported")
+        _assert(
+            edited["config"]["analyze"]["R_phys"] == 3300,
+            "R_phys control was not exported",
+        )
+        _assert(
+            edited["config"]["analyze"]["primary_mz"] == 20.022,
+            "primary m/z control was not exported",
+        )
+        _assert(
+            edited["config"]["analyze"]["whole_run_windows"],
+            "window mode control was not exported",
+        )
         _assert_config_round_trip(edited["config"])
         post_cursor = _assert_complete_posts(edited["config"], "/save", post_cursor)
         # Reverting exactly to the immutable preview settings must clear every stale
         # marker and restore the original provenance, not leave a sticky warning.
         post_cursor = len(_ReviewHandler.posts)
-        _browser(session, "eval", "(() => { const set=(id,v)=>{const e=document.querySelector('#'+id);"
-                 "e.value=v; e.dispatchEvent(new Event('change',{bubbles:true}));}; "
-                 "set('Rphys','3100'); set('primarymz','19.022'); "
-                 "document.querySelector('#wholewindows').click(); })()")
+        _browser(
+            session,
+            "eval",
+            "(() => { const set=(id,v)=>{const e=document.querySelector('#'+id);"
+            "e.value=v; e.dispatchEvent(new Event('change',{bubbles:true}));}; "
+            "set('Rphys','3100'); set('primarymz','19.022'); "
+            "document.querySelector('#wholewindows').click(); })()",
+        )
         _browser(session, "wait", "1000")
-        reverted = _eval(session, "({text:document.querySelector('#methodlive').innerText, "
-                               "banner:document.querySelector('#stalebanner').innerText, "
-                               "stale:staleSettings(), config:buildConfig()})")
-        _assert(reverted["stale"] == {"primary": False, "Rphys": False, "windows": False},
-                "reverting to preview settings left stale state behind")
-        _assert(reverted["banner"] == "" and "PREVIEW STALE" not in reverted["text"],
-                "reverting to preview settings left a stale warning behind")
-        _assert("primary m/z: 19.022 (curated config)" in reverted["text"]
-                and "Rphys" in reverted["text"],
-                "reverting did not restore initial setting provenance")
+        reverted = _eval(
+            session,
+            "({text:document.querySelector('#methodlive').innerText, "
+            "banner:document.querySelector('#stalebanner').innerText, "
+            "stale:staleSettings(), config:buildConfig()})",
+        )
+        _assert(
+            reverted["stale"] == {"primary": False, "Rphys": False, "windows": False},
+            "reverting to preview settings left stale state behind",
+        )
+        _assert(
+            reverted["banner"] == "" and "PREVIEW STALE" not in reverted["text"],
+            "reverting to preview settings left a stale warning behind",
+        )
+        _assert(
+            "primary m/z: 19.022 (curated config)" in reverted["text"]
+            and "Rphys" in reverted["text"],
+            "reverting did not restore initial setting provenance",
+        )
         post_cursor = _assert_complete_posts(reverted["config"], "/save", post_cursor)
         # Leave the final Done payload edited, so the smoke covers the actual
         # authoritative rerun configuration after a stale->fresh transition.
         post_cursor = len(_ReviewHandler.posts)
-        _browser(session, "eval", "(() => { const set=(id,v)=>{const e=document.querySelector('#'+id);"
-                 "e.value=v; e.dispatchEvent(new Event('change',{bubbles:true}));}; "
-                 "set('Rphys','3300'); set('primarymz','20.022'); "
-                 "document.querySelector('#wholewindows').click(); })()")
+        _browser(
+            session,
+            "eval",
+            "(() => { const set=(id,v)=>{const e=document.querySelector('#'+id);"
+            "e.value=v; e.dispatchEvent(new Event('change',{bubbles:true}));}; "
+            "set('Rphys','3300'); set('primarymz','20.022'); "
+            "document.querySelector('#wholewindows').click(); })()",
+        )
         _browser(session, "wait", "1000")
-        final_preview = _eval(session, "({config:buildConfig(), stale:staleSettings()})")
-        _assert(final_preview["stale"] == {"primary": True, "Rphys": True, "windows": True},
-                "final edited settings did not become stale again")
+        final_preview = _eval(
+            session, "({config:buildConfig(), stale:staleSettings()})"
+        )
+        _assert(
+            final_preview["stale"] == {"primary": True, "Rphys": True, "windows": True},
+            "final edited settings did not become stale again",
+        )
         _assert_config_round_trip(final_preview["config"])
-        post_cursor = _assert_complete_posts(final_preview["config"], "/save", post_cursor)
+        post_cursor = _assert_complete_posts(
+            final_preview["config"], "/save", post_cursor
+        )
         post_cursor = len(_ReviewHandler.posts)
-        _browser(session, "eval", "document.querySelector('#K').value=''; document.querySelector('#K').dispatchEvent(new Event('change',{bubbles:true}))")
+        _browser(
+            session,
+            "eval",
+            "document.querySelector('#K').value=''; document.querySelector('#K').dispatchEvent(new Event('change',{bubbles:true}))",
+        )
         _browser(session, "wait", "700")
-        unavailable = _eval(session, "({methods:document.querySelector('#methodlive').innerText, "
-                                 "note:document.querySelector('#calnote').innerText, config:buildConfig()})")
-        _assert("Concentration is unavailable" in unavailable["methods"] and "unavailable" in unavailable["note"],
-                "concentration availability did not update when K was cleared")
+        unavailable = _eval(
+            session,
+            "({methods:document.querySelector('#methodlive').innerText, "
+            "note:document.querySelector('#calnote').innerText, config:buildConfig()})",
+        )
+        _assert(
+            "Concentration is unavailable" in unavailable["methods"]
+            and "unavailable" in unavailable["note"],
+            "concentration availability did not update when K was cleared",
+        )
         _assert_config_round_trip(unavailable["config"])
-        post_cursor = _assert_complete_posts(unavailable["config"], "/save", post_cursor)
+        post_cursor = _assert_complete_posts(
+            unavailable["config"], "/save", post_cursor
+        )
         post_cursor = len(_ReviewHandler.posts)
-        _browser(session, "eval", "document.querySelector('#K').value='2.5'; document.querySelector('#K').dispatchEvent(new Event('change',{bubbles:true}))")
+        _browser(
+            session,
+            "eval",
+            "document.querySelector('#K').value='2.5'; document.querySelector('#K').dispatchEvent(new Event('change',{bubbles:true}))",
+        )
         _browser(session, "wait", "700")
         filled = _eval(session, "({config:buildConfig()})")
         post_cursor = _assert_complete_posts(filled["config"], "/save", post_cursor)
         post_cursor = len(_ReviewHandler.posts)
         _browser(session, "eval", "document.querySelector('#resetK').click()")
         _browser(session, "wait", "700")
-        reset = _eval(session, "({K:cfg.K,Vm:cfg.Vm,text:document.querySelector('#methodlive').innerText,"
-                           "note:document.querySelector('#calnote').innerText,config:buildConfig()})")
-        _assert(reset["K"] == 0.8 and reset["Vm"] == 24.0, "reset did not restore file-derived calibration")
+        reset = _eval(
+            session,
+            "({K:cfg.K,Vm:cfg.Vm,text:document.querySelector('#methodlive').innerText,"
+            "note:document.querySelector('#calnote').innerText,config:buildConfig()})",
+        )
+        _assert(
+            reset["K"] == 0.8 and reset["Vm"] == 24.0,
+            "reset did not restore file-derived calibration",
+        )
         _assert_config_round_trip(reset["config"])
         post_cursor = _assert_complete_posts(reset["config"], "/save", post_cursor)
-        _assert("file acquisition calibration" in reset["text"] and "file drift temperature" in reset["text"],
-                "reset provenance is not file-derived")
+        _assert(
+            "file acquisition calibration" in reset["text"]
+            and "file drift temperature" in reset["text"],
+            "reset provenance is not file-derived",
+        )
         _browser(session, "eval", "document.querySelector('#methodClose').click()")
         # Switch from the initial intervals view to the actual identification card.
         _browser(
@@ -755,9 +910,13 @@ def main() -> int:
             and "not a measured apex" in clustered["note"],
             "clustered-peak wording is missing from the identification card",
         )
-        preview = _eval(session, "({whole:M.whole_run_windows, first:rawTrace(peaks[0])})")
-        _assert(preview["whole"] is False and preview["first"]["2"] > preview["first"]["0"],
-                "per-interval preview did not preserve interval-specific trace values")
+        preview = _eval(
+            session, "({whole:M.whole_run_windows, first:rawTrace(peaks[0])})"
+        )
+        _assert(
+            preview["whole"] is False and preview["first"]["2"] > preview["first"]["0"],
+            "per-interval preview did not preserve interval-specific trace values",
+        )
         _browser(session, "find", "nth", "0", ".plist li", "click")
 
         sole = _eval(
@@ -859,12 +1018,17 @@ def main() -> int:
         posted = _eval(session, "({config:buildConfig()})")
         _assert_config_round_trip(posted["config"])
         save_posts = [body for path, body in _ReviewHandler.posts if path == "/save"]
-        _assert(save_posts and save_posts[-1] == posted["config"],
-                "latest save body differs from the browser's complete buildConfig()")
-        done_posts = [body for path, body in _ReviewHandler.posts[done_cursor:]
-                      if path == "/done"]
-        _assert(done_posts and all(body == posted["config"] for body in done_posts),
-                "Done body differs from the browser's complete buildConfig()")
+        _assert(
+            save_posts and save_posts[-1] == posted["config"],
+            "latest save body differs from the browser's complete buildConfig()",
+        )
+        done_posts = [
+            body for path, body in _ReviewHandler.posts[done_cursor:] if path == "/done"
+        ]
+        _assert(
+            done_posts and all(body == posted["config"] for body in done_posts),
+            "Done body differs from the browser's complete buildConfig()",
+        )
         _standalone_browser_pass(data)
         _provenance_browser_pass()
         print("viz browser identification/configuration regression: OK")
