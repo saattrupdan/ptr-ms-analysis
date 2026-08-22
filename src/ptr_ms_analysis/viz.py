@@ -101,6 +101,7 @@ def build_viz_data(
     inten = f["SPECdata/Intensities"]
     ncyc = int(inten.shape[0])
     avg = np.asarray(f["SPECdata/AverageSpec"][:], dtype=np.float64)
+    avg = np.where(np.isfinite(avg), avg, 0.0)  # tolerate rare corrupt bins
     dur = ptrms.spec_duration_s(f)
 
     primary = ptrms.extract_primary(f, primary_mz=primary_mz, R=R)

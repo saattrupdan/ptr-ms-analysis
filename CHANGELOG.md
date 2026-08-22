@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed browser-review preparation failing when `SPECdata/AverageSpec` contains
+  non-finite bins; `viz` now treats those rare corrupt bins as zero, matching peak
+  detection and trace extraction.
+
 ## [0.1.1] - 2026-08-21
 
 ### Fixed
