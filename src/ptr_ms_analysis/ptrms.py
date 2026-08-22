@@ -799,9 +799,10 @@ def merge_adjacent_high_segments(segments, max_gap_cycles=60):
 
 def spec_duration_s(f):
     try:
-        return float(f.attrs["Single Spec Duration (ms)"][0]) / 1000.0
-    except (IndexError, KeyError, OSError, TypeError, ValueError):
+        duration = float(f.attrs["Single Spec Duration (ms)"][0]) / 1000.0
+    except (IndexError, KeyError, OSError, TypeError, ValueError, OverflowError):
         return 1.0
+    return duration if np.isfinite(duration) and duration > 0 else 1.0
 
 
 def load_pc_times(f):
@@ -833,18 +834,49 @@ def load_pc_times(f):
 
 
 def viz_x_axis_data(f):
-    """Return cycle, relative-time, and absolute-time axis data for the viz app."""
+    """Return finite, browser-safe cycle, relative, and absolute axis data.
+
+    PCTime is useful for the relative axis even when it is outside JavaScript's
+    Date range.  In that case only the absolute UTC axis is disabled.  A bad
+    duration must not leak NaN, infinity, or a non-increasing domain into the
+    browser, so the documented one-second fallback is used instead.
+    """
     ncyc = int(f["SPECdata/Intensities"].shape[0])
     pctimes = load_pc_times(f)
     cycles = np.arange(ncyc, dtype=np.float64) + 1.0
-    if pctimes is None:
-        relative = np.arange(ncyc, dtype=np.float64) * spec_duration_s(f)
-        absolute = None
-    else:
-        relative = pctimes - pctimes[0]
-        absolute = pctimes
+
+    duration = spec_duration_s(f)
+    if not np.isfinite(duration) or duration <= 0:
+        duration = 1.0
+    fallback = np.arange(ncyc, dtype=np.float64) * duration
+    if not np.all(np.isfinite(fallback)) or (
+        ncyc > 1 and not np.all(np.diff(fallback) > 0)
+    ):
+        fallback = np.arange(ncyc, dtype=np.float64)
+
+    relative = fallback
+    absolute = None
+    if pctimes is not None:
+        candidate = pctimes - pctimes[0]
+        if np.all(np.isfinite(candidate)) and (
+            ncyc <= 1 or np.all(np.diff(candidate) > 0)
+        ):
+            relative = candidate
+        # ECMAScript Date supports exactly ±8.64e15 milliseconds.  Keep the
+        # raw Unix-second values for display, but do not offer dates that the
+        # browser cannot render as UTC.
+        js_date_limit_s = 8.64e12
+        if np.all((pctimes >= -js_date_limit_s) & (pctimes <= js_date_limit_s)):
+            absolute = pctimes
+
+    def serialise_relative(values):
+        rounded = [round(float(x), 6) for x in values]
+        if len(rounded) > 1 and not np.all(np.diff(rounded) > 0):
+            return [float(x) for x in values]
+        return rounded
+
     return {
-        "relative": [round(float(x), 6) for x in relative],
+        "relative": serialise_relative(relative),
         "absolute": None
         if absolute is None
         else [round(float(x), 3) for x in absolute],

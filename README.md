@@ -71,26 +71,25 @@ peaks/segments. Skip it and run `analyze` directly only for a headless/no-browse
 a hand-off file. There is no one-shot command; the delivered CSV always comes from
 `analyze`, never the browser.
 
-**Planned, not yet available on current main:** `viz` will offer a configurable x-axis
-unit for the browser review. The default will remain cycle display, with choices for
-cycles, relative time, and absolute acquisition time in UTC. Relative time will show
-elapsed acquisition time, using the spectrum duration as a fallback. Absolute time will
-use validated `SPECdata/PCTime` values and will be unavailable when those timestamps
-are missing or invalid.
+`viz` offers a configurable x-axis unit for the browser review. The default is cycle
+display. Accepted values are exactly `cycle`, `relative`, and `absolute`. Relative time
+shows elapsed acquisition time, using the spectrum duration when it is finite and
+positive, and a one-second fallback otherwise. Absolute time uses validated
+`SPECdata/PCTime` values and is unavailable when those timestamps are missing, invalid,
+or outside the browser's UTC Date range.
 
-The planned setting will be `viz.x_axis_unit` in the config, with a matching
-`--x-axis-unit` option on `ptr viz`:
+Set `viz.x_axis_unit` in the config, or use the matching `--x-axis-unit` option on
+`ptr viz`:
 
 ```json
 {
-  "viz": { "x_axis_unit": "cycles" }
+  "viz": { "x_axis_unit": "relative" }
 }
 ```
 
-Precedence will be CLI override > config value > cycle default. The selector will update
-the Signal over time plot and the Intervals card only: saved ranges and CSV `Cycle` rows
-will remain integer, 1-based, inclusive cycle boundaries. Current main does not yet
-accept this config field or CLI option.
+Precedence is CLI override > config value > cycle default. The selector is shown only
+on the **Signal over time** tab and updates that plot and the Intervals card. Saved
+ranges and CSV `Cycle` rows remain integer, 1-based, inclusive cycle boundaries.
 
 An analysis config may include an `analyze` object with `R`, `R_phys`, `K`,
 `molar_volume`, `primary_mz`, `kinetic`, `k_anchor`, `humidity_correct`, `humidity_p`,

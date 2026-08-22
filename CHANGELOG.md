@@ -9,10 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Documented the planned configurable `viz` x-axis unit selector, including its
-  cycle, relative-time, and UTC absolute-time choices, CLI/config precedence, and
-  cycle-based range and CSV persistence. The feature is not yet available on
-  current main.
+- Added the configurable `viz` x-axis unit selector. It accepts exactly `cycle`,
+  `relative`, and `absolute`, with CLI/config precedence and cycle-based range and
+  CSV persistence. Relative time uses a finite positive spectrum duration, or one
+  second when the duration metadata is invalid; absolute time is disabled for invalid
+  or browser-unrenderable `PCTime` values.
 
 ## [0.1.2] - 2026-08-22
 

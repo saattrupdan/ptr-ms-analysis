@@ -63,7 +63,7 @@ _ANALYSIS_DEFAULTS = {
     "whole_run_windows": False,
 }
 
-_X_AXIS_UNITS = ("cycle", "relative_time", "absolute_time")
+_X_AXIS_UNITS = ("cycle", "relative", "absolute")
 
 
 def resolve_x_axis_unit(config=None, args=None):
@@ -1883,7 +1883,7 @@ def main():
         "--x-axis-unit",
         choices=_X_AXIS_UNITS,
         default=None,
-        help="Time-trace x-axis: cycle, relative_time, or absolute_time (default cycle)",
+        help="Time-trace x-axis: cycle, relative, or absolute (default cycle)",
     )
     pv.add_argument(
         "--save-config",

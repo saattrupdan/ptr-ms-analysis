@@ -27,10 +27,14 @@ Root attributes hold instrument/run metadata: `Single Spec Duration (ms)`
 | `AddTraces/DataCollection/Data` | (n_cyc, 5) | Per-cycle `ACQ_SRV_MassCal_a/b` and spec timing. |
 | `AddTraces/PTR-Instrument/Data` | (n_cyc, 75) | Full instrument telemetry (voltages, temperatures, flows, turbos). |
 
-The planned `viz` absolute acquisition-time display will use `SPECdata/PCTime` only
-after validating the per-cycle PC Unix timestamps. If the dataset is missing or its
-values are invalid, that display will be unavailable. Relative-time display will use
-elapsed acquisition time and fall back to the spectrum duration when needed.
+The `viz` x-axis selector accepts exactly `cycle`, `relative`, and `absolute`.
+Relative-time display uses elapsed acquisition time from `SPECdata/PCTime` when valid,
+falling back to the spectrum duration when it is finite and positive, or one second
+otherwise. Absolute-time display
+uses `SPECdata/PCTime` only after validating every per-cycle PC Unix timestamp and its
+JavaScript `Date` range. If the dataset is missing, malformed, or outside that range,
+the absolute display is unavailable; relative display remains available when its domain
+can be represented as finite increasing values.
 
 ## Key finding: Viewer re-processes from raw spectra
 

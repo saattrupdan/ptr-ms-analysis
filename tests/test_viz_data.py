@@ -73,6 +73,35 @@ class VizDataTest(unittest.TestCase):
         self.assertFalse(axes["absolute_available"])
         self.assertEqual(axes["relative"], [0.0, 2.5, 5.0])
 
+    def test_nonpositive_or_nonfinite_duration_uses_safe_relative_domain(self):
+        for duration_ms in (0.0, -1000.0, np.nan):
+            with self.subTest(duration_ms=duration_ms):
+                with h5py.File(
+                    "in-memory", "w", driver="core", backing_store=False
+                ) as h5:
+                    h5.create_dataset("SPECdata/Intensities", data=np.zeros((3, 2)))
+                    h5.attrs["Single Spec Duration (ms)"] = [duration_ms]
+                    axes = ptrms.viz_x_axis_data(h5)
+
+                self.assertEqual(axes["relative"], [0.0, 1.0, 2.0])
+                self.assertTrue(np.all(np.isfinite(axes["relative"])))
+                self.assertTrue(np.all(np.diff(axes["relative"]) > 0))
+
+    def test_out_of_javascript_date_range_keeps_relative_but_disables_absolute(self):
+        with h5py.File("in-memory", "w", driver="core", backing_store=False) as h5:
+            h5.create_dataset("SPECdata/Intensities", data=np.zeros((3, 2)))
+            h5.create_dataset(
+                "SPECdata/PCTime",
+                data=[[10_000_000_000_000], [10_000_000_000_002], [10_000_000_000_005]],
+            )
+            h5.attrs["Single Spec Duration (ms)"] = [1000.0]
+            axes = ptrms.viz_x_axis_data(h5)
+
+        self.assertIsNone(axes["absolute"])
+        self.assertFalse(axes["absolute_available"])
+        self.assertEqual(axes["relative"], [0.0, 2.0, 5.0])
+        self.assertTrue(np.all(np.diff(axes["relative"]) > 0))
+
 
 if __name__ == "__main__":
     unittest.main()
