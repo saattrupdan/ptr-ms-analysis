@@ -62,13 +62,35 @@ By default it serves a localhost app that live-saves every edit into the `--conf
 and, when the expert clicks *Done*, runs the full-precision analysis and writes the
 `--out` CSV; `--html review.html` writes a portable offline file instead (edits exported
 via a Download button).
-A first-time user gets an automatic guided tour of the interface (skippable, remembered in
-the browser). The agent can also add a `"checklist"` array to the config — short points for
-the reviewer to confirm (an ambiguous segment, a relabelled background channel, a
-calibration caveat) — which the app shows as a tickable list, so review notes live in the
-app instead of a wall of chat text. `viz` does not detect peaks/segments. Skip it and run `analyze` directly only for a
-headless/no-browser run or a hand-off file. There is no one-shot command; the delivered
-CSV always comes from `analyze`, never the browser.
+A first-time user gets an automatic guided tour of the interface (skippable,
+remembered in the browser). The agent can also add a `"checklist"` array to the config —
+short points for the reviewer to confirm (an ambiguous segment, a relabelled background
+channel, a calibration caveat) — which the app shows as a tickable list, so review
+notes live in the app instead of a wall of chat text. `viz` does not detect
+peaks/segments. Skip it and run `analyze` directly only for a headless/no-browser run or
+a hand-off file. There is no one-shot command; the delivered CSV always comes from
+`analyze`, never the browser.
+
+**Planned, not yet available on current main:** `viz` will offer a configurable x-axis
+unit for the browser review. The default will remain cycle display, with choices for
+cycles, relative time, and absolute acquisition time in UTC. Relative time will show
+elapsed acquisition time, using the spectrum duration as a fallback. Absolute time will
+use validated `SPECdata/PCTime` values and will be unavailable when those timestamps
+are missing or invalid.
+
+The planned setting will be `viz.x_axis_unit` in the config, with a matching
+`--x-axis-unit` option on `ptr viz`:
+
+```json
+{
+  "viz": { "x_axis_unit": "cycles" }
+}
+```
+
+Precedence will be CLI override > config value > cycle default. The selector will update
+the Signal over time plot and the Intervals card only: saved ranges and CSV `Cycle` rows
+will remain integer, 1-based, inclusive cycle boundaries. Current main does not yet
+accept this config field or CLI option.
 
 An analysis config may include an `analyze` object with `R`, `R_phys`, `K`,
 `molar_volume`, `primary_mz`, `kinetic`, `k_anchor`, `humidity_correct`, `humidity_p`,

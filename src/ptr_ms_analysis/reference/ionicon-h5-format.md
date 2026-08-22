@@ -27,6 +27,11 @@ Root attributes hold instrument/run metadata: `Single Spec Duration (ms)`
 | `AddTraces/DataCollection/Data` | (n_cyc, 5) | Per-cycle `ACQ_SRV_MassCal_a/b` and spec timing. |
 | `AddTraces/PTR-Instrument/Data` | (n_cyc, 75) | Full instrument telemetry (voltages, temperatures, flows, turbos). |
 
+The planned `viz` absolute acquisition-time display will use `SPECdata/PCTime` only
+after validating the per-cycle PC Unix timestamps. If the dataset is missing or its
+values are invalid, that display will be unavailable. Relative-time display will use
+elapsed acquisition time and fall back to the spectrum duration when needed.
+
 ## Key finding: Viewer re-processes from raw spectra
 
 The PTR-MS Viewer CSV values are **not** copies of the pre-computed `TRACEdata`.
