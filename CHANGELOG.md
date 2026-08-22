@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-22
+
 ### Fixed
 
 - Restored the detailed scientific sections in the browser review Methods panel while
