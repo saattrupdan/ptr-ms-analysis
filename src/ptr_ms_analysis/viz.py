@@ -1930,9 +1930,6 @@ function updateStaleness(){ const stale=staleSettings(), rows=staleRows(stale);
     : ""; }
 function updateMethods(){
   const live=document.getElementById("methodlive"); if(!live) return;
-  Array.from(methodPanel.children).forEach(el=>{
-    if(el!==live && el.tagName!=="H2") el.hidden=true;
-  });
   const stale=staleSettings(); updateStaleness();
   const source=v=>v==="config.analyze"?"curated config":v==="cli"?"CLI override":v||"legacy default";
   const src=M.sources||{};

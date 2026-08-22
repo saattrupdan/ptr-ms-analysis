@@ -437,6 +437,7 @@ def _standalone_browser_pass(data: dict[str, Any]) -> None:
             initial = _eval(
                 session,
                 "({body:document.body.innerText, text:document.querySelector('#methodlive').innerText, "
+                "panelText:document.querySelector('#methodpanel').innerText, "
                 "buttons:Array.from(document.querySelectorAll('button')).map(b=>b.innerText), "
                 "served:SERVED, protocol:location.protocol})",
             )
@@ -451,6 +452,10 @@ def _standalone_browser_pass(data: dict[str, Any]) -> None:
             _assert(
                 "Download config" in initial["text"] and "Done" not in initial["text"],
                 "standalone Methods still use served-mode wording",
+            )
+            _assert(
+                "Mass calibration & drift" in initial["panelText"],
+                "Methods omits the detailed scientific sections",
             )
             _assert(
                 "Download config" in initial["buttons"]
@@ -842,18 +847,24 @@ def main() -> int:
         # checking that each subsequent edit saves one complete current snapshot.
         post_cursor = len(_ReviewHandler.posts)
 
-        # Methods is live provenance, not static help: inspect curated non-default
-        # settings, edit the controls, and verify both save and Done payloads.
+        # Methods combines live provenance with detailed scientific explanations:
+        # inspect curated non-default settings, edit the controls, and verify both save
+        # and Done payloads.
         _browser(session, "eval", "document.querySelector('#methodBtn').click()")
         initial_methods = _eval(
             session,
-            "({text:document.querySelector('#methodlive').innerText, kinetic:cfg.kinetic, "
+            "({text:document.querySelector('#methodlive').innerText, "
+            "panelText:document.querySelector('#methodpanel').innerText, kinetic:cfg.kinetic, "
             "R:cfg.R, Rphys:cfg.Rphys, primary:cfg.primarymz, humid:cfg.humid, "
             "humidChecked:document.querySelector('#humid').checked})",
         )
         _assert(
             "R integration windows" in initial_methods["text"],
             "Methods omits R: {!r}".format(initial_methods["text"][:200]),
+        )
+        _assert(
+            "Mass calibration & drift" in initial_methods["panelText"],
+            "Methods omits the detailed scientific sections",
         )
         _assert("Rphys" in initial_methods["text"], "Methods omits physical resolution")
         _assert(
