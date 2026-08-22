@@ -59,6 +59,59 @@ class VizDataTest(unittest.TestCase):
         self.assertEqual(axes["absolute"], [1700000000.0, 1700000002.0, 1700000009.0])
         self.assertTrue(axes["absolute_available"])
 
+    def test_adjacent_sub_millisecond_pctimes_keep_distinct_axis_values(self):
+        pctimes = [
+            1_700_000_000.0004,
+            1_700_000_000.0008,
+            1_700_000_000.0012,
+        ]
+        with h5py.File("in-memory", "w", driver="core", backing_store=False) as h5:
+            h5.create_dataset("SPECdata/Intensities", data=np.zeros((3, 2)))
+            h5.create_dataset("SPECdata/PCTime", data=np.asarray(pctimes)[:, None])
+            h5.attrs["Single Spec Duration (ms)"] = [1.0]
+            axes = ptrms.viz_x_axis_data(h5)
+
+        self.assertEqual(axes["absolute"], pctimes)
+        self.assertTrue(np.all(np.diff(axes["absolute"]) > 0))
+        json.loads(json.dumps(axes, allow_nan=False))
+
+    def test_absolute_axis_accepts_year_zero_but_rejects_expanded_years(self):
+        year_zero = -62167219200.0
+        year_10000 = 253402300800.0
+        cases = (
+            ([year_zero, year_zero + 0.001], True),
+            ([year_zero - 0.001, year_zero], False),
+            ([year_10000 - 0.001, year_10000 - 0.0004], True),
+            ([year_10000, year_10000 + 0.001], False),
+        )
+        for pctimes, available in cases:
+            with self.subTest(pctimes=pctimes):
+                with h5py.File(
+                    "in-memory", "w", driver="core", backing_store=False
+                ) as h5:
+                    h5.create_dataset("SPECdata/Intensities", data=np.zeros((2, 2)))
+                    h5.create_dataset(
+                        "SPECdata/PCTime", data=np.asarray(pctimes)[:, None]
+                    )
+                    h5.attrs["Single Spec Duration (ms)"] = [1.0]
+                    axes = ptrms.viz_x_axis_data(h5)
+
+                self.assertEqual(axes["absolute_available"], available)
+                if not available:
+                    self.assertIsNone(axes["absolute"])
+
+    def test_render_html_rejects_ambiguous_embedded_absolute_axis(self):
+        data = {
+            "meta": {
+                "x_axis": {
+                    "absolute": [1.0, 1.0],
+                    "absolute_available": True,
+                }
+            }
+        }
+        with self.assertRaisesRegex(ValueError, "strictly increasing"):
+            viz.render_html(data)
+
     def test_malformed_pctimes_disable_absolute_and_use_duration_fallback(self):
         with h5py.File("in-memory", "w", driver="core", backing_store=False) as h5:
             h5.create_dataset("SPECdata/Intensities", data=np.zeros((3, 2)))
