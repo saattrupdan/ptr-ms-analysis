@@ -359,6 +359,20 @@ review — a headless/automated run, or a portable file to hand off.
 ptr viz FILE.h5 --config analysis-config.json --out results.csv    # serve; Done -> writes results.csv
 ```
 
+**Planned, not yet available on current main:** browser review will have an x-axis
+unit selector. Its default will remain cycles. The planned choices are cycles,
+relative time (elapsed acquisition time, with a spectrum-duration fallback), and
+absolute acquisition time in UTC. The absolute choice will use validated
+`SPECdata/PCTime` values and will be unavailable when those timestamps are missing or
+invalid.
+
+The planned config shape is `viz.x_axis_unit`, with a matching `--x-axis-unit` option
+for `ptr viz`; precedence is CLI override > config value > cycle default. Changing the
+selector will update the **Signal over time** plot and **Intervals** card only. It will
+not change saved ranges or CSV `Cycle` rows: those remain integer, 1-based, inclusive
+cycle boundaries. Do not use this setting or flag with the current main until it is
+implemented.
+
 By default `viz` runs a localhost server, opens the browser, and **writes every change
 straight into the `--config` file**; when the expert clicks **Done** it runs the
 full-precision analysis and writes `--out` (the CLI prints the URL and blocks until
