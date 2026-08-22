@@ -63,6 +63,22 @@ _ANALYSIS_DEFAULTS = {
     "whole_run_windows": False,
 }
 
+_X_AXIS_UNITS = ("cycle", "relative_time", "absolute_time")
+
+
+def resolve_x_axis_unit(config=None, args=None):
+    """Resolve the viz x-axis unit with CLI > config > cycle precedence."""
+    config = config or {}
+    curated = config.get("viz")
+    if curated is not None and not isinstance(curated, dict):
+        raise ValueError("viz must be a JSON object")
+    curated = curated or {}
+    cli_value = getattr(args, "x_axis_unit", None) if args is not None else None
+    value = cli_value if cli_value is not None else curated.get("x_axis_unit", "cycle")
+    if value not in _X_AXIS_UNITS:
+        raise ValueError("viz.x_axis_unit must be one of: " + ", ".join(_X_AXIS_UNITS))
+    return value
+
 
 def _load_config(args):
     """Load the complete config once, retaining fields unknown to this CLI."""
@@ -1172,6 +1188,7 @@ def cmd_viz(args):
 
     config = _load_config(args)
     settings = resolve_analysis_settings(config, args)
+    x_axis_unit = resolve_x_axis_unit(config, args)
     with h5py.File(args.h5, "r") as f:
         peaks = _load_peaks(args, f, settings=settings)
         ranges_cfg = _load_ranges(args, f)
@@ -1204,6 +1221,7 @@ def cmd_viz(args):
             molar_volume=settings["molar_volume"],
             analysis_settings=settings,
             config_base=config,
+            x_axis_unit=x_axis_unit,
             checklist=_load_checklist(args),
         )
 
@@ -1222,6 +1240,7 @@ def cmd_viz(args):
                 **(config.get("analyze") or {}),
                 **{key: settings[key] for key in _ANALYSIS_DEFAULTS},
             }
+            initial["viz"] = {**(config.get("viz") or {}), "x_axis_unit": x_axis_unit}
             with open(cfg_path, "w", encoding="utf-8") as fh:
                 json.dump(initial, fh, indent=2)
         html = viz.render_html(data, config_path=cfg_path)
@@ -1859,6 +1878,12 @@ def main():
     pv.add_argument("--peaks-json", help="Inline peaks JSON (alternative to --config)")
     pv.add_argument(
         "--ranges-json", help="Inline ranges JSON (alternative to --config)"
+    )
+    pv.add_argument(
+        "--x-axis-unit",
+        choices=_X_AXIS_UNITS,
+        default=None,
+        help="Time-trace x-axis: cycle, relative_time, or absolute_time (default cycle)",
     )
     pv.add_argument(
         "--save-config",

@@ -70,6 +70,7 @@ def build_viz_data(
     checklist=None,
     analysis_settings=None,
     config_base=None,
+    x_axis_unit="cycle",
 ):
     """Assemble everything the HTML app needs into one JSON-able dict.
 
@@ -103,6 +104,11 @@ def build_viz_data(
     avg = np.asarray(f["SPECdata/AverageSpec"][:], dtype=np.float64)
     avg = np.where(np.isfinite(avg), avg, 0.0)  # tolerate rare corrupt bins
     dur = ptrms.spec_duration_s(f)
+    x_axis = ptrms.viz_x_axis_data(f)
+    if x_axis_unit not in ("cycle", "relative_time", "absolute_time"):
+        raise ValueError("invalid x-axis unit: " + str(x_axis_unit))
+    if x_axis_unit == "absolute_time" and not x_axis["absolute_available"]:
+        x_axis_unit = "cycle"
 
     primary = ptrms.extract_primary(f, primary_mz=primary_mz, R=R)
     humidity = ptrms.water_cluster_ratio(f, primary_mz=primary_mz, R=R)
@@ -278,6 +284,8 @@ def build_viz_data(
             "file": os.path.abspath(f.filename) if hasattr(f, "filename") else "",
             "ncyc": ncyc,
             "dur": dur,
+            "x_axis_unit": x_axis_unit,
+            "x_axis": x_axis,
             "a": a,
             "b": b,
             "R": R,
@@ -825,6 +833,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
         <button data-tab="spec">Mass spectrum</button>
       </span>
       <span class="sub" id="plotsub">— the selected peak's intensity across the run (when it appears)</span>
+      <label class="ctl" id="xaxiswrap" style="margin-left:4px">x-axis
+        <select id="xaxisunit" style="width:auto"></select></label>
       <label class="ctl" id="specrangewrap" style="margin-left:4px">average over
         <select id="specrange" style="width:auto"></select></label>
       <span class="grow"></span>
@@ -869,7 +879,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <div class="card" id="intcard">
     <h2>Intervals <span class="sub">— name / classify; drag edges in the plot to set the range</span></h2>
     <div class="scroll">
-      <table id="rngtbl"><thead><tr><th class="l">label</th><th class="l">class</th><th>cycles</th></tr></thead><tbody></tbody></table>
+      <table id="rngtbl"><thead><tr><th class="l">label</th><th class="l">class</th><th id="rngunit">cycles</th></tr></thead><tbody></tbody></table>
     </div>
     <div class="hint">⌘/Ctrl-drag the plot to add · click to select, then Del to remove</div>
   </div>
@@ -985,6 +995,39 @@ const SERVED = location.protocol.indexOf("http") === 0;
 const M = DATA.meta, PC = DATA.per_cycle, SPEC = DATA.spectrum;
 const A = M.a, B = M.b, NCYC = M.ncyc, NBIN = SPEC.length;
 const m2tb = m => A*Math.sqrt(m)+B;
+const AXIS = M.x_axis || {relative:[], absolute:null, absolute_available:false};
+let xAxisUnit = M.x_axis_unit || "cycle";
+function axisValues(){
+  if(xAxisUnit==="absolute_time" && AXIS.absolute_available) return AXIS.absolute;
+  if(xAxisUnit==="relative_time") return AXIS.relative;
+  return null;
+}
+function axisAtCycle(c){ const vals=axisValues(); if(!vals) return c;
+  const i=Math.max(1,Math.min(NCYC, c)); return vals[Math.round(i)-1]; }
+function cycleAtAxis(v){ const vals=axisValues(); if(!vals) return v;
+  if(v<=vals[0]) return 1; if(v>=vals[vals.length-1]) return NCYC;
+  let lo=0, hi=vals.length-1;
+  while(hi-lo>1){ const mid=(lo+hi)>>1; if(vals[mid]<=v)lo=mid; else hi=mid; }
+  const frac=(v-vals[lo])/(vals[hi]-vals[lo]); return lo+1+frac;
+}
+function axisUnitLabel(){ return xAxisUnit==="absolute_time" ? "UTC time" : xAxisUnit==="relative_time" ? "time (s)" : "cycle"; }
+function formatAxis(v, full=false){
+  if(xAxisUnit==="absolute_time"){
+    const d=new Date(v*1000); if(!isFinite(d.getTime())) return "—";
+    return full ? d.toISOString().replace("T"," ").replace("Z"," UTC") : d.toISOString().slice(11,19)+" UTC";
+  }
+  if(xAxisUnit==="relative_time") return (+v).toFixed(1)+" s";
+  return String(Math.round(v));
+}
+function renderXAxis(){ const el=document.getElementById("xaxisunit"); if(!el) return;
+  const opts=[["cycle","cycles"],["relative_time","relative time (s)"],["absolute_time","absolute time (UTC)"]];
+  el.innerHTML=""; opts.forEach(([v,t])=>{ const o=document.createElement("option"); o.value=v; o.textContent=t;
+    o.disabled=v==="absolute_time"&&!AXIS.absolute_available; el.appendChild(o); });
+  el.value=xAxisUnit; if(el.value!==xAxisUnit){ xAxisUnit="cycle"; el.value="cycle"; }
+  const wrap=document.getElementById("xaxiswrap"); if(wrap) wrap.title=AXIS.absolute_available?"Time axis uses validated per-cycle PCTime; absolute dates are UTC":"Absolute UTC time is unavailable because SPECdata/PCTime is missing or malformed";
+  const unit=document.getElementById("rngunit"); if(unit) unit.textContent=axisUnitLabel();
+}
+function formatRange(r){ return formatAxis(axisAtCycle(r.start),true)+"–"+formatAxis(axisAtCycle(r.end),true); }
 const tb2m = tb => Math.pow((tb-B)/A, 2);
 
 let peaks = DATA.peaks.map(p => { const dw=p.apex/(2*DATA.meta.R);
@@ -1082,7 +1125,9 @@ function undo(){ const s=undoStack.pop(); if(!s) return;
     if(p) jumpToPeak(p); else animateTo(f.apex-0.6,f.apex+0.6,300); scheduleSave(); return; }
   if(f && f.kind==="range"){ if(f.id!=null) selRange=f.id;
     if(tab!=="trace") setTab("trace"); renderPeaks(); renderRanges();
-    const pad=Math.max(8,(f.end-f.start)*0.6); animateTo(f.start-pad,f.end+pad,300); scheduleSave(); return; }
+    const pad=Math.max(8,(f.end-f.start)*0.6);
+    animateTo(axisAtCycle(Math.max(1,f.start-pad)),axisAtCycle(Math.min(NCYC,f.end+pad)),300);
+    scheduleSave(); return; }
   renderPeaks(); renderRanges(); redraw(); }
 
 // ---- math (mirrors ptrms.quantify) ----
@@ -1159,13 +1204,13 @@ const TINSET=(()=>{ const disc=PC.discriminator; if(!disc) return null;
 const plotC=document.getElementById("plot");
 let tab="trace";                        // "spec" | "trace" — intervals reviewed first, then peaks
 let vSpec={lo:0,hi:1};                   // domain in m/z
-let vTrace={lo:1,hi:NCYC};               // domain in cycles
+let vTrace={lo:axisAtCycle(1),hi:axisAtCycle(NCYC)}; // domain in the selected x-axis unit
 let insetBox=null;                       // {x,y,w,h,d0,d1} set each draw for hit-testing
 let cursor=null;                         // {x,y} in CSS px for the hover crosshair (null = off-plot)
 let anim=null;                           // active view animation
 function view(){ return tab==="spec"?vSpec:vTrace; }
-function fullDomain(){ return tab==="spec"?[Math.max(1,INSET.lo),INSET.hi]:[1,NCYC]; }
-function minWidth(){ return tab==="spec"?0.15:5; }
+function fullDomain(){ return tab==="spec"?[Math.max(1,INSET.lo),INSET.hi]:[axisAtCycle(1),axisAtCycle(NCYC)]; }
+function minWidth(){ return tab==="spec"?0.15:Math.max(5, (axisAtCycle(Math.min(NCYC,2))-axisAtCycle(1))*5); }
 function initSpecView(){ const ms=peaks.map(p=>p.mz);
   if(ms.length){ vSpec.lo=Math.max(1,Math.min(...ms)-4); vSpec.hi=Math.max(...ms)+4; }
   else { vSpec.lo=10; vSpec.hi=Math.min(300, tb2m(NBIN-1)); } }
@@ -1325,14 +1370,19 @@ function peakHitsAt(x){ const lo=vSpec.lo,hi=vSpec.hi, out=[];
 
 // ---- time trace view ----
 function traceX(w){ const padL=46, plotW=w-padL-10;
-  return c=>padL+((c-vTrace.lo)/(vTrace.hi-vTrace.lo))*plotW; }
+  return c=>padL+(axisAtCycle(c)-vTrace.lo)/(vTrace.hi-vTrace.lo)*plotW;
+}
 function cycleAtX(px){ const w=plotC.clientWidth, padL=46, plotW=w-padL-10;
-  return Math.round(vTrace.lo+((px-padL)/plotW)*(vTrace.hi-vTrace.lo)); }
+  return Math.round(cycleAtAxis(vTrace.lo+((px-padL)/plotW)*(vTrace.hi-vTrace.lo)));
+}
+function axisAtX(px){ const w=plotC.clientWidth, padL=46, plotW=w-padL-10;
+  return vTrace.lo+((px-padL)/plotW)*(vTrace.hi-vTrace.lo);
+}
 function drawTrace(){
   const [x,w,h]=fit(plotC), padL=46, padB=22; grid(x,w,h,padL,padB);
   const X=traceX(w), p=selPeak(), top=8, plotH=h-top-padB;
   // visible cycle window + peak-preserving decimation (~2 samples per pixel)
-  const c0=Math.max(1,Math.floor(vTrace.lo)), c1=Math.min(NCYC,Math.ceil(vTrace.hi));
+  const c0=Math.max(1,Math.floor(cycleAtAxis(vTrace.lo))), c1=Math.min(NCYC,Math.ceil(cycleAtAxis(vTrace.hi)));
   const step=Math.max(1,Math.floor((c1-c0)/((w-56)*2||1)));
   x.save(); x.beginPath(); x.rect(padL,top,w-padL-10,plotH); x.clip();
   const disc=PC.discriminator;
@@ -1384,11 +1434,11 @@ function drawTrace(){
     x.fillText(r.label, lx, top+13); });
   x.restore();
   x.fillStyle=TH.axis; x.font="10px sans-serif";
-  x.fillText(""+Math.round(vTrace.lo),46,h-6); x.fillText(""+Math.round(vTrace.hi),w-40,h-6);
-  x.fillText("cycle",(padL+w)/2,h-6);
-  if(cursor){ const plotW=w-padL-10, cyc=Math.round(vTrace.lo+(cursor.x-padL)/plotW*(vTrace.hi-vTrace.lo));
+  x.fillText(formatAxis(vTrace.lo),46,h-6); x.fillText(formatAxis(vTrace.hi),w-70,h-6);
+  x.fillText(axisUnitLabel(),(padL+w)/2,h-6);
+  if(cursor){ const cyc=cycleAtX(cursor.x), xv=axisAtX(cursor.x);
     const yStr=(yLo!=null)?(yLo+(top+plotH-cursor.y)/plotH*(yHi-yLo)).toPrecision(3):"—";
-    crosshair(x,w,h,padL,top,plotH, ""+cyc, yStr); }
+    crosshair(x,w,h,padL,top,plotH, formatAxis(xv), yStr); }
   insetBox=null;   // no overview inset on the trace plot (it obscured the signal)
 }
 
@@ -1483,7 +1533,7 @@ plotC.addEventListener("wheel",e=>{ e.preventDefault(); anim=null; const v=view(
   const padL=tab==="spec"?56:46, plotW=Math.max(1,plotC.clientWidth-padL-10);
   const dx=(Math.abs(e.deltaX)>Math.abs(e.deltaY))?e.deltaX:(e.shiftKey?e.deltaY:0);
   if(dx){ const d=dx/plotW*(v.hi-v.lo); v.lo+=d; v.hi+=d; clampView(); scheduleDraw(); return; }
-  const dom = tab==="spec"?specMzAtX(e.offsetX):cycleAtX(e.offsetX);
+  const dom = tab==="spec"?specMzAtX(e.offsetX):axisAtX(e.offsetX);
   const f=Math.exp(e.deltaY*0.0016);          // smooth, proportional zoom
   v.lo=dom-(dom-v.lo)*f; v.hi=dom+(v.hi-dom)*f; clampView(); scheduleDraw(); },{passive:false});
 // suppress the context menu on the plot so Ctrl-drag (add) works cleanly on macOS
@@ -1626,7 +1676,7 @@ function renderRanges(){ const tb=document.querySelector("#rngtbl tbody"); if(!t
     tr.innerHTML=`<td class="l"><input type="text" class="lbl" data-a="label" value="${(r.label||'').replace(/"/g,'&quot;')}"></td>`+
       `<td class="l"><select data-a="class"><option value="sample" ${r.class==='sample'?'selected':''}>sample</option>`+
         `<option value="background" ${r.class==='background'?'selected':''}>background</option></select></td>`+
-      `<td class="mini" title="drag the interval edges in the plot to change">${r.start}–${r.end}</td>`;
+      `<td class="mini" title="drag the interval edges in the plot to change">${formatRange(r)}</td>`;
     tr.onclick=ev=>{ if(ev.target.dataset.a) return; selRange=r._id; renderRanges(); jumpToInterval(r); };
     tr.querySelectorAll("[data-a]").forEach(el=>{ const act=el.dataset.a;
       el.onchange=()=>{ pushUndo(); r[act]=el.value;
@@ -1636,7 +1686,7 @@ function renderRanges(){ const tb=document.querySelector("#rngtbl tbody"); if(!t
   if(selTr && selRange!==_lastScrolledRange){ selTr.scrollIntoView({block:"nearest",behavior:"smooth"}); }
   _lastScrolledRange=selRange; }
 function jumpToInterval(r){ const pad=Math.max(8,(r.end-r.start)*0.6);
-  if(tab!=="trace") setTab("trace"); animateTo(r.start-pad, r.end+pad, 300); }
+  if(tab!=="trace") setTab("trace"); animateTo(axisAtCycle(Math.max(1,r.start-pad)), axisAtCycle(Math.min(NCYC,r.end+pad)), 300); }
 
 // ---- config / save ----
 function buildConfig(){ return {
@@ -1646,6 +1696,7 @@ function buildConfig(){ return {
     if(p.winManual){ if(Math.abs(p.winL-p.winR)<1e-6) o.window=+(p.winL*2).toFixed(5);
       else o.window={left:+p.winL.toFixed(5),right:+p.winR.toFixed(5)}; } return o; }),
   ranges: ranges.map(r=>({label:r.label,start:r.start,end:r.end,unit:"cycle"})),
+  viz:{ ...((DATA.config_base||{}).viz||{}), x_axis_unit:xAxisUnit },
   analyze:{ ...((DATA.config_base||{}).analyze||{}), R:cfg.R, R_phys:cfg.Rphys,
     K:cfg.K, molar_volume:cfg.Vm, primary_mz:cfg.primarymz,
     kinetic:cfg.kinetic, k_anchor:cfg.kanchor, humidity_correct:cfg.humid,
@@ -1779,6 +1830,13 @@ function setTab(t){ tab=t; anim=null; hoverRange=null; hoverPeakId=null;
   else if(typeof showSpin==="function"){ if(_spinTimer){ clearTimeout(_spinTimer); _spinTimer=null; } showSpin(false); }
   relayout(); }
 document.querySelectorAll("#maintabs button").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+const xAxisSelect=document.getElementById("xaxisunit");
+if(xAxisSelect) xAxisSelect.onchange=e=>{
+  const v=e.target.value;
+  if(v==="absolute_time"&&!AXIS.absolute_available){ e.target.value=xAxisUnit; return; }
+  xAxisUnit=v; vTrace={lo:axisAtCycle(1),hi:axisAtCycle(NCYC)};
+  renderXAxis(); renderRanges(); drawMain(); scheduleSave();
+};
 
 // ---- controls ----
 function setv(id,v){ const el=document.getElementById(id); if(el) el.value=v??""; }
@@ -1903,7 +1961,8 @@ document.getElementById("zoomin").onclick=()=>zoomBy(1/1.6);
 document.getElementById("zoomreset").onclick=()=>{
   if(tab==="spec"){ const p=selPeak();                       // reset = back to the selected compound's zoomed view
     if(p) jumpToPeak(p); else { initSpecView(); animateTo(vSpec.lo,vSpec.hi,180); } }
-  else animateTo(1,NCYC,180); };
+  else animateTo(axisAtCycle(1),axisAtCycle(NCYC),180);
+};
 // peaks: details toggle — widen the sidebar instead of side-scrolling
 document.getElementById("pkdetails").onclick=()=>{ showDetails=!showDetails;
   const app=document.getElementById("app");
@@ -2082,6 +2141,7 @@ if(SERVED){ const b=document.createElement("button"); b.className="primary"; b.t
 } else { const b=document.createElement("button"); b.className="primary"; b.textContent="Download config";
   b.onclick=()=>download("config.json",JSON.stringify(buildConfig(),null,2)); erow.appendChild(b);
   b.title="Hand this config back to the agent; it re-runs the analysis at full precision."; }
+renderXAxis();
 initSpecView(); clampView(); renderPeaks(); renderRanges();
 // initial mass-spectrum view: zoomed onto the first compound rather than the whole range
 // (same zoom as clicking the compound in the peak list — jumpToPeak's half-width)

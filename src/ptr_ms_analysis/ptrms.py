@@ -111,12 +111,7 @@ def load_mass_cal(f):
         if raw_mapping is not None and raw_mapping.shape == (2, 2):
             try:
                 (m1, tb1), (m2, tb2) = raw_mapping
-                if (
-                    np.isfinite(raw_mapping).all()
-                    and m1 > 0
-                    and m2 > 0
-                    and m1 != m2
-                ):
+                if np.isfinite(raw_mapping).all() and m1 > 0 and m2 > 0 and m1 != m2:
                     # This is intentionally the original expression on the raw
                     # scalar dtype.  Some valid files use float32 and changing the
                     # order or precision changes their legacy calibration exactly.
@@ -150,25 +145,20 @@ def load_mass_cal(f):
                             condition = np.linalg.cond(design)
                             # Limit round-off amplification to sqrt(epsilon), a
                             # standard useful-digit criterion for a float64 fit.
-                            condition_limit = 1.0 / np.sqrt(
-                                np.finfo(np.float64).eps
-                            )
+                            condition_limit = 1.0 / np.sqrt(np.finfo(np.float64).eps)
                             if np.isfinite(condition) and condition <= condition_limit:
-                                a, b = np.linalg.lstsq(
-                                    design, timebins, rcond=None
-                                )[0]
+                                a, b = np.linalg.lstsq(design, timebins, rcond=None)[0]
                                 if np.isfinite(a) and np.isfinite(b) and a > 0:
                                     with np.errstate(over="ignore", invalid="ignore"):
                                         inferred_masses = ((timebins - b) / a) ** 2
                                         relative_mass_errors = np.abs(
                                             (inferred_masses - masses) / masses
                                         )
-                                    if (
-                                        np.isfinite(relative_mass_errors).all()
-                                        and np.all(
-                                            relative_mass_errors
-                                            <= MAPPING_MAX_RELATIVE_MASS_ERROR
-                                        )
+                                    if np.isfinite(
+                                        relative_mass_errors
+                                    ).all() and np.all(
+                                        relative_mass_errors
+                                        <= MAPPING_MAX_RELATIVE_MASS_ERROR
                                     ):
                                         return float(a), float(b)
             except (TypeError, ValueError, FloatingPointError, np.linalg.LinAlgError):
@@ -812,6 +802,55 @@ def spec_duration_s(f):
         return float(f.attrs["Single Spec Duration (ms)"][0]) / 1000.0
     except (IndexError, KeyError, OSError, TypeError, ValueError):
         return 1.0
+
+
+def load_pc_times(f):
+    """Return validated per-cycle PC Unix timestamps, or ``None``.
+
+    PCTime is optional in IoniTOF exports.  It is only suitable for an axis when
+    it contains exactly one finite, strictly increasing timestamp per spectrum.
+    In particular, malformed timestamps must not be replaced with plausible
+    absolute dates.
+    """
+    try:
+        ncyc = int(f["SPECdata/Intensities"].shape[0])
+        ds = f["SPECdata/PCTime"]
+        if ds.ndim == 2 and ds.shape[1] == 1:
+            values = np.asarray(ds[:, 0], dtype=np.float64)
+        elif ds.ndim == 1:
+            values = np.asarray(ds[:], dtype=np.float64)
+        else:
+            return None
+    except (KeyError, OSError, TypeError, ValueError):
+        return None
+    if values.shape != (ncyc,) or not np.all(np.isfinite(values)):
+        return None
+    if np.any(values <= 0):
+        return None
+    if ncyc > 1 and not np.all(np.diff(values) > 0):
+        return None
+    return values
+
+
+def viz_x_axis_data(f):
+    """Return cycle, relative-time, and absolute-time axis data for the viz app."""
+    ncyc = int(f["SPECdata/Intensities"].shape[0])
+    pctimes = load_pc_times(f)
+    cycles = np.arange(ncyc, dtype=np.float64) + 1.0
+    if pctimes is None:
+        relative = np.arange(ncyc, dtype=np.float64) * spec_duration_s(f)
+        absolute = None
+    else:
+        relative = pctimes - pctimes[0]
+        absolute = pctimes
+    return {
+        "relative": [round(float(x), 6) for x in relative],
+        "absolute": None
+        if absolute is None
+        else [round(float(x), 3) for x in absolute],
+        "absolute_available": absolute is not None,
+        "cycle": [int(x) for x in cycles],
+    }
 
 
 # ---------- quantification ----------

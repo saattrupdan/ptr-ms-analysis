@@ -63,6 +63,20 @@ class AnalysisSettingsTest(unittest.TestCase):
         self.assertEqual(settings["sources"]["R"], "cli")
         self.assertEqual(settings["sources"]["kinetic"], "cli")
 
+    def test_viz_axis_cli_overrides_config_and_rejects_unknown_units(self):
+        args = Namespace(x_axis_unit="absolute_time")
+        self.assertEqual(
+            analyze.resolve_x_axis_unit(
+                {"viz": {"x_axis_unit": "relative_time"}}, args
+            ),
+            "absolute_time",
+        )
+        self.assertEqual(
+            analyze.resolve_x_axis_unit({}, Namespace(x_axis_unit=None)), "cycle"
+        )
+        with self.assertRaises(ValueError):
+            analyze.resolve_x_axis_unit({"viz": {"x_axis_unit": "seconds"}})
+
     def test_calibrate_uses_all_effective_extraction_settings(self):
         config = {"analyze": {"R": 1800, "R_phys": 3200, "primary_mz": 19.022}}
         args = Namespace(

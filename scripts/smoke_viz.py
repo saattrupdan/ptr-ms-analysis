@@ -51,6 +51,13 @@ def _synthetic_data() -> dict[str, Any]:
             "file": "synthetic-review.h5",
             "ncyc": 4,
             "dur": 1.0,
+            "x_axis_unit": "cycle",
+            "x_axis": {
+                "cycle": [1, 2, 3, 4],
+                "relative": [0.0, 2.0, 9.0, 15.0],
+                "absolute": [1700000000.0, 1700000002.0, 1700000009.0, 1700000015.0],
+                "absolute_available": True,
+            },
             "a": 1000.0,
             "b": 0.0,
             "R": 1500.0,
@@ -231,6 +238,7 @@ def _synthetic_data() -> dict[str, Any]:
         ],
         "config_base": {
             "unknown_top_level": {"keep": True},
+            "viz": {"unknown_setting": "keep"},
             "analyze": {"unknown_setting": "keep"},
         },
         "checklist": [],
@@ -329,6 +337,11 @@ def _assert_config_round_trip(config: dict[str, Any]) -> None:
     """Check fields whose loss would make a saved review non-reproducible."""
     _assert(config["unknown_top_level"]["keep"], "unknown top-level field was dropped")
     _assert(
+        config["viz"]["x_axis_unit"] in {"cycle", "relative_time", "absolute_time"},
+        "x-axis unit was not saved",
+    )
+    _assert(config["viz"]["unknown_setting"] == "keep", "unknown viz field was dropped")
+    _assert(
         config["analyze"]["unknown_setting"] == "keep",
         "unknown analyze field was dropped",
     )
@@ -357,6 +370,39 @@ def _standalone_browser_pass(data: dict[str, Any]) -> None:
             _browser(session, "eval", "localStorage.setItem('ptrms-onboarded', '1')")
             _browser(session, "reload")
             _browser(session, "wait", "--load", "networkidle")
+            _browser(
+                session,
+                "eval",
+                "document.querySelector('#xaxisunit').value='relative_time'; document.querySelector('#xaxisunit').dispatchEvent(new Event('change',{bubbles:true}))",
+            )
+            relative_axis = _eval(
+                session,
+                "({unit:xAxisUnit, text:document.querySelector('#rngtbl').innerText, config:buildConfig()})",
+            )
+            _assert(
+                relative_axis["unit"] == "relative_time"
+                and "0.0 s" in relative_axis["text"],
+                "standalone relative-time labels did not update",
+            )
+            _browser(
+                session,
+                "eval",
+                "document.querySelector('#xaxisunit').value='absolute_time'; document.querySelector('#xaxisunit').dispatchEvent(new Event('change',{bubbles:true}))",
+            )
+            absolute_axis = _eval(
+                session,
+                "({unit:xAxisUnit, text:document.querySelector('#rngtbl').innerText, config:buildConfig()})",
+            )
+            _assert(
+                absolute_axis["unit"] == "absolute_time"
+                and "UTC" in absolute_axis["text"],
+                "standalone UTC labels did not update",
+            )
+            _browser(
+                session,
+                "eval",
+                "document.querySelector('#xaxisunit').value='cycle'; document.querySelector('#xaxisunit').dispatchEvent(new Event('change',{bubbles:true}))",
+            )
             _browser(session, "eval", "document.querySelector('#methodBtn').click()")
             initial = _eval(
                 session,
@@ -662,6 +708,59 @@ def main() -> int:
         # first controlled edit; every request below has a matching snapshot.
         _ReviewHandler.posts = []
         post_cursor = 0
+
+        # Check all display units, including irregular timestamp conversion. Ranges
+        # remain integer cycles in the saved config while the card follows the axis.
+        axis = _eval(
+            session,
+            "({unit:xAxisUnit, options:Array.from(document.querySelectorAll('#xaxisunit option')).map(o=>({value:o.value,disabled:o.disabled}))})",
+        )
+        _assert(
+            axis["options"]
+            == [
+                {"value": "cycle", "disabled": False},
+                {"value": "relative_time", "disabled": False},
+                {"value": "absolute_time", "disabled": False},
+            ],
+            "x-axis selector options are wrong",
+        )
+        _browser(
+            session,
+            "eval",
+            "document.querySelector('#xaxisunit').value='relative_time'; document.querySelector('#xaxisunit').dispatchEvent(new Event('change',{bubbles:true}))",
+        )
+        converted = _eval(session, "({cycle:axisAtCycle(3), back:cycleAtAxis(9)})")
+        _assert(
+            converted["cycle"] == 9 and converted["back"] == 3,
+            "irregular relative timestamps did not map cycles",
+        )
+        relative_axis = _eval(
+            session,
+            "({unit:xAxisUnit, text:document.querySelector('#rngtbl').innerText, config:buildConfig()})",
+        )
+        _assert(
+            relative_axis["unit"] == "relative_time"
+            and "0.0 s" in relative_axis["text"],
+            "relative-time interval labels did not update",
+        )
+        _browser(
+            session,
+            "eval",
+            "document.querySelector('#xaxisunit').value='absolute_time'; document.querySelector('#xaxisunit').dispatchEvent(new Event('change',{bubbles:true}))",
+        )
+        absolute_axis = _eval(
+            session,
+            "({unit:xAxisUnit, text:document.querySelector('#rngtbl').innerText, config:buildConfig()})",
+        )
+        _assert(
+            absolute_axis["unit"] == "absolute_time" and "UTC" in absolute_axis["text"],
+            "absolute UTC interval labels did not update",
+        )
+        _browser(
+            session,
+            "eval",
+            "document.querySelector('#xaxisunit').value='cycle'; document.querySelector('#xaxisunit').dispatchEvent(new Event('change',{bubbles:true}))",
+        )
 
         # Methods is live provenance, not static help: inspect curated non-default
         # settings, edit the controls, and verify both save and Done payloads.
