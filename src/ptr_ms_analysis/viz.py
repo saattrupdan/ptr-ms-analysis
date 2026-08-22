@@ -58,6 +58,27 @@ def _normalise_checklist(items):
     return out
 
 
+def _validate_embedded_absolute_axis(payload):
+    """Reject an absolute axis that cannot support unambiguous interpolation."""
+    embedded = json.loads(payload)
+    meta = embedded.get("meta", {})
+    x_axis = meta.get("x_axis") or {}
+    if not x_axis.get("absolute_available"):
+        return
+    try:
+        values = np.asarray(x_axis["absolute"], dtype=np.float64)
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("embedded absolute x-axis is not numeric") from None
+    if (
+        values.ndim != 1
+        or not np.all(np.isfinite(values))
+        or (len(values) > 1 and not np.all(np.diff(values) > 0))
+    ):
+        raise ValueError(
+            "embedded absolute x-axis must be finite and strictly increasing"
+        )
+
+
 def build_viz_data(
     f,
     peaks_cfg,
@@ -355,6 +376,7 @@ def build_viz_data(
 
 def render_html(data, config_path=None):
     payload = json.dumps(data, separators=(",", ":"))
+    _validate_embedded_absolute_axis(payload)
     return _TEMPLATE.replace("/*__DATA__*/", payload).replace(
         "/*__CFGPATH__*/", json.dumps(config_path or "")
     )

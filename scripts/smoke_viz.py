@@ -55,7 +55,12 @@ def _synthetic_data() -> dict[str, Any]:
             "x_axis": {
                 "cycle": [1, 2, 3, 4],
                 "relative": [0.0, 2.0, 9.0, 15.0],
-                "absolute": [1700000000.0, 1700000002.0, 1700000009.0, 1700000015.0],
+                "absolute": [
+                    1700000000.0004,
+                    1700000000.0008,
+                    1700000000.0012,
+                    1700000000.0016,
+                ],
                 "absolute_available": True,
             },
             "a": 1000.0,
@@ -813,6 +818,20 @@ def main() -> int:
         _assert(
             absolute_axis["unit"] == "absolute" and "UTC" in absolute_axis["text"],
             "absolute UTC interval labels did not update",
+        )
+        absolute_precision = _eval(
+            session,
+            "(() => { const vals=AXIS.absolute; "
+            "const labels=vals.map(v=>formatAxis(v,true)); "
+            "const mid=(vals[1]+vals[2])/2; "
+            "return {distinct:vals[0]!==vals[1], mapping:cycleAtAxis(mid), labels, "
+            "valid:labels.every(x=>/^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3} UTC$/.test(x))}; })()",
+        )
+        _assert(
+            absolute_precision["distinct"]
+            and 2.49 < absolute_precision["mapping"] < 2.51
+            and absolute_precision["valid"],
+            "sub-millisecond absolute axis mapping or labels are invalid",
         )
         _browser(
             session,

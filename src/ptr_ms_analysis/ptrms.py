@@ -17,6 +17,11 @@ from importlib import resources
 import numpy as np
 
 PROTON = 1.007276
+
+# Date.toISOString() switches to expanded years outside this UTC interval.
+_JS_NORMAL_YEAR_0000_START_S = -62167219200.0
+_JS_NORMAL_YEAR_10000_START_S = 253402300800.0
+
 K_ANCHOR_DEFAULT = 2.0  # 1e-9 cm3/s: the single k a non-kinetic calibration assumes
 # 100 ppm: a deliberately generous corruption/model-consistency ceiling, not an
 # accuracy claim; the real Data_10_26_33 fixture is about 8 ppm.
@@ -826,8 +831,6 @@ def load_pc_times(f):
         return None
     if values.shape != (ncyc,) or not np.all(np.isfinite(values)):
         return None
-    if np.any(values <= 0):
-        return None
     if ncyc > 1 and not np.all(np.diff(values) > 0):
         return None
     return values
@@ -862,25 +865,32 @@ def viz_x_axis_data(f):
             ncyc <= 1 or np.all(np.diff(candidate) > 0)
         ):
             relative = candidate
-        # ECMAScript Date supports exactly ±8.64e15 milliseconds.  Keep the
-        # raw Unix-second values for display, but do not offer dates that the
-        # browser cannot render as UTC.
-        js_date_limit_s = 8.64e12
-        if np.all((pctimes >= -js_date_limit_s) & (pctimes <= js_date_limit_s)):
+        # Keep absolute dates only where Date.toISOString() emits a normal
+        # four-digit year.  Expanded years use a leading sign and break the
+        # browser's current tick formatting.
+        if np.all(
+            (pctimes >= _JS_NORMAL_YEAR_0000_START_S)
+            & (pctimes < _JS_NORMAL_YEAR_10000_START_S)
+        ):
             absolute = pctimes
 
-    def serialise_relative(values):
-        rounded = [round(float(x), 6) for x in values]
-        if len(rounded) > 1 and not np.all(np.diff(rounded) > 0):
-            return [float(x) for x in values]
-        return rounded
+    def serialise_axis(values):
+        # Do not round Unix seconds: at ordinary acquisition dates a millisecond
+        # is already close to the precision of a JavaScript Number, and rounding
+        # here would collapse valid adjacent sub-millisecond spectra.
+        serialised = [float(x) for x in values]
+        if not np.all(np.isfinite(serialised)) or (
+            len(serialised) > 1 and not np.all(np.diff(serialised) > 0)
+        ):
+            return None
+        return serialised
 
+    relative_axis = serialise_axis(relative)
+    absolute_axis = None if absolute is None else serialise_axis(absolute)
     return {
-        "relative": serialise_relative(relative),
-        "absolute": None
-        if absolute is None
-        else [round(float(x), 3) for x in absolute],
-        "absolute_available": absolute is not None,
+        "relative": relative_axis,
+        "absolute": absolute_axis,
+        "absolute_available": absolute_axis is not None,
         "cycle": [int(x) for x in cycles],
     }
 
