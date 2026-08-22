@@ -30,11 +30,10 @@ Root attributes hold instrument/run metadata: `Single Spec Duration (ms)`
 The `viz` x-axis selector accepts exactly `cycle`, `relative`, and `absolute`.
 Relative-time display uses elapsed acquisition time from `SPECdata/PCTime` when valid,
 falling back to the spectrum duration when it is finite and positive, or one second
-otherwise. Absolute-time display
-uses `SPECdata/PCTime` only after validating every per-cycle PC Unix timestamp and its
-JavaScript `Date` range. If the dataset is missing, malformed, or outside that range,
-the absolute display is unavailable; relative display remains available when its domain
-can be represented as finite increasing values.
+otherwise. Absolute-time display validates every `SPECdata/PCTime` value and requires a
+four-digit ISO UTC year (0000–9999). If the dataset is missing, malformed, or outside
+that range, absolute display is unavailable; relative display remains available when its
+domain can be represented as finite increasing values.
 
 ## Key finding: Viewer re-processes from raw spectra
 

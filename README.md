@@ -73,10 +73,10 @@ a hand-off file. There is no one-shot command; the delivered CSV always comes fr
 
 `viz` offers a configurable x-axis unit for the browser review. The default is cycle
 display. Accepted values are exactly `cycle`, `relative`, and `absolute`. Relative time
-shows elapsed acquisition time, using the spectrum duration when it is finite and
-positive, and a one-second fallback otherwise. Absolute time uses validated
-`SPECdata/PCTime` values and is unavailable when those timestamps are missing, invalid,
-or outside the browser's UTC Date range.
+uses elapsed acquisition time from valid `SPECdata/PCTime` values, falling back to the
+spectrum duration when it is finite and positive, or one second otherwise. Absolute
+time uses validated `PCTime` values and is unavailable when they are missing, invalid,
+or outside the four-digit ISO UTC year range (0000–9999).
 
 Set `viz.x_axis_unit` in the config, or use the matching `--x-axis-unit` option on
 `ptr viz`:
