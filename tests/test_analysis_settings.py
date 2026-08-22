@@ -64,12 +64,10 @@ class AnalysisSettingsTest(unittest.TestCase):
         self.assertEqual(settings["sources"]["kinetic"], "cli")
 
     def test_viz_axis_cli_overrides_config_and_rejects_unknown_units(self):
-        args = Namespace(x_axis_unit="absolute_time")
+        args = Namespace(x_axis_unit="absolute")
         self.assertEqual(
-            analyze.resolve_x_axis_unit(
-                {"viz": {"x_axis_unit": "relative_time"}}, args
-            ),
-            "absolute_time",
+            analyze.resolve_x_axis_unit({"viz": {"x_axis_unit": "relative"}}, args),
+            "absolute",
         )
         self.assertEqual(
             analyze.resolve_x_axis_unit({}, Namespace(x_axis_unit=None)), "cycle"

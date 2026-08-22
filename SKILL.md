@@ -359,19 +359,18 @@ review — a headless/automated run, or a portable file to hand off.
 ptr viz FILE.h5 --config analysis-config.json --out results.csv    # serve; Done -> writes results.csv
 ```
 
-**Planned, not yet available on current main:** browser review will have an x-axis
-unit selector. Its default will remain cycles. The planned choices are cycles,
-relative time (elapsed acquisition time, with a spectrum-duration fallback), and
-absolute acquisition time in UTC. The absolute choice will use validated
-`SPECdata/PCTime` values and will be unavailable when those timestamps are missing or
-invalid.
+Browser review provides an x-axis unit selector. Its default is cycle. The accepted
+values are exactly `cycle`, `relative`, and `absolute`. Relative time is elapsed
+acquisition time, using the spectrum duration when it is finite and positive, and a
+one-second fallback otherwise. Absolute time uses validated `SPECdata/PCTime` values and
+is unavailable when those timestamps are missing, invalid, or outside the browser's
+UTC Date range.
 
-The planned config shape is `viz.x_axis_unit`, with a matching `--x-axis-unit` option
-for `ptr viz`; precedence is CLI override > config value > cycle default. Changing the
-selector will update the **Signal over time** plot and **Intervals** card only. It will
-not change saved ranges or CSV `Cycle` rows: those remain integer, 1-based, inclusive
-cycle boundaries. Do not use this setting or flag with the current main until it is
-implemented.
+The config shape is `viz.x_axis_unit`, with a matching `--x-axis-unit` option for
+`ptr viz`; precedence is CLI override > config value > cycle default. The selector is
+shown only on the **Signal over time** tab and updates that plot and the **Intervals**
+card only. It does not change saved ranges or CSV `Cycle` rows: those remain integer,
+1-based, inclusive cycle boundaries.
 
 By default `viz` runs a localhost server, opens the browser, and **writes every change
 straight into the `--config` file**; when the expert clicks **Done** it runs the

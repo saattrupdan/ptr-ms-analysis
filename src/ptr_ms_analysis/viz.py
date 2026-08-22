@@ -105,9 +105,9 @@ def build_viz_data(
     avg = np.where(np.isfinite(avg), avg, 0.0)  # tolerate rare corrupt bins
     dur = ptrms.spec_duration_s(f)
     x_axis = ptrms.viz_x_axis_data(f)
-    if x_axis_unit not in ("cycle", "relative_time", "absolute_time"):
+    if x_axis_unit not in ("cycle", "relative", "absolute"):
         raise ValueError("invalid x-axis unit: " + str(x_axis_unit))
-    if x_axis_unit == "absolute_time" and not x_axis["absolute_available"]:
+    if x_axis_unit == "absolute" and not x_axis["absolute_available"]:
         x_axis_unit = "cycle"
 
     primary = ptrms.extract_primary(f, primary_mz=primary_mz, R=R)
@@ -998,8 +998,8 @@ const m2tb = m => A*Math.sqrt(m)+B;
 const AXIS = M.x_axis || {relative:[], absolute:null, absolute_available:false};
 let xAxisUnit = M.x_axis_unit || "cycle";
 function axisValues(){
-  if(xAxisUnit==="absolute_time" && AXIS.absolute_available) return AXIS.absolute;
-  if(xAxisUnit==="relative_time") return AXIS.relative;
+  if(xAxisUnit==="absolute" && AXIS.absolute_available) return AXIS.absolute;
+  if(xAxisUnit==="relative") return AXIS.relative;
   return null;
 }
 function axisAtCycle(c){ const vals=axisValues(); if(!vals) return c;
@@ -1010,19 +1010,19 @@ function cycleAtAxis(v){ const vals=axisValues(); if(!vals) return v;
   while(hi-lo>1){ const mid=(lo+hi)>>1; if(vals[mid]<=v)lo=mid; else hi=mid; }
   const frac=(v-vals[lo])/(vals[hi]-vals[lo]); return lo+1+frac;
 }
-function axisUnitLabel(){ return xAxisUnit==="absolute_time" ? "UTC time" : xAxisUnit==="relative_time" ? "time (s)" : "cycle"; }
+function axisUnitLabel(){ return xAxisUnit==="absolute" ? "UTC time" : xAxisUnit==="relative" ? "time (s)" : "cycle"; }
 function formatAxis(v, full=false){
-  if(xAxisUnit==="absolute_time"){
+  if(xAxisUnit==="absolute"){
     const d=new Date(v*1000); if(!isFinite(d.getTime())) return "—";
     return full ? d.toISOString().replace("T"," ").replace("Z"," UTC") : d.toISOString().slice(11,19)+" UTC";
   }
-  if(xAxisUnit==="relative_time") return (+v).toFixed(1)+" s";
+  if(xAxisUnit==="relative") return (+v).toFixed(1)+" s";
   return String(Math.round(v));
 }
 function renderXAxis(){ const el=document.getElementById("xaxisunit"); if(!el) return;
-  const opts=[["cycle","cycles"],["relative_time","relative time (s)"],["absolute_time","absolute time (UTC)"]];
+  const opts=[["cycle","cycles"],["relative","relative time (s)"],["absolute","absolute time (UTC)"]];
   el.innerHTML=""; opts.forEach(([v,t])=>{ const o=document.createElement("option"); o.value=v; o.textContent=t;
-    o.disabled=v==="absolute_time"&&!AXIS.absolute_available; el.appendChild(o); });
+    o.disabled=v==="absolute"&&!AXIS.absolute_available; el.appendChild(o); });
   el.value=xAxisUnit; if(el.value!==xAxisUnit){ xAxisUnit="cycle"; el.value="cycle"; }
   const wrap=document.getElementById("xaxiswrap"); if(wrap) wrap.title=AXIS.absolute_available?"Time axis uses validated per-cycle PCTime; absolute dates are UTC":"Absolute UTC time is unavailable because SPECdata/PCTime is missing or malformed";
   const unit=document.getElementById("rngunit"); if(unit) unit.textContent=axisUnitLabel();
@@ -1821,6 +1821,7 @@ function setTab(t){ tab=t; anim=null; hoverRange=null; hoverPeakId=null;
   document.getElementById("spechint").style.display=spec?"":"none";
   document.getElementById("tracehint").style.display=spec?"none":"";
   document.getElementById("specrangewrap").style.display=spec?"":"none";
+  document.getElementById("xaxiswrap").style.display=spec?"none":"";
   document.getElementById("idcard").style.display=spec?"":"none";     // ID is spectrum-only
   document.getElementById("intcard").style.display=spec?"none":"";    // intervals are trace-only
   plotC.style.cursor="grab";
@@ -1833,7 +1834,7 @@ document.querySelectorAll("#maintabs button").forEach(b=>b.onclick=()=>setTab(b.
 const xAxisSelect=document.getElementById("xaxisunit");
 if(xAxisSelect) xAxisSelect.onchange=e=>{
   const v=e.target.value;
-  if(v==="absolute_time"&&!AXIS.absolute_available){ e.target.value=xAxisUnit; return; }
+  if(v==="absolute"&&!AXIS.absolute_available){ e.target.value=xAxisUnit; return; }
   xAxisUnit=v; vTrace={lo:axisAtCycle(1),hi:axisAtCycle(NCYC)};
   renderXAxis(); renderRanges(); drawMain(); scheduleSave();
 };

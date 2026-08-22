@@ -337,7 +337,7 @@ def _assert_config_round_trip(config: dict[str, Any]) -> None:
     """Check fields whose loss would make a saved review non-reproducible."""
     _assert(config["unknown_top_level"]["keep"], "unknown top-level field was dropped")
     _assert(
-        config["viz"]["x_axis_unit"] in {"cycle", "relative_time", "absolute_time"},
+        config["viz"]["x_axis_unit"] in {"cycle", "relative", "absolute"},
         "x-axis unit was not saved",
     )
     _assert(config["viz"]["unknown_setting"] == "keep", "unknown viz field was dropped")
@@ -370,32 +370,57 @@ def _standalone_browser_pass(data: dict[str, Any]) -> None:
             _browser(session, "eval", "localStorage.setItem('ptrms-onboarded', '1')")
             _browser(session, "reload")
             _browser(session, "wait", "--load", "networkidle")
+            _assert(
+                _eval(
+                    session,
+                    "({display:document.querySelector('#xaxiswrap').style.display, tab:tab})",
+                )
+                == {"display": "", "tab": "trace"},
+                "standalone x-axis selector is not visible on Signal over time",
+            )
             _browser(
                 session,
                 "eval",
-                "document.querySelector('#xaxisunit').value='relative_time'; document.querySelector('#xaxisunit').dispatchEvent(new Event('change',{bubbles:true}))",
+                "document.querySelector('#maintabs button[data-tab=spec]').click()",
+            )
+            _assert(
+                _eval(
+                    session,
+                    "({display:document.querySelector('#xaxiswrap').style.display, tab:tab})",
+                )
+                == {"display": "none", "tab": "spec"},
+                "standalone x-axis selector remains visible on Mass spectrum",
+            )
+            _browser(
+                session,
+                "eval",
+                "document.querySelector('#maintabs button[data-tab=trace]').click()",
+            )
+            _browser(
+                session,
+                "eval",
+                "document.querySelector('#xaxisunit').value='relative'; document.querySelector('#xaxisunit').dispatchEvent(new Event('change',{bubbles:true}))",
             )
             relative_axis = _eval(
                 session,
                 "({unit:xAxisUnit, text:document.querySelector('#rngtbl').innerText, config:buildConfig()})",
             )
             _assert(
-                relative_axis["unit"] == "relative_time"
+                relative_axis["unit"] == "relative"
                 and "0.0 s" in relative_axis["text"],
                 "standalone relative-time labels did not update",
             )
             _browser(
                 session,
                 "eval",
-                "document.querySelector('#xaxisunit').value='absolute_time'; document.querySelector('#xaxisunit').dispatchEvent(new Event('change',{bubbles:true}))",
+                "document.querySelector('#xaxisunit').value='absolute'; document.querySelector('#xaxisunit').dispatchEvent(new Event('change',{bubbles:true}))",
             )
             absolute_axis = _eval(
                 session,
                 "({unit:xAxisUnit, text:document.querySelector('#rngtbl').innerText, config:buildConfig()})",
             )
             _assert(
-                absolute_axis["unit"] == "absolute_time"
-                and "UTC" in absolute_axis["text"],
+                absolute_axis["unit"] == "absolute" and "UTC" in absolute_axis["text"],
                 "standalone UTC labels did not update",
             )
             _browser(
@@ -719,15 +744,49 @@ def main() -> int:
             axis["options"]
             == [
                 {"value": "cycle", "disabled": False},
-                {"value": "relative_time", "disabled": False},
-                {"value": "absolute_time", "disabled": False},
+                {"value": "relative", "disabled": False},
+                {"value": "absolute", "disabled": False},
             ],
             "x-axis selector options are wrong",
+        )
+        _assert(
+            _eval(
+                session,
+                "({display:document.querySelector('#xaxiswrap').style.display, tab:tab})",
+            )
+            == {"display": "", "tab": "trace"},
+            "x-axis selector is not visible on Signal over time",
         )
         _browser(
             session,
             "eval",
-            "document.querySelector('#xaxisunit').value='relative_time'; document.querySelector('#xaxisunit').dispatchEvent(new Event('change',{bubbles:true}))",
+            "document.querySelector('#maintabs button[data-tab=spec]').click()",
+        )
+        _assert(
+            _eval(
+                session,
+                "({display:document.querySelector('#xaxiswrap').style.display, tab:tab})",
+            )
+            == {"display": "none", "tab": "spec"},
+            "x-axis selector remains visible on Mass spectrum",
+        )
+        _browser(
+            session,
+            "eval",
+            "document.querySelector('#maintabs button[data-tab=trace]').click()",
+        )
+        _assert(
+            _eval(
+                session,
+                "({display:document.querySelector('#xaxiswrap').style.display, tab:tab})",
+            )
+            == {"display": "", "tab": "trace"},
+            "x-axis selector did not return on Signal over time",
+        )
+        _browser(
+            session,
+            "eval",
+            "document.querySelector('#xaxisunit').value='relative'; document.querySelector('#xaxisunit').dispatchEvent(new Event('change',{bubbles:true}))",
         )
         converted = _eval(session, "({cycle:axisAtCycle(3), back:cycleAtAxis(9)})")
         _assert(
@@ -739,21 +798,20 @@ def main() -> int:
             "({unit:xAxisUnit, text:document.querySelector('#rngtbl').innerText, config:buildConfig()})",
         )
         _assert(
-            relative_axis["unit"] == "relative_time"
-            and "0.0 s" in relative_axis["text"],
+            relative_axis["unit"] == "relative" and "0.0 s" in relative_axis["text"],
             "relative-time interval labels did not update",
         )
         _browser(
             session,
             "eval",
-            "document.querySelector('#xaxisunit').value='absolute_time'; document.querySelector('#xaxisunit').dispatchEvent(new Event('change',{bubbles:true}))",
+            "document.querySelector('#xaxisunit').value='absolute'; document.querySelector('#xaxisunit').dispatchEvent(new Event('change',{bubbles:true}))",
         )
         absolute_axis = _eval(
             session,
             "({unit:xAxisUnit, text:document.querySelector('#rngtbl').innerText, config:buildConfig()})",
         )
         _assert(
-            absolute_axis["unit"] == "absolute_time" and "UTC" in absolute_axis["text"],
+            absolute_axis["unit"] == "absolute" and "UTC" in absolute_axis["text"],
             "absolute UTC interval labels did not update",
         )
         _browser(
@@ -761,6 +819,9 @@ def main() -> int:
             "eval",
             "document.querySelector('#xaxisunit').value='cycle'; document.querySelector('#xaxisunit').dispatchEvent(new Event('change',{bubbles:true}))",
         )
+        # Axis changes are already covered above; discard their debounced save before
+        # checking that each subsequent edit saves one complete current snapshot.
+        post_cursor = len(_ReviewHandler.posts)
 
         # Methods is live provenance, not static help: inspect curated non-default
         # settings, edit the controls, and verify both save and Done payloads.
