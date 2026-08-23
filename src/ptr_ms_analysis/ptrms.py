@@ -836,11 +836,27 @@ def load_pc_times(f):
     return values
 
 
+def load_pc_timezone_offset(f):
+    """Return the lab-PC UTC offset in seconds, or zero when unavailable.
+
+    IONICON stores ``UTC_Offset`` as a root attribute.  It is metadata for
+    displaying the PC Unix timestamps in the lab's wall-clock time; it does not
+    affect relative elapsed time.
+    """
+    try:
+        values = np.asarray(f.attrs["UTC_Offset"], dtype=np.float64).reshape(-1)
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+    if values.size != 1 or not np.isfinite(values[0]):
+        return 0.0
+    return float(values[0])
+
+
 def viz_x_axis_data(f):
-    """Return finite, browser-safe cycle, relative, and absolute axis data.
+    """Return finite, browser-safe cycle, relative, and local-time axis data.
 
     PCTime is useful for the relative axis even when it is outside JavaScript's
-    Date range.  In that case only the absolute UTC axis is disabled.  A bad
+    Date range.  In that case only the absolute lab-local axis is disabled.  A bad
     duration must not leak NaN, infinity, or a non-increasing domain into the
     browser, so the documented one-second fallback is used instead.
     """
@@ -859,6 +875,7 @@ def viz_x_axis_data(f):
 
     relative = fallback
     absolute = None
+    timezone_offset = load_pc_timezone_offset(f)
     if pctimes is not None:
         candidate = pctimes - pctimes[0]
         if np.all(np.isfinite(candidate)) and (
@@ -868,11 +885,12 @@ def viz_x_axis_data(f):
         # Keep absolute dates only where Date.toISOString() emits a normal
         # four-digit year.  Expanded years use a leading sign and break the
         # browser's current tick formatting.
+        local_times = pctimes + timezone_offset
         if np.all(
-            (pctimes >= _JS_NORMAL_YEAR_0000_START_S)
-            & (pctimes < _JS_NORMAL_YEAR_10000_START_S)
+            (local_times >= _JS_NORMAL_YEAR_0000_START_S)
+            & (local_times < _JS_NORMAL_YEAR_10000_START_S)
         ):
-            absolute = pctimes
+            absolute = local_times
 
     def serialise_axis(values):
         # Do not round Unix seconds: at ordinary acquisition dates a millisecond
@@ -891,6 +909,7 @@ def viz_x_axis_data(f):
         "relative": relative_axis,
         "absolute": absolute_axis,
         "absolute_available": absolute_axis is not None,
+        "absolute_offset_s": timezone_offset,
         "cycle": [int(x) for x in cycles],
     }
 

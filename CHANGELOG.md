@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   where abundance is the mean per-cycle integrated Raw signal. The compact list now
   shows only the active sort field; details shows both m/z and abundance. Sidebar
   values follow the Mass spectrum tab's selected average-over interval.
+- Absolute-time displays now apply the file's `UTC_Offset` so plot, crosshair, and
+  interval times use the lab PC's local wall-clock time.
 
 ## [0.2.1] - 2026-08-22
 

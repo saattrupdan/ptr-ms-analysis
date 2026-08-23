@@ -75,8 +75,9 @@ a hand-off file. There is no one-shot command; the delivered CSV always comes fr
 display. Accepted values are exactly `cycle`, `relative`, and `absolute`. Relative time
 uses elapsed acquisition time from valid `SPECdata/PCTime` values, falling back to the
 spectrum duration when it is finite and positive, or one second otherwise. Absolute
-time uses validated `PCTime` values and is unavailable when they are missing, invalid,
-or outside the four-digit ISO UTC year range (0000–9999).
+time uses validated `PCTime` values plus the file's root `UTC_Offset` (when available)
+for lab-PC local time, and is unavailable when they are missing, invalid, or outside the
+four-digit ISO year range (0000–9999).
 
 Set `viz.x_axis_unit` in the config, or use the matching `--x-axis-unit` option on
 `ptr viz`:

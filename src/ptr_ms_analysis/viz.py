@@ -1050,21 +1050,21 @@ function cycleAtAxis(v){ const vals=axisValues(); if(!vals) return v;
   while(hi-lo>1){ const mid=(lo+hi)>>1; if(vals[mid]<=v)lo=mid; else hi=mid; }
   const frac=(v-vals[lo])/(vals[hi]-vals[lo]); return lo+1+frac;
 }
-function axisUnitLabel(){ return xAxisUnit==="absolute" ? "UTC time" : xAxisUnit==="relative" ? "time (s)" : "cycle"; }
+function axisUnitLabel(){ return xAxisUnit==="absolute" ? "local time" : xAxisUnit==="relative" ? "time (s)" : "cycle"; }
 function formatAxis(v, full=false){
   if(xAxisUnit==="absolute"){
     const d=new Date(v*1000); if(!isFinite(d.getTime())) return "—";
-    return full ? d.toISOString().slice(11,19) : d.toISOString().slice(11,19)+" UTC";
+    return d.toISOString().slice(11,19);
   }
   if(xAxisUnit==="relative") return (+v).toFixed(1)+" s";
   return String(Math.round(v));
 }
 function renderXAxis(){ const el=document.getElementById("xaxisunit"); if(!el) return;
-  const opts=[["cycle","cycles"],["relative","relative time (s)"],["absolute","absolute time (UTC)"]];
+  const opts=[["cycle","cycles"],["relative","relative time (s)"],["absolute","absolute time (local)"]];
   el.innerHTML=""; opts.forEach(([v,t])=>{ const o=document.createElement("option"); o.value=v; o.textContent=t;
     o.disabled=v==="absolute"&&!AXIS.absolute_available; el.appendChild(o); });
   el.value=xAxisUnit; if(el.value!==xAxisUnit){ xAxisUnit="cycle"; el.value="cycle"; }
-  const wrap=document.getElementById("xaxiswrap"); if(wrap) wrap.title=AXIS.absolute_available?"Time axis uses validated per-cycle PCTime; absolute dates are UTC":"Absolute UTC time is unavailable because SPECdata/PCTime is missing or malformed";
+  const wrap=document.getElementById("xaxiswrap"); if(wrap) wrap.title=AXIS.absolute_available?"Time axis uses validated per-cycle PCTime and the file's lab-PC UTC offset":"Local time is unavailable because SPECdata/PCTime is missing or malformed";
   const unit=document.getElementById("rngunit"); if(unit) unit.textContent=axisUnitLabel();
 }
 function formatRange(r){ return formatAxis(axisAtCycle(r.start),true)+"–"+formatAxis(axisAtCycle(r.end),true); }

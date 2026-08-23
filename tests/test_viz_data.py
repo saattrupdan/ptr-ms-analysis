@@ -102,6 +102,18 @@ class VizDataTest(unittest.TestCase):
         self.assertEqual(axes["absolute"], [1700000000.0, 1700000002.0, 1700000009.0])
         self.assertTrue(axes["absolute_available"])
 
+    def test_absolute_axis_applies_file_lab_timezone_offset(self):
+        with h5py.File("in-memory", "w", driver="core", backing_store=False) as h5:
+            h5.create_dataset("SPECdata/Intensities", data=np.zeros((2, 2)))
+            h5.create_dataset("SPECdata/PCTime", data=[[1000.0], [1002.0]])
+            h5.attrs["Single Spec Duration (ms)"] = [1000.0]
+            h5.attrs["UTC_Offset"] = [3600.0]
+            axes = ptrms.viz_x_axis_data(h5)
+
+        self.assertEqual(axes["relative"], [0.0, 2.0])
+        self.assertEqual(axes["absolute"], [4600.0, 4602.0])
+        self.assertEqual(axes["absolute_offset_s"], 3600.0)
+
     def test_adjacent_sub_millisecond_pctimes_keep_distinct_axis_values(self):
         pctimes = [
             1_700_000_000.0004,

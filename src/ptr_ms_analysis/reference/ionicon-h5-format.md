@@ -8,14 +8,15 @@ Raw → Corrected → Concentration chain the pipeline reproduces.
 
 Root attributes hold instrument/run metadata: `Single Spec Duration (ms)`
 (cycle length), `Timebin width (ps)`, `Pulsing Period (ns)`, `FileCreatedTime*`,
-`InstrumentType = IoniTof`, drift settings, etc.
+`UTC_Offset` (lab-PC offset in seconds), `InstrumentType = IoniTof`, drift settings,
+etc.
 
 | Path | Shape | Meaning |
 |---|---|---|
 | `SPECdata/Intensities` | (n_cyc, n_bins) | **Raw mass spectra**, one row per cycle, columns = TOF timebins (cps). The bulk of the file (~1 GB, gzip, chunked one-row-per-chunk). |
 | `SPECdata/AverageSpec` | (n_bins,) | Run-average spectrum — used for peak detection / apex finding. |
 | `SPECdata/Times` | (n_cyc, 4) | col 0 = 1-based cycle index; col 2 = acquisition time (IONICON epoch). |
-| `SPECdata/PCTime` | (n_cyc, 1) | PC Unix timestamp per cycle. |
+| `SPECdata/PCTime` | (n_cyc, 1) | PC Unix timestamp per cycle; add root `UTC_Offset` for lab-PC wall-clock time. |
 | `CALdata/Mapping` | (N, 2), N ≥ 2 | `(m/z, timebin)` anchors for mass calibration. Exactly two valid anchors are solved directly; three or more valid, well-conditioned anchors are fit by least squares. |
 | `TRACEdata/TraceRaw` | (n_cyc, n_pk) | Acquisition-time pre-computed peak traces (raw cps). |
 | `TRACEdata/TraceCorrected` | (n_cyc, n_pk) | Pre-computed transmission-corrected traces. |
@@ -31,9 +32,10 @@ The `viz` x-axis selector accepts exactly `cycle`, `relative`, and `absolute`.
 Relative-time display uses elapsed acquisition time from `SPECdata/PCTime` when valid,
 falling back to the spectrum duration when it is finite and positive, or one second
 otherwise. Absolute-time display validates every `SPECdata/PCTime` value and requires a
-four-digit ISO UTC year (0000–9999). If the dataset is missing, malformed, or outside
-that range, absolute display is unavailable; relative display remains available when its
-domain can be represented as finite increasing values.
+four-digit ISO year (0000–9999) after applying root `UTC_Offset` when available. If the
+dataset is missing, malformed, or outside that range, absolute display is unavailable;
+relative display remains available when its domain can be represented as finite increasing
+values.
 
 ## Key finding: Viewer re-processes from raw spectra
 
