@@ -425,8 +425,10 @@ def _standalone_browser_pass(data: dict[str, Any]) -> None:
                 "({unit:xAxisUnit, text:document.querySelector('#rngtbl').innerText, config:buildConfig()})",
             )
             _assert(
-                absolute_axis["unit"] == "absolute" and "UTC" in absolute_axis["text"],
-                "standalone UTC labels did not update",
+                absolute_axis["unit"] == "absolute"
+                and "UTC" not in absolute_axis["text"]
+                and "22:13:20" in absolute_axis["text"],
+                "standalone absolute interval labels did not update",
             )
             _browser(
                 session,
@@ -902,8 +904,10 @@ def main() -> int:
             "({unit:xAxisUnit, text:document.querySelector('#rngtbl').innerText, config:buildConfig()})",
         )
         _assert(
-            absolute_axis["unit"] == "absolute" and "UTC" in absolute_axis["text"],
-            "absolute UTC interval labels did not update",
+            absolute_axis["unit"] == "absolute"
+            and "UTC" not in absolute_axis["text"]
+            and "22:13:20" in absolute_axis["text"],
+            "absolute interval labels did not update",
         )
         absolute_precision = _eval(
             session,
@@ -911,7 +915,7 @@ def main() -> int:
             "const labels=vals.map(v=>formatAxis(v,true)); "
             "const mid=(vals[1]+vals[2])/2; "
             "return {distinct:vals[0]!==vals[1], mapping:cycleAtAxis(mid), labels, "
-            "valid:labels.every(x=>/^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3} UTC$/.test(x))}; })()",
+            "valid:labels.every(x=>/^\\d{2}:\\d{2}:\\d{2}$/.test(x))}; })()",
         )
         _assert(
             absolute_precision["distinct"]

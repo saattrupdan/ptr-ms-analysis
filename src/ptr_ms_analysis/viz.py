@@ -1054,7 +1054,7 @@ function axisUnitLabel(){ return xAxisUnit==="absolute" ? "UTC time" : xAxisUnit
 function formatAxis(v, full=false){
   if(xAxisUnit==="absolute"){
     const d=new Date(v*1000); if(!isFinite(d.getTime())) return "—";
-    return full ? d.toISOString().replace("T"," ").replace("Z"," UTC") : d.toISOString().slice(11,19)+" UTC";
+    return full ? d.toISOString().slice(11,19) : d.toISOString().slice(11,19)+" UTC";
   }
   if(xAxisUnit==="relative") return (+v).toFixed(1)+" s";
   return String(Math.round(v));
