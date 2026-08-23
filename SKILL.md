@@ -7,7 +7,7 @@ description: >
   concentration (ppb and µg/m³), and summarised per time segment (breath bags,
   backgrounds, sample periods). Triggers are "PTR-MS", "PTR-TOF", "IoniTOF", "IONICON",
   "PTR-MS Viewer", "breath VOC analysis", an .h5 with SPECdata/TRACEdata groups.
-last-updated: 2026-08-17
+last-updated: 2026-08-23
 ---
 
 # PTR-MS analysis (open-source PTR-MS Viewer replacement)
@@ -25,10 +25,22 @@ time segments. **You** assign chemistry and curate the segment boundaries — th
 curated config to the browser review (`viz`), which is the **default endpoint**. There is
 intentionally no one-shot `auto`: `viz` always runs on your best solution, so the human is
 confirming a good result rather than repairing a mechanical guess. Because you curated
-first, ideally nothing needs changing and *Done* is a one-click confirmation — the CSV it
-writes is identical to the no-review path. Only skip `viz` and go straight to `analyze`
-when the user explicitly wants no review (headless/automated, or a portable file to hand
-off).
+first, ideally nothing needs changing and *Done* is a one-click confirmation **for the
+user** — the CSV it writes is identical to the no-review path. Only skip `viz` and go
+straight to `analyze` when the user explicitly wants no review (headless/automated, or a
+portable file to hand off).
+
+**The review app belongs to the human — hand over the URL and stop.** Never open it in a
+browser-automation tool (agent-browser, Playwright, Puppeteer, CDP, or `curl` against its
+endpoints), never snapshot or read its pages, never open its Checklist / Method /
+Configuration panels, and **never click *Done***. *Done* is the user's sign-off; clicking
+it yourself fabricates a review that never happened and ships the CSV as "reviewed" when
+nobody looked at it. The same goes for ticking checklist items and for editing peaks,
+segments or settings in the app: if something needs changing, change the **config** before
+launching `viz`, or raise it in the config's `checklist` — never by clicking in the app.
+You do not need the browser to check your own work: `ptr analyze --config` prints every
+diagnostic the app displays. If a run genuinely should have no human in the loop, use
+`ptr analyze` (step 5) and say plainly that no review took place.
 
 Final range labels are deterministic: use `sample_01`, `sample_02`, … for high plateaus
 and `background_01`, `background_02`, … for low plateaus, each numbered chronologically
@@ -104,8 +116,9 @@ ptr segments FILE.h5                   # stable plateaus to label
 # 2. YOU write analysis-config.json: curated peaks (assignments picked from `candidates`,
 #    honest `unknown` where unsure, artifacts judged) + ranges (sample_/background_ labels).
 
-# 3. DEFAULT: browser review of YOUR config -> Done -> analyze -> CSV. BLOCKS on the
-#    browser, so run it backgrounded and give the user the URL:
+# 3. DEFAULT: browser review of YOUR config -> the USER clicks Done -> analyze -> CSV.
+#    BLOCKS on the browser, so run it backgrounded, give the user the URL, and stop —
+#    never drive this app yourself and never click 'Done' for them:
 ptr viz FILE.h5 --config analysis-config.json --out results.csv   # localhost app; waits for 'Done'
 
 # 3-alt. No review — ONLY when the user explicitly wants headless/no-browser output, or a
@@ -123,7 +136,10 @@ ptr analyze FILE.h5 --auto-peaks --auto-segments --include-cycle-rows --out resu
 **`viz` is long-running and interactive** (it waits for a human to click *Done* in the
 browser). Run it as a background command and tell the user to open the URL it prints; the
 CSV is written when they finish. Do not wait for it to return before responding — hand
-over the URL and let the user drive.
+over the URL and let the user drive. **"Let the user drive" is literal**: your last action
+for this file is printing the URL. Do not automate the browser, inspect the app, or click
+*Done* yourself (see the callout above), and do not poll for the CSV afterwards — the user
+tells you when they are finished.
 
 **Startup takes ~30-90 s on a large file** — `viz` loads the whole file and pre-computes
 traces *before* the server accepts connections. It prints `ptr: preparing the review …` to
@@ -351,9 +367,12 @@ reviews an existing peak list + ranges. **Always curate first, then review your 
 solution**: ideally the expert finds nothing to change and Done is a one-click
 confirmation (identical CSV to the headless path); if the config were a raw mechanical
 guess, the human would be doing curation you should have done. So the order is: `peaks` +
-`segments` → apply your judgment (steps 2–4 above) → write `analysis-config.json` → open
-`viz` on it. Skip straight to `analyze` (step 5) only when the user explicitly wants no
-review — a headless/automated run, or a portable file to hand off.
+`segments` → apply your judgment (steps 2–4 above) → write `analysis-config.json` → launch
+`viz` on it and hand the URL to the user. Skip straight to `analyze` (step 5) only when
+the user explicitly wants no review — a headless/automated run, or a portable file to hand
+off. **The "expert" is the user, never you**: launching `viz` and then reviewing it
+yourself through a browser tool is the worst of both paths — it costs the user a review
+they never got, and produces a CSV you could have written headlessly with `analyze`.
 
 ```bash
 ptr viz FILE.h5 --config analysis-config.json --out results.csv    # serve; Done -> writes results.csv
@@ -390,9 +409,10 @@ chat reply is short: one or two lines handing over the URL and noting there's a 
 waiting in the app. First-time users also get an automatic guided tour of the interface;
 you don't configure it, but it means you don't need to explain the buttons in chat either.
 
-In the app the expert sees the mass spectrum, a large zoom of the selected peak with its
-integration window, and the compound's time trace with segments overlaid. They can
-re-centre / add / remove / relabel peaks, drag / add / rename segments, and change **R**,
+In the app the expert (the user, at their own keyboard) sees the mass spectrum, a large
+zoom of the selected peak with its integration window, and the compound's time trace with
+segments overlaid. They can re-centre / add / remove / relabel peaks, drag / add / rename
+segments, and change **R**,
 **R_phys**, primary m/z, **K**, molar volume, the kinetic (`k`) correction, humidity
 settings, and whole-run versus isolated per-interval windows. R windowing, peak/interval
 edits, K, molar volume, kinetic, and humidity controls recompute from embedded preview
