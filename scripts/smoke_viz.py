@@ -124,6 +124,7 @@ def _synthetic_data() -> dict[str, Any]:
                 "win_r": 0.04,
                 "win_manual": True,
                 "trace": [10.0, 10.0, 20.0, 20.0],
+                "abundance": 15.0,
                 "candidates": [
                     _candidate("C2H6O", "Ethanol candidate", 1.0),
                 ],
@@ -145,6 +146,7 @@ def _synthetic_data() -> dict[str, Any]:
                 "win_r": 0.04,
                 "win_manual": True,
                 "trace": [20.0, 20.0, 20.0, 20.0],
+                "abundance": 20.0,
                 "candidates": [
                     _candidate("C4H10O", "Candidate one", 0.72),
                     _candidate("C5H12", "Candidate two", 0.28),
@@ -167,6 +169,7 @@ def _synthetic_data() -> dict[str, Any]:
                 "win_r": 0.04,
                 "win_manual": True,
                 "trace": [30.0, 30.0, 30.0, 30.0],
+                "abundance": 30.0,
                 "candidates": [
                     _candidate("C3H8O", "Library solvent", 0.65),
                     _candidate("C4H10", "Other generated candidate", 0.35),
@@ -189,6 +192,7 @@ def _synthetic_data() -> dict[str, Any]:
                 "win_r": 130.0 / (2.0 * 1200.0),
                 "win_manual": False,
                 "trace": [40.0, 40.0, 40.0, 40.0],
+                "abundance": 40.0,
                 "candidates": [],
                 "id_confidence": None,
                 "id_ambiguous": False,
@@ -212,6 +216,7 @@ def _synthetic_data() -> dict[str, Any]:
                 "win_r": 130.05 / (2.0 * 1200.0),
                 "win_manual": False,
                 "trace": [35.0, 35.0, 35.0, 35.0],
+                "abundance": 35.0,
                 "candidates": [],
                 "id_confidence": None,
                 "id_ambiguous": False,
@@ -231,6 +236,7 @@ def _synthetic_data() -> dict[str, Any]:
                 "win_r": 140.0 / (2.0 * 1200.0),
                 "win_manual": False,
                 "trace": [25.0, 25.0, 25.0, 25.0],
+                "abundance": 25.0,
                 "candidates": [],
                 "id_confidence": None,
                 "id_ambiguous": False,

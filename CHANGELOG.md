@@ -7,12 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-23
+
 ### Added
 
 - Added a peaks-sidebar ordering selector for m/z order or descending abundance,
   where abundance is the mean per-cycle integrated Raw signal. The compact list now
   shows only the active sort field; details shows both m/z and abundance. Sidebar
   values follow the Mass spectrum tab's selected average-over interval.
+
+### Changed
+
 - Absolute-time displays now apply the file's `UTC_Offset` so plot, crosshair, and
   interval times use the lab PC's local wall-clock time.
 
