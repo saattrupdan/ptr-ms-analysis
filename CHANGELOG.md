@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Added a peaks-sidebar ordering selector for m/z order or descending abundance,
+  where abundance is the mean per-cycle integrated Raw signal.
+
 ## [0.2.1] - 2026-08-22
 
 ### Fixed

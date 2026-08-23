@@ -391,6 +391,11 @@ shown only on the **Signal over time** tab and updates that plot and the **Inter
 card only. It does not change saved ranges or CSV `Cycle` rows: those remain integer,
 1-based, inclusive cycle boundaries.
 
+The **Peaks** sidebar can also be ordered by descending abundance. This is the mean
+per-cycle integrated Raw signal (the peak integral), with m/z used to break ties. The
+choice is saved as `viz.peak_order` and does not change the peak order in the analysis
+config or CSV.
+
 By default `viz` runs a localhost server, opens the browser, and **writes every change
 straight into the `--config` file**; when the expert clicks **Done** it runs the
 full-precision analysis and writes `--out` (the CLI prints the URL and blocks until

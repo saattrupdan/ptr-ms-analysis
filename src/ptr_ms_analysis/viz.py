@@ -263,11 +263,18 @@ def build_viz_data(
                     "sep_mDa": round(sep * 1000, 1),
                     "level": "deconvolved",
                 }
+        trace_values = np.asarray(raw_traces[m], dtype=np.float64)
+        finite_trace = trace_values[np.isfinite(trace_values)]
+        abundance = float(np.mean(finite_trace)) if finite_trace.size else None
         peaks.append(
             {
                 "id": idx,
                 "mz": round(m, 4),
                 "apex": round(apex, 4),
+                # Mean per-cycle integrated Raw signal gives a stable abundance
+                # measure while retaining the trace's exact window/deconvolution
+                # semantics.
+                "abundance": (None if abundance is None else round(abundance, 5)),
                 "label": p.get("label") or p.get("formula") or f"m{m:.3f}",
                 "formula": p.get("formula", ""),
                 "k": p.get("k") if p.get("k") is not None else info.get("k"),
@@ -728,6 +735,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
        overflow:hidden;text-overflow:ellipsis;outline:none;cursor:pointer}
   .plist input.lbl:not([readonly]){cursor:text}          /* selected row: editable -> text caret */
   .plist li.off input.lbl{opacity:.4;text-decoration:line-through}
+  .pkorder{display:inline-flex;align-items:center;gap:5px;text-transform:none;
+            letter-spacing:0;font-weight:400;color:var(--mut);font-size:11px}
+  .pkorder select{padding:4px 6px;font-size:11px}
   .plist input.lbl:not([readonly]):hover{border-color:var(--line)}
   .plist input.lbl:not([readonly]):focus{border-color:var(--acc);background:var(--panel2)}
   .plist .sp{flex:1 1 0;min-width:0}
@@ -839,6 +849,13 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <div class="card">
       <h2>Peaks <span class="mut" id="pkcount" style="font-weight:400"></span>
         <span class="grow"></span>
+        <label class="pkorder" title="Abundance is the mean per-cycle integrated Raw signal">
+          order
+          <select id="pkorder" aria-label="Peak ordering">
+            <option value="mz">m/z</option>
+            <option value="abundance">abundance (integral)</option>
+          </select>
+        </label>
         <button class="ghost" id="pkdetails">details</button></h2>
       <div class="scroll" id="peaksbody" style="max-height:calc(100vh - 190px);overflow-x:hidden"></div>
       <div class="hint">Click a peak to select &amp; zoom · ⌘/Ctrl-drag the mass spectrum to add · remove via ✕ in details</div>
@@ -1063,6 +1080,8 @@ let nextId = peaks.reduce((a,p)=>Math.max(a,p.id),-1)+1;
 // default the time trace to the actual deliverable (concentration) when available
 let quant = M.concentration_available ? "con" : "cor";
 let showDetails = false;   // peaks sidebar: labels only until 'details'
+let peakOrder = ((DATA.config_base||{}).viz||{}).peak_order;
+if(peakOrder!=="abundance" && peakOrder!=="mz") peakOrder="mz";
 let hoverRange = null;     // interval hovered in the trace (to show its label)
 let hoverPeakId = null;    // peak whose window is hovered in the spectrum (highlight, mirror of hoverRange)
 const QSHORT = {raw:"Raw",cor:"Corrected",con:"Conc",ug:"Conc µg"};
@@ -1588,13 +1607,24 @@ function selectPeak(p){
   const changed=selId!==p.id; selId=p.id;
   if(changed) renderPeaks();                          // don't re-render on re-click, so a label stays editable
   if(tab==="spec") jumpToPeak(p); else drawMain(); }
+function peakAbundance(p){
+  if(Number.isFinite(p.abundance)) return p.abundance;
+  const values=(p.trace||[]).filter(v=>Number.isFinite(v));
+  return values.length ? values.reduce((sum,v)=>sum+v,0)/values.length : -Infinity;
+}
+function orderedPeaks(){
+  return [...peaks].sort((a,b)=>{
+    if(peakOrder==="abundance") return peakAbundance(b)-peakAbundance(a) || a.mz-b.mz;
+    return a.mz-b.mz;
+  });
+}
 function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box) return;
   const cnt=document.getElementById("pkcount"); if(cnt) cnt.textContent=peaks.length?("· "+peaks.length):"";
   const dt=document.getElementById("pkdetails"); if(dt) dt.textContent=showDetails?"hide details":"details";
   box.innerHTML="";
   const esc=s=>(s||'').replace(/"/g,'&quot;');
   const ul=document.createElement("ul"); ul.className="plist"+(showDetails?" det":"");
-  for(const p of peaks){ const li=document.createElement("li");
+  for(const p of orderedPeaks()){ const li=document.createElement("li");
     li.className=(p.id===selId?"sel ":"")+(p.use?"":"off");
     const dup=dupPeak(p);
     const dot=dup?`<span class="dot ovl" title="duplicate: same compound also at m/z ${dup.mz.toFixed(3)}"></span>`:
@@ -1718,7 +1748,7 @@ function buildConfig(){ return {
     if(p.winManual){ if(Math.abs(p.winL-p.winR)<1e-6) o.window=+(p.winL*2).toFixed(5);
       else o.window={left:+p.winL.toFixed(5),right:+p.winR.toFixed(5)}; } return o; }),
   ranges: ranges.map(r=>({label:r.label,start:r.start,end:r.end,unit:"cycle"})),
-  viz:{ ...((DATA.config_base||{}).viz||{}), x_axis_unit:xAxisUnit },
+  viz:{ ...((DATA.config_base||{}).viz||{}), x_axis_unit:xAxisUnit, peak_order:peakOrder },
   analyze:{ ...((DATA.config_base||{}).analyze||{}), R:cfg.R, R_phys:cfg.Rphys,
     K:cfg.K, molar_volume:cfg.Vm, primary_mz:cfg.primarymz,
     kinetic:cfg.kinetic, k_anchor:cfg.kanchor, humidity_correct:cfg.humid,
@@ -1984,6 +2014,11 @@ document.getElementById("zoomreset").onclick=()=>{
   else animateTo(axisAtCycle(1),axisAtCycle(NCYC),180);
 };
 // peaks: details toggle — widen the sidebar instead of side-scrolling
+document.getElementById("pkorder").value=peakOrder;
+document.getElementById("pkorder").onchange=e=>{
+  peakOrder=e.target.value==="abundance"?"abundance":"mz";
+  renderPeaks(); scheduleSave();
+};
 document.getElementById("pkdetails").onclick=()=>{ showDetails=!showDetails;
   const app=document.getElementById("app");
   if(app) app.style.gridTemplateColumns=showDetails?"620px minmax(0,1fr)":"320px minmax(0,1fr)";

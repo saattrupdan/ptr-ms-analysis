@@ -744,6 +744,64 @@ def main() -> int:
         _ReviewHandler.posts = []
         post_cursor = 0
 
+        # The sidebar keeps the current m/z order by default, then supports a
+        # descending mean integrated-signal order without changing config peak order.
+        peak_order = _eval(
+            session,
+            "({value:document.querySelector('#pkorder').value, "
+            "labels:Array.from(document.querySelectorAll('#peaksbody input.lbl')).map(e=>e.value), "
+            "config:buildConfig()})",
+        )
+        _assert(peak_order["value"] == "mz", "peak order default is not m/z")
+        _assert(
+            peak_order["labels"]
+            == [
+                "Unassigned sole candidate",
+                "Ambiguous mix",
+                "Curated solvent",
+                "Cluster component A",
+                "Cluster component B",
+                "Isolated control",
+            ],
+            "default peak order is not m/z",
+        )
+        _browser(
+            session,
+            "eval",
+            "document.querySelector('#pkorder').value='abundance'; "
+            "document.querySelector('#pkorder').dispatchEvent(new Event('change',{bubbles:true}))",
+        )
+        _browser(session, "wait", "100")
+        peak_order = _eval(
+            session,
+            "({value:document.querySelector('#pkorder').value, "
+            "labels:Array.from(document.querySelectorAll('#peaksbody input.lbl')).map(e=>e.value), "
+            "config:buildConfig()})",
+        )
+        _assert(peak_order["value"] == "abundance", "abundance order was not selected")
+        _assert(
+            peak_order["labels"]
+            == [
+                "Cluster component A",
+                "Cluster component B",
+                "Curated solvent",
+                "Isolated control",
+                "Ambiguous mix",
+                "Unassigned sole candidate",
+            ],
+            "abundance peak order is wrong",
+        )
+        _assert(
+            peak_order["config"]["viz"]["peak_order"] == "abundance",
+            "peak order was not saved in viz config",
+        )
+        _browser(
+            session,
+            "eval",
+            "document.querySelector('#pkorder').value='mz'; "
+            "document.querySelector('#pkorder').dispatchEvent(new Event('change',{bubbles:true}))",
+        )
+
         # Check all display units, including irregular timestamp conversion. Ranges
         # remain integer cycles in the saved config while the card follows the axis.
         axis = _eval(

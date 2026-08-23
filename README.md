@@ -91,6 +91,11 @@ Precedence is CLI override > config value > cycle default. The selector is shown
 on the **Signal over time** tab and updates that plot and the Intervals card. Saved
 ranges and CSV `Cycle` rows remain integer, 1-based, inclusive cycle boundaries.
 
+The **Peaks** sidebar can also be ordered by descending abundance. This is the mean
+per-cycle integrated Raw signal (the peak integral), with m/z used to break ties. The
+choice is saved as `viz.peak_order` and does not change the peak order in the analysis
+config or CSV.
+
 An analysis config may include an `analyze` object with `R`, `R_phys`, `K`,
 `molar_volume`, `primary_mz`, `kinetic`, `k_anchor`, `humidity_correct`, `humidity_p`,
 `humidity_ref`, and `whole_run_windows`. Omitted CLI options do not replace these
