@@ -853,7 +853,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
           order
           <select id="pkorder" aria-label="Peak ordering">
             <option value="mz">m/z</option>
-            <option value="abundance">abundance (integral)</option>
+            <option value="abundance">abundance</option>
           </select>
         </label>
         <button class="ghost" id="pkdetails">details</button></h2>
