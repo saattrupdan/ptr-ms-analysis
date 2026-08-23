@@ -716,7 +716,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
         color:var(--fg);font-size:12.5px}
   .menu button:hover{background:var(--hover);border-color:transparent}
   .menu button.on{color:var(--acc2)} .menu button.on::after{content:"✓";margin-left:auto;color:var(--acc2)}
-  .app{display:grid;grid-template-columns:320px minmax(0,1fr);gap:16px;padding:16px 22px;align-items:start;
+  .app{display:grid;grid-template-columns:360px minmax(0,1fr);gap:16px;padding:16px 22px;align-items:start;
        transition:grid-template-columns .28s cubic-bezier(.4,0,.2,1)}
   @media(max-width:900px){.app{grid-template-columns:1fr}}
   .sidebar{position:sticky;top:16px}
@@ -2029,7 +2029,7 @@ document.getElementById("pkorder").onchange=e=>{
 };
 document.getElementById("pkdetails").onclick=()=>{ showDetails=!showDetails;
   const app=document.getElementById("app");
-  if(app) app.style.gridTemplateColumns=showDetails?"620px minmax(0,1fr)":"320px minmax(0,1fr)";
+  if(app) app.style.gridTemplateColumns=showDetails?"620px minmax(0,1fr)":"360px minmax(0,1fr)";
   const c=document.getElementById("peaksbody"); if(c){ c.style.maxHeight="calc(100vh - 190px)"; c.style.overflowX="hidden"; }
   renderPeaks();
   // the plot canvas reflows as the sidebar animates — keep it re-fitting for the duration
