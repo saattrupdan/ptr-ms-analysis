@@ -742,7 +742,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .plist input.lbl:not([readonly]):focus{border-color:var(--acc);background:var(--panel2)}
   .plist .sp{flex:1 1 0;min-width:0}
   .plist .mini{font-size:10.5px;color:var(--mut);font-variant-numeric:tabular-nums}
-  .plist .mz{flex:0 0 auto;min-width:52px;text-align:right}
+  .plist .mz,.plist .abundance{flex:0 0 auto;text-align:right}
+  .plist .mz{min-width:52px} .plist .abundance{min-width:62px}
   .plist .dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:#2b3644}
   .plist .dot.amb{background:var(--hi)} .plist .dot.ovl{background:#f87171}
   .plist .go{flex:0 0 auto;color:var(--mut);opacity:0;font-size:15px;line-height:1;transition:opacity .1s}
@@ -850,7 +851,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <h2>Peaks <span class="mut" id="pkcount" style="font-weight:400"></span>
         <span class="grow"></span>
         <label class="pkorder" title="Abundance is the mean per-cycle integrated Raw signal">
-          order
+          order by
           <select id="pkorder" aria-label="Peak ordering">
             <option value="mz">m/z</option>
             <option value="abundance">abundance</option>
@@ -871,7 +872,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
         <button data-tab="trace" class="on">Signal over time</button>
         <button data-tab="spec">Mass spectrum</button>
       </span>
-      <span class="sub" id="plotsub">— the selected peak's intensity across the run (when it appears)</span>
+      <span class="sub" id="plotsub"></span>
       <label class="ctl" id="xaxiswrap" style="margin-left:4px">x-axis
         <select id="xaxisunit" style="width:auto"></select></label>
       <label class="ctl" id="specrangewrap" style="margin-left:4px">average over
@@ -1607,16 +1608,26 @@ function selectPeak(p){
   const changed=selId!==p.id; selId=p.id;
   if(changed) renderPeaks();                          // don't re-render on re-click, so a label stays editable
   if(tab==="spec") jumpToPeak(p); else drawMain(); }
+function peakDisplayMz(p){ return dispApex(p); }
+function peakSpectrumIntegral(p){
+  const [wl,wr]=windowTB(peakDisplayMz(p),p.winL,p.winR);
+  const lo=Math.max(0,wl), hi=Math.min(SHOWSPEC.length,wr);
+  let sum=0; for(let i=lo;i<hi;i++) sum+=SHOWSPEC[i];
+  return sum;
+}
 function peakAbundance(p){
-  if(Number.isFinite(p.abundance)) return p.abundance;
-  const values=(p.trace||[]).filter(v=>Number.isFinite(v));
-  return values.length ? values.reduce((sum,v)=>sum+v,0)/values.length : -Infinity;
+  if(SHOWSPEC===SPEC && Number.isFinite(p.abundance)) return p.abundance;
+  return peakSpectrumIntegral(p);
 }
 function orderedPeaks(){
   return [...peaks].sort((a,b)=>{
-    if(peakOrder==="abundance") return peakAbundance(b)-peakAbundance(a) || a.mz-b.mz;
-    return a.mz-b.mz;
+    if(peakOrder==="abundance") return peakAbundance(b)-peakAbundance(a) || peakDisplayMz(a)-peakDisplayMz(b);
+    return peakDisplayMz(a)-peakDisplayMz(b);
   });
+}
+function peakValue(p, kind){
+  if(kind==="abundance") return `<span class="mini abundance" title="integrated Raw signal for the selected spectrum">${fmt(peakAbundance(p))}</span>`;
+  return `<span class="mini mz" title="mass-to-charge ratio for the selected spectrum">${peakDisplayMz(p).toFixed(3)}</span>`;
 }
 function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box) return;
   const cnt=document.getElementById("pkcount"); if(cnt) cnt.textContent=peaks.length?("· "+peaks.length):"";
@@ -1634,13 +1645,13 @@ function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box)
     let h=`<input type="checkbox" data-a="use" ${p.use?"checked":""}>`+dot+
       `<input type="text" class="lbl" data-a="label" ${ro} value="${esc(p.label)}">`;
     if(showDetails){ const cand=nearestCompound(p.mz), dmda=cand?((p.mz-cand.mz)*1000):null;
-      h+=`<span class="mini mz">${p.mz.toFixed(3)}</span>`+
+      h+=peakValue(p,"mz")+peakValue(p,"abundance")+
         `<span class="dc dmda ${dmda!=null&&Math.abs(dmda)>10?'warn':''}" title="mass error vs nearest known compound">${dmda!=null?((dmda>=0?'+':'')+dmda.toFixed(1)+' mDa'):'—'}</span>`+
         `<span class="dc kv" title="proton-transfer rate constant (~ = estimated)">${p.k?('k '+(+p.k).toFixed(2)+(p.k_estimated?'~':'')):'k —'}</span>`+
         `<span class="dc win" title="integration half-widths — drag the dashed handles in the spectrum">−${p.winL.toFixed(3)}/+${p.winR.toFixed(3)}${p.winManual?'*':''}</span>`+
         `<span class="dc pills">${peakPills(p)}</span>`+
         `<button class="dc del" data-a="del" title="remove peak">✕</button>`;
-    } else { h+=`<span class="sp"></span><span class="mini mz">${p.mz.toFixed(3)}</span><span class="go">›</span>`; }
+    } else { h+=`<span class="sp"></span>${peakValue(p,peakOrder)}<span class="go">›</span>`; }
     li.innerHTML=h;
     li.onclick=ev=>{ if(ev.target.dataset.a) return; selectPeak(p); };
     li.querySelector("[data-a=use]").onchange=e=>{ pushUndo(); p.use=e.target.checked; renderPeaks(); redraw(); };
@@ -1840,11 +1851,11 @@ function showSpin(on,msg){ const el=document.getElementById("specspin"); if(!el)
   else el.hidden=true; }
 function setSpecRange(val){
   const tok=++_specTok; if(_spinTimer){ clearTimeout(_spinTimer); _spinTimer=null; } showSpin(false);
-  const useWhole=()=>{ SHOWSPEC=SPEC; refineIntervalApexes(SHOWSPEC); drawSpec(); };
+  const useWhole=()=>{ SHOWSPEC=SPEC; refineIntervalApexes(SHOWSPEC); renderPeaks(); drawSpec(); };
   if(val==="all"||val===""||val==null){ useWhole(); return; }
   const r=ranges[+val]; if(!r){ useWhole(); return; }
   const key=r.start+"_"+r.end;
-  if(specCache[key]){ SHOWSPEC=specCache[key]; refineIntervalApexes(SHOWSPEC); drawSpec(); return; }
+  if(specCache[key]){ SHOWSPEC=specCache[key]; refineIntervalApexes(SHOWSPEC); renderPeaks(); drawSpec(); return; }
   // keep the currently-shown spectrum until the interval average loads, so the
   // peaks jump only once (straight to the real value) instead of via whole-run.
   // Only flash a spinner if the averaging actually takes a moment (>180ms).
@@ -1852,7 +1863,7 @@ function setSpecRange(val){
   fetch("/spectrum?lo="+r.start+"&hi="+r.end).then(x=>x.json()).then(arr=>{
     specCache[key]=arr;
     if(tok===_specTok && document.getElementById("specrange").value===val){
-      SHOWSPEC=arr; refineIntervalApexes(SHOWSPEC); drawSpec(); }
+      SHOWSPEC=arr; refineIntervalApexes(SHOWSPEC); renderPeaks(); drawSpec(); }
   }).catch(()=>{}).finally(()=>{ if(tok===_specTok){ if(_spinTimer){ clearTimeout(_spinTimer); _spinTimer=null; } showSpin(false); } }); }
 // (re)load the spectrum for whatever interval is selected — called when the
 // mass-spectrum tab is opened, so interval edits made on the trace tab are
@@ -1865,9 +1876,6 @@ function setTab(t){ tab=t; anim=null; hoverRange=null; hoverPeakId=null;
   document.querySelectorAll("#maintabs button").forEach(b=>b.classList.toggle("on",b.dataset.tab===t));
   const spec=t==="spec";
   document.getElementById("qtabs").style.display=spec?"none":"";
-  document.getElementById("plotsub").textContent=spec
-    ? "— intensity vs m/z (which compounds are present)"
-    : "— the selected peak's intensity across the run (when it appears)";
   document.getElementById("leg-spec").style.display=spec?"":"none";
   document.getElementById("leg-trace").style.display=spec?"none":"";
   document.getElementById("spechint").style.display=spec?"":"none";

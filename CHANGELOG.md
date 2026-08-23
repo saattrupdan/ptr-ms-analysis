@@ -10,7 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Added a peaks-sidebar ordering selector for m/z order or descending abundance,
-  where abundance is the mean per-cycle integrated Raw signal.
+  where abundance is the mean per-cycle integrated Raw signal. The compact list now
+  shows only the active sort field; details shows both m/z and abundance. Sidebar
+  values follow the Mass spectrum tab's selected average-over interval.
 
 ## [0.2.1] - 2026-08-22
 

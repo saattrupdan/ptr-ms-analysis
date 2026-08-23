@@ -393,8 +393,11 @@ card only. It does not change saved ranges or CSV `Cycle` rows: those remain int
 
 The **Peaks** sidebar can also be ordered by descending abundance. This is the mean
 per-cycle integrated Raw signal (the peak integral), with m/z used to break ties. The
-choice is saved as `viz.peak_order` and does not change the peak order in the analysis
-config or CSV.
+compact list shows only the active sort field; the details view shows both m/z and
+abundance. The m/z and abundance values follow the Mass spectrum tab's selected
+average-over interval; isolated peaks use that interval's apex and clustered peaks
+retain their fixed model centres. The choice is saved as `viz.peak_order` and does not
+change the peak order in the analysis config or CSV.
 
 By default `viz` runs a localhost server, opens the browser, and **writes every change
 straight into the `--config` file**; when the expert clicks **Done** it runs the

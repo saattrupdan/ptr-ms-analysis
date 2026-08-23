@@ -749,10 +749,17 @@ def main() -> int:
         peak_order = _eval(
             session,
             "({value:document.querySelector('#pkorder').value, "
+            "order:document.querySelector('.pkorder').innerText, "
             "labels:Array.from(document.querySelectorAll('#peaksbody input.lbl')).map(e=>e.value), "
+            "values:Array.from(document.querySelectorAll('#peaksbody .mini')).map(e=>e.className), "
             "config:buildConfig()})",
         )
         _assert(peak_order["value"] == "mz", "peak order default is not m/z")
+        _assert("order by" in peak_order["order"], "peak order label is wrong")
+        _assert(
+            set(peak_order["values"]) == {"mini mz"},
+            "compact m/z order does not show only m/z",
+        )
         _assert(
             peak_order["labels"]
             == [
@@ -776,9 +783,14 @@ def main() -> int:
             session,
             "({value:document.querySelector('#pkorder').value, "
             "labels:Array.from(document.querySelectorAll('#peaksbody input.lbl')).map(e=>e.value), "
+            "values:Array.from(document.querySelectorAll('#peaksbody .mini')).map(e=>e.className), "
             "config:buildConfig()})",
         )
         _assert(peak_order["value"] == "abundance", "abundance order was not selected")
+        _assert(
+            set(peak_order["values"]) == {"mini abundance"},
+            "compact abundance order does not show only abundance",
+        )
         _assert(
             peak_order["labels"]
             == [
@@ -799,8 +811,19 @@ def main() -> int:
             session,
             "eval",
             "document.querySelector('#pkorder').value='mz'; "
-            "document.querySelector('#pkorder').dispatchEvent(new Event('change',{bubbles:true}))",
+            "document.querySelector('#pkorder').dispatchEvent(new Event('change',{bubbles:true})); "
+            "document.querySelector('#pkdetails').click()",
         )
+        details = _eval(
+            session,
+            "({mz:document.querySelectorAll('#peaksbody .mini.mz').length, "
+            "abundance:document.querySelectorAll('#peaksbody .mini.abundance').length})",
+        )
+        _assert(
+            details == {"mz": 6, "abundance": 6},
+            "details view does not show both m/z and abundance",
+        )
+        _browser(session, "eval", "document.querySelector('#pkdetails').click()")
 
         # Check all display units, including irregular timestamp conversion. Ranges
         # remain integer cycles in the saved config while the card follows the axis.
@@ -1138,7 +1161,11 @@ def main() -> int:
             "Math.max(ws[0].left,ws[1].left)); "
             "const union=Math.max(ws[0].right,ws[1].right)-"
             "Math.min(ws[0].left,ws[1].left); "
+            "const isolatedRow=Array.from(document.querySelectorAll('#peaksbody li')).find(li=>"
+            "li.querySelector('.lbl').value==='Isolated control'); "
             "return {windows:ws, overlap:intersection/union, isolated:dispApex(peaks[5]), "
+            "isolatedValue:isolatedRow.querySelector('.mini').textContent, "
+            "isolatedAbundance:peakAbundance(peaks[5]), "
             "note:document.querySelector('#idpanel').innerText}; })()",
         )
         _assert(
@@ -1152,6 +1179,14 @@ def main() -> int:
         _assert(
             clustered["isolated"] > 140.01,
             "isolated control did not re-centre on its interval maximum",
+        )
+        _assert(
+            clustered["isolatedValue"] == "140.020",
+            "sidebar m/z did not follow the selected spectrum",
+        )
+        _assert(
+            clustered["isolatedAbundance"] > 25,
+            "sidebar abundance did not follow the selected spectrum",
         )
         _assert(
             "fixed model centre" in clustered["note"]
