@@ -612,7 +612,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .card h2 .sub{text-transform:none;letter-spacing:0;font-weight:400;color:var(--mut);font-size:11.5px}
   .card h2 .grow{flex:1}
   .card h2.pkhead{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
-  .pkhead .pktitle{align-self:flex-end;line-height:1.1}
+  .pkhead .pktitle{align-self:flex-start;line-height:1.1}
   .pktitle .mut{text-transform:none;letter-spacing:0;font-size:10px;font-weight:400}
   .pkcontrols{align-self:flex-end;display:flex;align-items:center;gap:8px}
   .pkcontrols .pkorder{flex-direction:row;align-items:center;gap:5px;text-align:left}

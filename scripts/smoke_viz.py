@@ -788,7 +788,7 @@ def main() -> int:
             "const o=document.querySelector('.pkorder'); "
             "return {display:getComputedStyle(document.querySelector('.pkhead')).display, "
             "direction:getComputedStyle(document.querySelector('.pkhead')).flexDirection, "
-            "titleRight:Math.abs(t.right-h.right)<1, controlsRight:Math.abs(c.right-h.right)<1, "
+            "titleLeft:Math.abs(t.left-h.left)<1, controlsRight:Math.abs(c.right-h.right)<1, "
             "twoRows:t.bottom<=c.top, orderDirection:getComputedStyle(o).flexDirection, "
             "controlOrder:Array.from(document.querySelector('.pkcontrols').children).map(e=>e.id||e.className)}; })()",
         )
@@ -797,7 +797,7 @@ def main() -> int:
             == {
                 "display": "flex",
                 "direction": "column",
-                "titleRight": True,
+                "titleLeft": True,
                 "controlsRight": True,
                 "twoRows": True,
                 "orderDirection": "row",
