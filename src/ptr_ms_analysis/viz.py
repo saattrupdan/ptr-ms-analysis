@@ -611,6 +611,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
            display:flex;align-items:center;gap:10px;font-weight:700}
   .card h2 .sub{text-transform:none;letter-spacing:0;font-weight:400;color:var(--mut);font-size:11.5px}
   .card h2 .grow{flex:1}
+  .pktitle{display:flex;flex-direction:column;align-items:flex-start;gap:1px;line-height:1.1}
+  .pktitle .mut{text-transform:none;letter-spacing:0;font-size:10px;font-weight:400}
+  .pkheadbtn{padding:4px 7px;font-size:10px}
   .pad{padding:14px 15px}
   canvas{width:100%;display:block;background:var(--panel2)}
   #plot{cursor:grab} #plot.grabbing{cursor:grabbing}
@@ -849,7 +852,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <!-- peaks: the central control, always in view -->
   <aside class="sidebar">
     <div class="card">
-      <h2>Peaks <span class="mut" id="pkcount" style="font-weight:400"></span>
+      <h2>
+        <span class="pktitle"><span>Peaks</span><span class="mut" id="pkcount"></span></span>
         <span class="grow"></span>
         <label class="pkorder" title="Abundance is the mean per-cycle integrated Raw signal">
           order by
@@ -858,8 +862,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
             <option value="abundance">abundance</option>
           </select>
         </label>
-        <button class="ghost" id="pkcheckall" type="button">Check all</button>
-        <button class="ghost" id="pkdetails">details</button></h2>
+        <button class="ghost pkheadbtn" id="pkcheckall" type="button">Check all</button>
+        <button class="ghost pkheadbtn" id="pkdetails">Details</button></h2>
       <div class="scroll" id="peaksbody" style="max-height:calc(100vh - 190px);overflow-x:hidden"></div>
       <div class="hint">Click a peak to select &amp; zoom · ⌘/Ctrl-drag the mass spectrum to add · remove via ✕ in details</div>
     </div>
@@ -1632,8 +1636,8 @@ function peakValue(p, kind){
   return `<span class="mini mz" title="mass-to-charge ratio for the selected spectrum">${peakDisplayMz(p).toFixed(3)}</span>`;
 }
 function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box) return;
-  const cnt=document.getElementById("pkcount"); if(cnt) cnt.textContent=peaks.length?("· "+peaks.length):"";
-  const dt=document.getElementById("pkdetails"); if(dt) dt.textContent=showDetails?"hide details":"details";
+  const cnt=document.getElementById("pkcount"); if(cnt) cnt.textContent=peaks.length?String(peaks.length):"";
+  const dt=document.getElementById("pkdetails"); if(dt) dt.textContent=showDetails?"Hide details":"Details";
   box.innerHTML="";
   const esc=s=>(s||'').replace(/"/g,'&quot;');
   const ul=document.createElement("ul"); ul.className="plist"+(showDetails?" det":"");
