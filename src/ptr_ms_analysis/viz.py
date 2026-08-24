@@ -596,7 +596,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
     }
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--fg);
+  html,body{height:100%;overflow:hidden}
+  body{margin:0;display:flex;flex-direction:column;min-height:0;background:var(--bg);color:var(--fg);
        font:13.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
   header{display:flex;align-items:baseline;gap:14px;padding:13px 22px;
          border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--headtop),var(--bg))}
@@ -723,9 +724,12 @@ _TEMPLATE = r"""<!DOCTYPE html>
         color:var(--fg);font-size:12.5px}
   .menu button:hover{background:var(--hover);border-color:transparent}
   .menu button.on{color:var(--acc2)} .menu button.on::after{content:"✓";margin-left:auto;color:var(--acc2)}
-  .app{display:grid;grid-template-columns:360px minmax(0,1fr);gap:16px;padding:16px 22px;align-items:start;
+  .app{display:grid;grid-template-columns:360px minmax(0,1fr);gap:16px;padding:16px 22px;
+       align-items:start;flex:1 1 auto;min-height:0;min-width:0;overflow:hidden;
        transition:grid-template-columns .28s cubic-bezier(.4,0,.2,1)}
+  .main{min-width:0;min-height:0;overflow:hidden}
   @media(max-width:900px){.app{grid-template-columns:1fr}}
+
   .sidebar{position:sticky;top:16px}
   .main>.card+.card{margin-top:0}
   .plotresize{height:6px;display:flex;align-items:center;justify-content:center;cursor:ns-resize;
@@ -766,8 +770,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .plist .dc.dmda{min-width:58px;text-align:right} .plist .dc.dmda.warn{color:#f87171}
   .plist .dc.kv{min-width:50px;text-align:right}
   .plist .dc.win{min-width:92px;text-align:right}
-  .plist .dc.pills{display:flex;gap:4px;flex:0 0 160px;min-width:160px;overflow:hidden}
-  .plist .dc.del{cursor:pointer;color:var(--mut);background:none;border:0;font-size:12px;padding:2px 4px}
+  .plist .dc.pills{display:flex;gap:4px;flex:0 0 var(--tag-width,1px);min-width:var(--tag-width,1px);overflow:visible}
+  .plist .dc.del{display:inline-flex;align-items:center;justify-content:center;flex:0 0 28px;width:28px;
+                 cursor:pointer;color:var(--mut);background:none;border:0;font-size:12px;padding:2px 4px;text-align:center}
   .plist .dc.del:hover{color:#f87171}
   /* configuration slide-over */
   #cfgscrim{position:fixed;inset:0;background:var(--scrim);z-index:40;backdrop-filter:blur(2px)}
@@ -1102,6 +1107,7 @@ let nextId = peaks.reduce((a,p)=>Math.max(a,p.id),-1)+1;
 // default the time trace to the actual deliverable (concentration) when available
 let quant = M.concentration_available ? "con" : "cor";
 let showDetails = false;   // peaks sidebar: labels only until 'details'
+let peakTagWidth = 0;
 let peakOrder = ((DATA.config_base||{}).viz||{}).peak_order;
 if(peakOrder!=="abundance" && peakOrder!=="label" && peakOrder!=="mz") peakOrder="mz";
 let hoverRange = null;     // interval hovered in the trace (to show its label)
@@ -1297,6 +1303,7 @@ function scheduleDraw(){ if(drawQueued) return; drawQueued=true;
   requestAnimationFrame(()=>{ drawQueued=false; drawMain(); }); }
 // Size the plot + context card so the whole app fits the viewport (only cards scroll internally).
 function relayout(){ if(!plotC.isConnected) return;
+  setAppColumns(peakTagWidth);
   const vh=window.innerHeight, canvasTop=plotC.getBoundingClientRect().top;
   const foot=document.querySelector(".plotfoot"), footH=foot?foot.offsetHeight:34;
   const hintH=(tab==="trace")?34:0;                 // intervals card shows a hint line, ID card doesn't
@@ -1686,6 +1693,11 @@ function peakValue(p, kind){
   if(kind==="abundance") return `<span class="mini abundance" title="integrated Raw signal for the selected spectrum">${fmtAbundance(peakAbundance(p))}</span>`;
   return `<span class="mini mz" title="mass-to-charge ratio for the selected spectrum">${peakDisplayMz(p).toFixed(3)}</span>`;
 }
+function setAppColumns(tagWidth){ const app=document.getElementById("app"); if(!app) return;
+  if(window.innerWidth<=900){ app.style.gridTemplateColumns="1fr"; return; }
+  const available=Math.max(360,window.innerWidth-38), desired=showDetails?Math.max(620,600+tagWidth):360;
+  const width=Math.min(available,desired);
+  app.style.gridTemplateColumns=width+"px minmax(0,1fr)"; }
 function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box) return;
   const dt=document.getElementById("pkdetails"); if(dt) dt.textContent=showDetails?"Hide details":"Details";
   box.innerHTML="";
@@ -1717,6 +1729,12 @@ function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box)
     const del=li.querySelector("[data-a=del]"); if(del) del.onclick=e=>{ e.stopPropagation(); deletePeak(p); };
     ul.appendChild(li); }
   box.appendChild(ul);
+  if(showDetails){
+    peakTagWidth=0; ul.querySelectorAll(".dc.pills").forEach(el=>{
+      peakTagWidth=Math.max(peakTagWidth,el.scrollWidth); });
+    ul.style.setProperty("--tag-width",Math.ceil(peakTagWidth)+"px");
+    setAppColumns(peakTagWidth);
+  } else { peakTagWidth=0; setAppColumns(0); }
   updatePeakToggle();
   const sp=selPeak(); const tof=document.getElementById("traceof");
   if(tof) tof.textContent = sp? sp.label+" (m/z "+sp.mz.toFixed(3)+")":"—";
@@ -2098,7 +2116,7 @@ document.getElementById("pkcheckall").onclick=()=>{
 };
 document.getElementById("pkdetails").onclick=()=>{ showDetails=!showDetails;
   const app=document.getElementById("app");
-  if(app) app.style.gridTemplateColumns=showDetails?"760px minmax(0,1fr)":"360px minmax(0,1fr)";
+  setAppColumns(0);
   const c=document.getElementById("peaksbody"); if(c){ c.style.maxHeight="calc(100vh - 190px)"; c.style.overflowX="hidden"; }
   renderPeaks();
   // the plot canvas reflows as the sidebar animates — keep it re-fitting for the duration

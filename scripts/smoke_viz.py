@@ -952,11 +952,13 @@ def main() -> int:
             session,
             "({mz:document.querySelectorAll('#peaksbody .mini.mz').length, "
             "abundance:document.querySelectorAll('#peaksbody .mini.abundance').length, "
-            "wide:getComputedStyle(document.querySelector('#app')).gridTemplateColumns"
-            ".startsWith('760px')})",
+            "wide:!getComputedStyle(document.querySelector('#app')).gridTemplateColumns"
+            ".startsWith('360px'), tags:Array.from(document.querySelectorAll('#peaksbody .dc.pills'))"
+            ".every(e=>e.scrollWidth<=e.clientWidth+1), deletion:getComputedStyle"
+            "(document.querySelector('#peaksbody .dc.del')).width})",
         )
         _assert(
-            details == {"mz": 6, "abundance": 6, "wide": True},
+            details == {"mz": 6, "abundance": 6, "wide": True, "tags": True, "deletion": "28px"},
             "details view does not show both m/z and abundance",
         )
         _browser(session, "eval", "document.querySelector('#pkdetails').click()")
