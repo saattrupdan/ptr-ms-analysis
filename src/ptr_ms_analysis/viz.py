@@ -727,7 +727,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
        transition:grid-template-columns .28s cubic-bezier(.4,0,.2,1)}
   @media(max-width:900px){.app{grid-template-columns:1fr}}
   .sidebar{position:sticky;top:16px}
-  .main>.card+.card{margin-top:16px}
+  .main>.card+.card{margin-top:0}
   .plotresize{height:6px;display:flex;align-items:center;justify-content:center;cursor:ns-resize;
               touch-action:none;user-select:none}
   .plotresize::after{content:"";width:44px;height:3px;border-radius:99px;background:var(--line)}
