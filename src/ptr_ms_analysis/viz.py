@@ -726,12 +726,14 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .menu button:hover{background:var(--hover);border-color:transparent}
   .menu button.on{color:var(--acc2)} .menu button.on::after{content:"✓";margin-left:auto;color:var(--acc2)}
   .app{display:grid;grid-template-columns:360px minmax(0,1fr);gap:16px;padding:16px 22px;
-       align-items:start;flex:1 1 auto;min-height:0;min-width:0;overflow:hidden;
+       align-items:stretch;flex:1 1 auto;min-height:0;min-width:0;overflow:hidden;
        transition:grid-template-columns .28s cubic-bezier(.4,0,.2,1)}
-  .main{min-width:0;min-height:0;overflow:hidden}
-  @media(max-width:900px){.app{grid-template-columns:1fr}}
+  .main{display:flex;flex-direction:column;height:100%;min-width:0;min-height:0;overflow:hidden}
+  @media(max-width:900px){.app{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) minmax(0,2fr)}}
 
-  .sidebar{position:sticky;top:16px}
+  .sidebar{height:100%;min-height:0}
+  .sidebar .card{height:100%;display:flex;flex-direction:column;padding-bottom:8px}
+  .sidebar .peaksbody{flex:1 1 auto;min-height:0;max-height:none!important;overflow-y:auto}
   .main>.card+.card{margin-top:0}
   .plotresize{height:6px;display:flex;align-items:center;justify-content:center;cursor:ns-resize;
               touch-action:none;user-select:none}
@@ -898,9 +900,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <span class="sub" id="plotsub"></span>
       <label class="ctl" id="xaxiswrap" style="margin-left:4px">x-axis
         <select id="xaxisunit" style="width:auto"></select></label>
+      <span class="grow"></span>
       <label class="ctl" id="specrangewrap" style="margin-left:4px">average over
         <select id="specrange" style="width:auto"></select></label>
-      <span class="grow"></span>
       <span class="tabs" id="qtabs" style="display:none">
         <button data-q="raw" class="on">Raw</button>
         <button data-q="cor">Corrected</button>
@@ -1304,11 +1306,12 @@ function scheduleDraw(){ if(drawQueued) return; drawQueued=true;
 // Size the plot + context card so the whole app fits the viewport (only cards scroll internally).
 function relayout(){ if(!plotC.isConnected) return;
   setAppColumns(peakTagWidth);
-  const vh=window.innerHeight, canvasTop=plotC.getBoundingClientRect().top;
+  const main=document.querySelector(".main"), layoutBottom=main?main.getBoundingClientRect().bottom:window.innerHeight;
+  const canvasTop=plotC.getBoundingClientRect().top;
   const foot=document.querySelector(".plotfoot"), footH=foot?foot.offsetHeight:34;
-  const hintH=(tab==="trace")?34:0;                 // intervals card shows a hint line, ID card doesn't
+  const hintH=0;                                    // both context cards now have no trailing hint
   const splitH=plotResize?plotResize.offsetHeight:12;
-  const leftover=vh-canvasTop-footH-splitH-40/*ctx header*/-hintH-18/*bottom pad*/-2;
+  const leftover=layoutBottom-canvasTop-footH-splitH-40/*ctx header*/-hintH-18/*bottom pad*/-2;
   const minPlot=Math.min(MIN_PLOT_HEIGHT,Math.max(60,leftover-MIN_CONTEXT_HEIGHT));
   const maxPlot=Math.max(minPlot,Math.min(560,leftover-MIN_CONTEXT_HEIGHT));
   let bodyH, ph;
