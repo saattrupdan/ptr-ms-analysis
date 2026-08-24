@@ -1107,7 +1107,7 @@ let nextId = peaks.reduce((a,p)=>Math.max(a,p.id),-1)+1;
 // default the time trace to the actual deliverable (concentration) when available
 let quant = M.concentration_available ? "con" : "cor";
 let showDetails = false;   // peaks sidebar: labels only until 'details'
-let peakTagWidth = 0;
+let peakTagWidth = 0, peakDetailWidth = 0;
 let peakOrder = ((DATA.config_base||{}).viz||{}).peak_order;
 if(peakOrder!=="abundance" && peakOrder!=="label" && peakOrder!=="mz") peakOrder="mz";
 let hoverRange = null;     // interval hovered in the trace (to show its label)
@@ -1693,9 +1693,9 @@ function peakValue(p, kind){
   if(kind==="abundance") return `<span class="mini abundance" title="integrated Raw signal for the selected spectrum">${fmtAbundance(peakAbundance(p))}</span>`;
   return `<span class="mini mz" title="mass-to-charge ratio for the selected spectrum">${peakDisplayMz(p).toFixed(3)}</span>`;
 }
-function setAppColumns(tagWidth){ const app=document.getElementById("app"); if(!app) return;
+function setAppColumns(tagWidth,rowWidth=peakDetailWidth){ const app=document.getElementById("app"); if(!app) return;
   if(window.innerWidth<=900){ app.style.gridTemplateColumns="1fr"; return; }
-  const available=Math.max(360,window.innerWidth-38), desired=showDetails?Math.max(620,600+tagWidth):360;
+  const available=Math.max(360,window.innerWidth-38), desired=showDetails?Math.max(620,600+tagWidth,rowWidth+2):360;
   const width=Math.min(available,desired);
   app.style.gridTemplateColumns=width+"px minmax(0,1fr)"; }
 function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box) return;
@@ -1734,7 +1734,10 @@ function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box)
       peakTagWidth=Math.max(peakTagWidth,el.scrollWidth); });
     ul.style.setProperty("--tag-width",Math.ceil(peakTagWidth)+"px");
     setAppColumns(peakTagWidth);
-  } else { peakTagWidth=0; setAppColumns(0); }
+    peakDetailWidth=0; ul.querySelectorAll(".plist li").forEach(el=>{
+      peakDetailWidth=Math.max(peakDetailWidth,el.scrollWidth); });
+    setAppColumns(peakTagWidth,peakDetailWidth);
+  } else { peakTagWidth=0; peakDetailWidth=0; setAppColumns(0); }
   updatePeakToggle();
   const sp=selPeak(); const tof=document.getElementById("traceof");
   if(tof) tof.textContent = sp? sp.label+" (m/z "+sp.mz.toFixed(3)+")":"—";
