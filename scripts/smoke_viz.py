@@ -780,6 +780,28 @@ def main() -> int:
             ],
             "default peak order is not m/z",
         )
+        header_layout = _eval(
+            session,
+            "(() => { const h=document.querySelector('.pkhead').getBoundingClientRect(); "
+            "const t=document.querySelector('.pktitle').getBoundingClientRect(); "
+            "const c=document.querySelector('.pkcontrols').getBoundingClientRect(); "
+            "const d=document.querySelector('#pkdetails').getBoundingClientRect(); "
+            "return {display:getComputedStyle(document.querySelector('.pkhead')).display, "
+            "children:Array.from(document.querySelector('.pkhead').children).map(e=>e.id||e.className), "
+            "titleTop:t.top<=c.top, controlsCentre:Math.abs(c.left+c.width/2-(h.left+h.width/2))<20, "
+            "detailsRight:Math.abs(d.right-h.right)<1}; })()",
+        )
+        _assert(
+            header_layout
+            == {
+                "display": "grid",
+                "children": ["pktitle", "pkcontrols", "pkdetails"],
+                "titleTop": True,
+                "controlsCentre": True,
+                "detailsRight": True,
+            },
+            "peak header controls are not laid out as requested",
+        )
         peak_toggle = _eval(
             session,
             "({label:document.querySelector('#pkcheckall').textContent, "
