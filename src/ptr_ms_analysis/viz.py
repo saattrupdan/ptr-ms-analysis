@@ -611,8 +611,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
            display:flex;align-items:center;gap:10px;font-weight:700}
   .card h2 .sub{text-transform:none;letter-spacing:0;font-weight:400;color:var(--mut);font-size:11.5px}
   .card h2 .grow{flex:1}
+  .card h2.pkhead{align-items:flex-end}
   .pktitle{display:flex;flex-direction:column;align-items:flex-start;gap:1px;line-height:1.1}
   .pktitle .mut{text-transform:none;letter-spacing:0;font-size:10px;font-weight:400}
+  .pkhead .pkorder{align-items:center;text-align:center}
   .pkheadbtn{padding:4px 7px;font-size:10px}
   .pad{padding:14px 15px}
   canvas{width:100%;display:block;background:var(--panel2)}
@@ -852,9 +854,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <!-- peaks: the central control, always in view -->
   <aside class="sidebar">
     <div class="card">
-      <h2>
+      <h2 class="pkhead">
         <span class="pktitle"><span>Peaks</span><span class="mut" id="pkcount"></span></span>
-        <span class="grow"></span>
         <label class="pkorder" title="Abundance is the mean per-cycle integrated Raw signal">
           order by
           <select id="pkorder" aria-label="Peak ordering">
