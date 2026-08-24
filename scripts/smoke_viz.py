@@ -780,6 +780,54 @@ def main() -> int:
             ],
             "default peak order is not m/z",
         )
+        peak_toggle = _eval(
+            session,
+            "({label:document.querySelector('#pkcheckall').textContent, "
+            "disabled:document.querySelector('#pkcheckall').disabled, "
+            "checked:Array.from(document.querySelectorAll('#peaksbody input[data-a=use]'))"
+            ".filter(e=>e.checked).length})",
+        )
+        _assert(
+            peak_toggle == {"label": "Uncheck all peaks", "disabled": False, "checked": 6},
+            "peak toggle did not start in the all-checked state",
+        )
+        _browser(session, "eval", "document.querySelector('#pkcheckall').click()")
+        peak_toggle = _eval(
+            session,
+            "({label:document.querySelector('#pkcheckall').textContent, "
+            "checked:Array.from(document.querySelectorAll('#peaksbody input[data-a=use]'))"
+            ".filter(e=>e.checked).length})",
+        )
+        _assert(
+            peak_toggle == {"label": "Check all peaks", "checked": 0},
+            "peak toggle did not uncheck every peak",
+        )
+        _browser(
+            session,
+            "eval",
+            "document.querySelector('#peaksbody input[data-a=use]').click()",
+        )
+        peak_toggle = _eval(
+            session,
+            "({label:document.querySelector('#pkcheckall').textContent, "
+            "checked:Array.from(document.querySelectorAll('#peaksbody input[data-a=use]'))"
+            ".filter(e=>e.checked).length})",
+        )
+        _assert(
+            peak_toggle == {"label": "Check all peaks", "checked": 1},
+            "peak toggle did not represent a mixed selection",
+        )
+        _browser(session, "eval", "document.querySelector('#pkcheckall').click()")
+        peak_toggle = _eval(
+            session,
+            "({label:document.querySelector('#pkcheckall').textContent, "
+            "checked:Array.from(document.querySelectorAll('#peaksbody input[data-a=use]'))"
+            ".filter(e=>e.checked).length})",
+        )
+        _assert(
+            peak_toggle == {"label": "Uncheck all peaks", "checked": 6},
+            "peak toggle did not check every peak from a mixed selection",
+        )
         _browser(
             session,
             "eval",

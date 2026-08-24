@@ -1,5 +1,6 @@
 """Smoke coverage for the installed package and resource-backed CLI."""
 
+import inspect
 import json
 import sys
 import unittest
@@ -8,7 +9,7 @@ from importlib import resources
 from io import StringIO
 from unittest import mock
 
-from ptr_ms_analysis import analyze, ptrms
+from ptr_ms_analysis import analyze, ptrms, viz
 
 
 class _SingleArgumentTraversable:
@@ -75,6 +76,21 @@ class PackageSmokeTest(unittest.TestCase):
         payload = json.loads(output.getvalue())
         self.assertIn("compounds", payload)
         self.assertTrue(payload["compounds"])
+
+    def test_viz_waits_indefinitely_by_default(self):
+        timeout_default = inspect.signature(viz.serve).parameters["timeout"].default
+        self.assertIsNone(timeout_default)
+
+        output = StringIO()
+        with (
+            mock.patch.object(sys, "argv", ["ptr", "viz", "--help"]),
+            redirect_stdout(output),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            analyze.main()
+
+        self.assertEqual(raised.exception.code, 0)
+        self.assertIn("default: indefinitely", output.getvalue())
 
     def test_help_command_needs_no_hdf5_fixture(self):
         output = StringIO()

@@ -1924,8 +1924,8 @@ def main():
     pv.add_argument(
         "--timeout",
         type=int,
-        default=1800,
-        help="Seconds to wait for 'Done' (default 1800)",
+        default=None,
+        help="Seconds to wait for 'Done' (default: indefinitely)",
     )
     pv.add_argument(
         "--no-open", action="store_true", help="Do not auto-open the browser"

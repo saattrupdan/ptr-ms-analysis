@@ -393,7 +393,7 @@ def serve(
     html,
     config_path,
     port=8765,
-    timeout=1800,
+    timeout=None,
     open_browser=True,
     run_analysis=None,
     spectrum_fn=None,
@@ -406,8 +406,9 @@ def serve(
     a background thread WHILE STAYING UP, so the page can poll /status and show a
     spinner until the results file is ready. Returns
     (final_config_or_None, finished_bool, summary_or_None); blocks until the
-    analysis finishes (after Done) or until ``timeout`` with no Done.
-    Uses only the stdlib — no extra dependencies, keeps the no-install promise."""
+    analysis finishes after Done, or indefinitely before Done unless an explicit
+    ``timeout`` is supplied. Uses only the stdlib — no extra dependencies, keeps
+    the no-install promise."""
     done = threading.Event()  # expert clicked Done
     analysis_done = threading.Event()  # background analysis finished
     closed = threading.Event()  # page acked the result (can shut down)
@@ -857,6 +858,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
             <option value="abundance">abundance</option>
           </select>
         </label>
+        <button class="ghost" id="pkcheckall" type="button">Check all peaks</button>
         <button class="ghost" id="pkdetails">details</button></h2>
       <div class="scroll" id="peaksbody" style="max-height:calc(100vh - 190px);overflow-x:hidden"></div>
       <div class="hint">Click a peak to select &amp; zoom · ⌘/Ctrl-drag the mass spectrum to add · remove via ✕ in details</div>
@@ -1661,6 +1663,7 @@ function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box)
     const del=li.querySelector("[data-a=del]"); if(del) del.onclick=e=>{ e.stopPropagation(); deletePeak(p); };
     ul.appendChild(li); }
   box.appendChild(ul);
+  updatePeakToggle();
   const sp=selPeak(); const tof=document.getElementById("traceof");
   if(tof) tof.textContent = sp? sp.label+" (m/z "+sp.mz.toFixed(3)+")":"—";
   // the per-compound trace legend entry only makes sense once a compound is chosen
@@ -1673,6 +1676,13 @@ function evText(c){ if(!c.iso_obs) return '<span class="mut">no isotope data</sp
   const cls=(o,p)=> o < p*0.5 ? "bad" : (Math.abs(o-p)<Math.max(0.01,p*0.5)?"ok":"");
   return `M+1 <span class="${cls(c.iso_obs[0],c.iso_pred[0])}">${pct(c.iso_obs[0])}</span>/${pct(c.iso_pred[0])} · `+
          `M+2 <span class="${cls(c.iso_obs[1],c.iso_pred[1])}">${pct(c.iso_obs[1])}</span>/${pct(c.iso_pred[1])}`; }
+function updatePeakToggle(){
+  const btn=document.getElementById("pkcheckall"); if(!btn) return;
+  const allChecked=peaks.length>0 && peaks.every(p=>p.use);
+  btn.disabled=peaks.length===0;
+  btn.textContent=allChecked?"Uncheck all peaks":"Check all peaks";
+  btn.setAttribute("aria-label",btn.textContent);
+}
 function renderId(){ const el=document.getElementById("idpanel"), conf=document.getElementById("idconf"), p=selPeak();
   const esc=s=>(s||'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
   const assigned=!!(p&&p.formula);
@@ -2026,6 +2036,11 @@ document.getElementById("pkorder").value=peakOrder;
 document.getElementById("pkorder").onchange=e=>{
   peakOrder=e.target.value==="abundance"?"abundance":"mz";
   renderPeaks(); scheduleSave();
+};
+document.getElementById("pkcheckall").onclick=()=>{
+  const checked=peaks.length>0 && peaks.every(p=>p.use);
+  pushUndo(); peaks.forEach(p=>{ p.use=!checked; });
+  renderPeaks(); redraw();
 };
 document.getElementById("pkdetails").onclick=()=>{ showDetails=!showDetails;
   const app=document.getElementById("app");

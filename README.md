@@ -104,8 +104,8 @@ abundance. The m/z and abundance values follow the Mass spectrum tab's selected
 average-over interval; isolated peaks use that interval's apex and clustered peaks
 retain their fixed model centres. The choice is saved as `viz.peak_order` and does not
 change the peak order in the analysis config or CSV. The Peaks sidebar also has a
-check/uncheck-all toggle. This is display-only: it changes which peak markers are shown
-in the review, not the peaks saved to the analysis config or included in the CSV.
+check/uncheck-all toggle for choosing which peaks are active in the review and included
+in the saved analysis config and CSV.
 
 An analysis config may include an `analyze` object with `R`, `R_phys`, `K`,
 `molar_volume`, `primary_mz`, `kinetic`, `k_anchor`, `humidity_correct`, `humidity_p`,
