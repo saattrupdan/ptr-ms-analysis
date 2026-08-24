@@ -815,7 +815,7 @@ def main() -> int:
         _assert(
             splitter["role"] == "separator"
             and splitter["orientation"] == "horizontal"
-            and splitter["min"] >= 120
+            and splitter["min"] >= 60
             and splitter["max"] > splitter["min"]
             and splitter["height"] >= splitter["min"]
             and splitter["handlers"],

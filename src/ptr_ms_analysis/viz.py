@@ -728,7 +728,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   @media(max-width:900px){.app{grid-template-columns:1fr}}
   .sidebar{position:sticky;top:16px}
   .main>.card+.card{margin-top:16px}
-  .plotresize{height:12px;display:flex;align-items:center;justify-content:center;cursor:ns-resize;
+  .plotresize{height:6px;display:flex;align-items:center;justify-content:center;cursor:ns-resize;
               touch-action:none;user-select:none}
   .plotresize::after{content:"";width:44px;height:3px;border-radius:99px;background:var(--line)}
   .plotresize:hover::after,.plot-resizing .plotresize::after{background:var(--acc)}
@@ -925,7 +925,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   </div>
 
   <div class="plotresize" id="plotresize" role="separator" aria-orientation="horizontal"
-       aria-label="Resize plot and context card" aria-valuemin="280" aria-valuemax="560"
+       aria-label="Resize plot and context card" aria-valuemin="140" aria-valuemax="560"
        aria-valuenow="540" title="Drag to resize the plot and card below"></div>
 
   <!-- context card: identification (spectrum tab) -->
@@ -1269,7 +1269,7 @@ const TINSET=(()=>{ const disc=PC.discriminator; if(!disc) return null;
 const plotC=document.getElementById("plot");
 const plotResize=document.getElementById("plotresize");
 const PLOT_HEIGHT_KEY="ptrms-plot-height";
-const MIN_PLOT_HEIGHT=280, MIN_CONTEXT_HEIGHT=110;
+const MIN_PLOT_HEIGHT=140, MIN_CONTEXT_HEIGHT=55;
 let plotHeight=(()=>{ try{ const n=Number(localStorage.getItem(PLOT_HEIGHT_KEY));
   return Number.isFinite(n)&&n>0?n:null; }catch(e){ return null; } })();
 let splitDrag=null;
@@ -1301,7 +1301,7 @@ function relayout(){ if(!plotC.isConnected) return;
   const hintH=(tab==="trace")?34:0;                 // intervals card shows a hint line, ID card doesn't
   const splitH=plotResize?plotResize.offsetHeight:12;
   const leftover=vh-canvasTop-footH-splitH-40/*ctx header*/-hintH-18/*bottom pad*/-2;
-  const minPlot=Math.min(MIN_PLOT_HEIGHT,Math.max(120,leftover-MIN_CONTEXT_HEIGHT));
+  const minPlot=Math.min(MIN_PLOT_HEIGHT,Math.max(60,leftover-MIN_CONTEXT_HEIGHT));
   const maxPlot=Math.max(minPlot,Math.min(560,leftover-MIN_CONTEXT_HEIGHT));
   let bodyH, ph;
   if(plotHeight===null){
