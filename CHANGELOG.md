@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-24
+
+### Added
+
+- Added a check/uncheck-all toggle to the Peaks sidebar.
+- Added alphabetical label ordering alongside m/z and abundance ordering.
+- Added a persistent draggable splitter between the plot and context card.
+
+### Changed
+
+- `viz` now waits indefinitely by default; `--timeout` remains available as an
+  explicit opt-in limit.
+- Improved responsive sizing and alignment of the Peaks sidebar and context cards.
+- Removed redundant card guidance and improved the guided-tour button's light-mode
+  contrast.
+
 ## [0.3.0] - 2026-08-23
 
 ### Added
