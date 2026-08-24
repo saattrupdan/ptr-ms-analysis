@@ -915,6 +915,35 @@ def main() -> int:
         _browser(
             session,
             "eval",
+            "document.querySelector('#pkorder').value='label'; "
+            "document.querySelector('#pkorder').dispatchEvent(new Event('change',{bubbles:true}))",
+        )
+        label_order = _eval(
+            session,
+            "({value:document.querySelector('#pkorder').value, "
+            "labels:Array.from(document.querySelectorAll('#peaksbody input.lbl')).map(e=>e.value), "
+            "config:buildConfig()})",
+        )
+        _assert(label_order["value"] == "label", "label order was not selected")
+        _assert(
+            label_order["labels"]
+            == [
+                "Ambiguous mix",
+                "Cluster component A",
+                "Cluster component B",
+                "Curated solvent",
+                "Isolated control",
+                "Unassigned sole candidate",
+            ],
+            "label peak order is wrong",
+        )
+        _assert(
+            label_order["config"]["viz"]["peak_order"] == "label",
+            "label peak order was not saved in viz config",
+        )
+        _browser(
+            session,
+            "eval",
             "document.querySelector('#pkorder').value='mz'; "
             "document.querySelector('#pkorder').dispatchEvent(new Event('change',{bubbles:true})); "
             "document.querySelector('#pkdetails').click()",

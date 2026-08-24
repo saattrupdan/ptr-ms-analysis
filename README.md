@@ -97,10 +97,10 @@ Precedence is CLI override > config value > cycle default. The selector is shown
 on the **Signal over time** tab and updates that plot and the Intervals card. Saved
 ranges and CSV `Cycle` rows remain integer, 1-based, inclusive cycle boundaries.
 
-The **Peaks** sidebar can also be ordered by descending abundance. This is the mean
-per-cycle integrated Raw signal (the peak integral), with m/z used to break ties. The
-compact list shows only the active sort field; the details view shows both m/z and
-abundance. The m/z and abundance values follow the Mass spectrum tab's selected
+The **Peaks** sidebar can also be ordered by descending abundance or alphabetically by
+label. Abundance is the mean per-cycle integrated Raw signal (the peak integral), with
+m/z used to break ties. The compact list shows only the active sort field; the details
+view shows both m/z and abundance. The m/z and abundance values follow the Mass spectrum tab's selected
 average-over interval; isolated peaks use that interval's apex and clustered peaks
 retain their fixed model centres. The choice is saved as `viz.peak_order` and does not
 change the peak order in the analysis config or CSV. The Peaks sidebar also has a

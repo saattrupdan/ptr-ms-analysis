@@ -862,13 +862,14 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <aside class="sidebar">
     <div class="card">
       <h2 class="pkhead">
-        <span class="pktitle">Peaks <span class="mut" id="pkcount"></span></span>
+        <span class="pktitle">Peaks</span>
         <span class="pkcontrols">
           <label class="pkorder" title="Abundance is the mean per-cycle integrated Raw signal">
             order by
             <select id="pkorder" aria-label="Peak ordering">
               <option value="mz">m/z</option>
               <option value="abundance">abundance</option>
+              <option value="label">label</option>
             </select>
           </label>
           <button class="ghost pkheadbtn" id="pkcheckall" type="button">Check all</button>
@@ -1102,7 +1103,7 @@ let nextId = peaks.reduce((a,p)=>Math.max(a,p.id),-1)+1;
 let quant = M.concentration_available ? "con" : "cor";
 let showDetails = false;   // peaks sidebar: labels only until 'details'
 let peakOrder = ((DATA.config_base||{}).viz||{}).peak_order;
-if(peakOrder!=="abundance" && peakOrder!=="mz") peakOrder="mz";
+if(peakOrder!=="abundance" && peakOrder!=="label" && peakOrder!=="mz") peakOrder="mz";
 let hoverRange = null;     // interval hovered in the trace (to show its label)
 let hoverPeakId = null;    // peak whose window is hovered in the spectrum (highlight, mirror of hoverRange)
 const QSHORT = {raw:"Raw",cor:"Corrected",con:"Conc",ug:"Conc µg"};
@@ -1674,6 +1675,10 @@ function peakAbundance(p){
 function orderedPeaks(){
   return [...peaks].sort((a,b)=>{
     if(peakOrder==="abundance") return peakAbundance(b)-peakAbundance(a) || peakDisplayMz(a)-peakDisplayMz(b);
+    if(peakOrder==="label"){
+      const la=(a.label||"").toLocaleLowerCase(), lb=(b.label||"").toLocaleLowerCase();
+      return (la<lb?-1:(la>lb?1:0)) || peakDisplayMz(a)-peakDisplayMz(b);
+    }
     return peakDisplayMz(a)-peakDisplayMz(b);
   });
 }
@@ -1682,7 +1687,6 @@ function peakValue(p, kind){
   return `<span class="mini mz" title="mass-to-charge ratio for the selected spectrum">${peakDisplayMz(p).toFixed(3)}</span>`;
 }
 function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box) return;
-  const cnt=document.getElementById("pkcount"); if(cnt) cnt.textContent=peaks.length?("· "+peaks.length):"";
   const dt=document.getElementById("pkdetails"); if(dt) dt.textContent=showDetails?"Hide details":"Details";
   box.innerHTML="";
   const esc=s=>(s||'').replace(/"/g,'&quot;');
@@ -2084,7 +2088,7 @@ document.getElementById("zoomreset").onclick=()=>{
 // peaks: details toggle — widen the sidebar instead of side-scrolling
 document.getElementById("pkorder").value=peakOrder;
 document.getElementById("pkorder").onchange=e=>{
-  peakOrder=e.target.value==="abundance"?"abundance":"mz";
+  peakOrder=e.target.value==="abundance"?"abundance":(e.target.value==="label"?"label":"mz");
   renderPeaks(); scheduleSave();
 };
 document.getElementById("pkcheckall").onclick=()=>{
