@@ -810,7 +810,9 @@ def main() -> int:
             "(() => { const r=document.querySelector('#plotresize'); "
             "return {role:r.getAttribute('role'), orientation:r.getAttribute('aria-orientation'), "
             "min:+r.getAttribute('aria-valuemin'), max:+r.getAttribute('aria-valuemax'), "
-            "height:+document.querySelector('#plot').dataset.h, handlers:typeof r.onpointerdown==='function'}; })()",
+            "height:+document.querySelector('#plot').dataset.h, handlers:typeof r.onpointerdown==='function', "
+            "bottomAligned:Math.abs(document.querySelector('.sidebar .card').getBoundingClientRect().bottom-"
+            "document.querySelector('#intcard').getBoundingClientRect().bottom)<1}; })()",
         )
         _assert(
             splitter["role"] == "separator"
@@ -818,7 +820,8 @@ def main() -> int:
             and splitter["min"] >= 60
             and splitter["max"] > splitter["min"]
             and splitter["height"] >= splitter["min"]
-            and splitter["handlers"],
+            and splitter["handlers"]
+            and splitter["bottomAligned"],
             "plot/card resize splitter is missing or unbounded",
         )
         abundance_format = _eval(
@@ -1007,6 +1010,18 @@ def main() -> int:
             )
             == {"display": "none", "tab": "spec"},
             "x-axis selector remains visible on Mass spectrum",
+        )
+        spectrum_layout = _eval(
+            session,
+            "(() => { const h=document.querySelector('.main>.card h2').getBoundingClientRect(); "
+            "const a=document.querySelector('#specrangewrap').getBoundingClientRect(); "
+            "return {averageRight:Math.abs(a.right-(h.right-15))<1, "
+            "bottomAligned:Math.abs(document.querySelector('.sidebar .card').getBoundingClientRect().bottom-"
+            "document.querySelector('#idcard').getBoundingClientRect().bottom)<1}; })()",
+        )
+        _assert(
+            spectrum_layout == {"averageRight": True, "bottomAligned": True},
+            "Mass spectrum header or card is not aligned to the viewport",
         )
         _browser(
             session,

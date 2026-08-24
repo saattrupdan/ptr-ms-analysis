@@ -1309,9 +1309,10 @@ function relayout(){ if(!plotC.isConnected) return;
   const main=document.querySelector(".main"), layoutBottom=main?main.getBoundingClientRect().bottom:window.innerHeight;
   const canvasTop=plotC.getBoundingClientRect().top;
   const foot=document.querySelector(".plotfoot"), footH=foot?foot.offsetHeight:34;
-  const hintH=0;                                    // both context cards now have no trailing hint
+  const context=document.getElementById(tab==="spec"?"idcard":"intcard");
+  const contextHead=context&&context.querySelector("h2"), contextHeadH=contextHead?contextHead.offsetHeight:40;
   const splitH=plotResize?plotResize.offsetHeight:12;
-  const leftover=layoutBottom-canvasTop-footH-splitH-40/*ctx header*/-hintH-18/*bottom pad*/-2;
+  const leftover=layoutBottom-canvasTop-footH-splitH-contextHeadH-2;
   const minPlot=Math.min(MIN_PLOT_HEIGHT,Math.max(60,leftover-MIN_CONTEXT_HEIGHT));
   const maxPlot=Math.max(minPlot,Math.min(560,leftover-MIN_CONTEXT_HEIGHT));
   let bodyH, ph;
@@ -1326,6 +1327,7 @@ function relayout(){ if(!plotC.isConnected) return;
   if(plotResize){ plotResize.setAttribute("aria-valuemin",String(Math.round(minPlot)));
     plotResize.setAttribute("aria-valuemax",String(Math.round(maxPlot)));
     plotResize.setAttribute("aria-valuenow",String(Math.round(ph))); }
+  if(context) context.style.height=(contextHeadH+bodyH+2)+"px";
   document.querySelectorAll("#intcard .scroll").forEach(s=>s.style.maxHeight=bodyH+"px");
   const idp=document.getElementById("idpanel"); if(idp){ idp.style.maxHeight=bodyH+"px"; idp.style.overflowY="auto"; }
   drawMain(); }
