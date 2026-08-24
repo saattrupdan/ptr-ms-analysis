@@ -862,7 +862,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <button class="hbtn" id="checkBtn" title="Review checklist" hidden>📋 Checklist <span class="badge" id="checkbadge"></span></button>
   <button class="hbtn" id="methodBtn" title="How the analysis works">📖 Method</button>
   <button class="hbtn" id="cfgBtn" title="Configuration">⚙ Configuration</button>
-  <button class="hbtn ic" id="tourBtn" title="Show the guided tour">❔</button>
+  <button class="hbtn ic" id="tourBtn" title="Show the guided tour">?</button>
   <span id="exportrow"></span>
 </header>
 
