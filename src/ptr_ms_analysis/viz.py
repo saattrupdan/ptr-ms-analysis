@@ -736,7 +736,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
        overflow:hidden;text-overflow:ellipsis;outline:none;cursor:pointer}
   .plist input.lbl:not([readonly]){cursor:text}          /* selected row: editable -> text caret */
   .plist li.off input.lbl{opacity:.4;text-decoration:line-through}
-  .pkorder{display:inline-flex;align-items:center;gap:5px;text-transform:none;
+  .pkorder{display:inline-flex;flex-direction:column;align-items:flex-start;gap:3px;text-transform:none;
             letter-spacing:0;font-weight:400;color:var(--mut);font-size:11px}
   .pkorder select{padding:4px 6px;font-size:11px}
   .plist input.lbl:not([readonly]):hover{border-color:var(--line)}
@@ -858,7 +858,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
             <option value="abundance">abundance</option>
           </select>
         </label>
-        <button class="ghost" id="pkcheckall" type="button">Check all peaks</button>
+        <button class="ghost" id="pkcheckall" type="button">Check all</button>
         <button class="ghost" id="pkdetails">details</button></h2>
       <div class="scroll" id="peaksbody" style="max-height:calc(100vh - 190px);overflow-x:hidden"></div>
       <div class="hint">Click a peak to select &amp; zoom · ⌘/Ctrl-drag the mass spectrum to add · remove via ✕ in details</div>
@@ -1680,7 +1680,7 @@ function updatePeakToggle(){
   const btn=document.getElementById("pkcheckall"); if(!btn) return;
   const allChecked=peaks.length>0 && peaks.every(p=>p.use);
   btn.disabled=peaks.length===0;
-  btn.textContent=allChecked?"Uncheck all peaks":"Check all peaks";
+  btn.textContent=allChecked?"Uncheck all":"Check all";
   btn.setAttribute("aria-label",btn.textContent);
 }
 function renderId(){ const el=document.getElementById("idpanel"), conf=document.getElementById("idconf"), p=selPeak();

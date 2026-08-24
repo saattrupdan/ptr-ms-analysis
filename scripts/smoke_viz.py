@@ -788,7 +788,7 @@ def main() -> int:
             ".filter(e=>e.checked).length})",
         )
         _assert(
-            peak_toggle == {"label": "Uncheck all peaks", "disabled": False, "checked": 6},
+            peak_toggle == {"label": "Uncheck all", "disabled": False, "checked": 6},
             "peak toggle did not start in the all-checked state",
         )
         _browser(session, "eval", "document.querySelector('#pkcheckall').click()")
@@ -799,7 +799,7 @@ def main() -> int:
             ".filter(e=>e.checked).length})",
         )
         _assert(
-            peak_toggle == {"label": "Check all peaks", "checked": 0},
+            peak_toggle == {"label": "Check all", "checked": 0},
             "peak toggle did not uncheck every peak",
         )
         _browser(
@@ -814,7 +814,7 @@ def main() -> int:
             ".filter(e=>e.checked).length})",
         )
         _assert(
-            peak_toggle == {"label": "Check all peaks", "checked": 1},
+            peak_toggle == {"label": "Check all", "checked": 1},
             "peak toggle did not represent a mixed selection",
         )
         _browser(session, "eval", "document.querySelector('#pkcheckall').click()")
@@ -825,7 +825,7 @@ def main() -> int:
             ".filter(e=>e.checked).length})",
         )
         _assert(
-            peak_toggle == {"label": "Uncheck all peaks", "checked": 6},
+            peak_toggle == {"label": "Uncheck all", "checked": 6},
             "peak toggle did not check every peak from a mixed selection",
         )
         _browser(
