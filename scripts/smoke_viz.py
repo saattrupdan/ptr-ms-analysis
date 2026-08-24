@@ -805,6 +805,14 @@ def main() -> int:
             },
             "peak header controls are not laid out as requested",
         )
+        abundance_format = _eval(
+            session,
+            "({grouped:fmtAbundance(12345.6), ordinary:fmtAbundance(999.9)})",
+        )
+        _assert(
+            abundance_format == {"grouped": "12,346", "ordinary": "999.90"},
+            "abundance values are not formatted with thousands separators",
+        )
         peak_toggle = _eval(
             session,
             "({label:document.querySelector('#pkcheckall').textContent, "
@@ -898,10 +906,12 @@ def main() -> int:
         details = _eval(
             session,
             "({mz:document.querySelectorAll('#peaksbody .mini.mz').length, "
-            "abundance:document.querySelectorAll('#peaksbody .mini.abundance').length})",
+            "abundance:document.querySelectorAll('#peaksbody .mini.abundance').length, "
+            "wide:getComputedStyle(document.querySelector('#app')).gridTemplateColumns"
+            ".startsWith('760px')})",
         )
         _assert(
-            details == {"mz": 6, "abundance": 6},
+            details == {"mz": 6, "abundance": 6, "wide": True},
             "details view does not show both m/z and abundance",
         )
         _browser(session, "eval", "document.querySelector('#pkdetails').click()")

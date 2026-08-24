@@ -760,7 +760,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .plist .dc.dmda{min-width:58px;text-align:right} .plist .dc.dmda.warn{color:#f87171}
   .plist .dc.kv{min-width:50px;text-align:right}
   .plist .dc.win{min-width:92px;text-align:right}
-  .plist .dc.pills{display:flex;gap:4px;flex:0 0 100px;min-width:100px;overflow:hidden}
+  .plist .dc.pills{display:flex;gap:4px;flex:0 0 160px;min-width:160px;overflow:hidden}
   .plist .dc.del{cursor:pointer;color:var(--mut);background:none;border:0;font-size:12px;padding:2px 4px}
   .plist .dc.del:hover{color:#f87171}
   /* configuration slide-over */
@@ -1213,6 +1213,9 @@ function nearestCompound(mz){ let best=null,bd=0.05;
 function selPeak(){ return peaks.find(p=>p.id===selId); }
 function fmt(v){ if(v==null||!isFinite(v))return '—'; const a=Math.abs(v);
   if(a>=1000)return v.toFixed(0); if(a>=1)return v.toFixed(2); return v.toPrecision(3); }
+function fmtAbundance(v){ if(v==null||!isFinite(v))return '—';
+  if(Math.abs(v)>=1000)return v.toLocaleString('en-US',{maximumFractionDigits:0});
+  return fmt(v); }
 function clampCyc(c){ return Math.max(1,Math.min(NCYC,c)); }
 
 // ---- canvas helper (DPI-correct; reads a FIXED logical height from data-h) ----
@@ -1636,7 +1639,7 @@ function orderedPeaks(){
   });
 }
 function peakValue(p, kind){
-  if(kind==="abundance") return `<span class="mini abundance" title="integrated Raw signal for the selected spectrum">${fmt(peakAbundance(p))}</span>`;
+  if(kind==="abundance") return `<span class="mini abundance" title="integrated Raw signal for the selected spectrum">${fmtAbundance(peakAbundance(p))}</span>`;
   return `<span class="mini mz" title="mass-to-charge ratio for the selected spectrum">${peakDisplayMz(p).toFixed(3)}</span>`;
 }
 function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box) return;
@@ -2052,7 +2055,7 @@ document.getElementById("pkcheckall").onclick=()=>{
 };
 document.getElementById("pkdetails").onclick=()=>{ showDetails=!showDetails;
   const app=document.getElementById("app");
-  if(app) app.style.gridTemplateColumns=showDetails?"620px minmax(0,1fr)":"360px minmax(0,1fr)";
+  if(app) app.style.gridTemplateColumns=showDetails?"760px minmax(0,1fr)":"360px minmax(0,1fr)";
   const c=document.getElementById("peaksbody"); if(c){ c.style.maxHeight="calc(100vh - 190px)"; c.style.overflowX="hidden"; }
   renderPeaks();
   // the plot canvas reflows as the sidebar animates — keep it re-fitting for the duration
