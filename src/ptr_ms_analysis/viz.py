@@ -728,6 +728,12 @@ _TEMPLATE = r"""<!DOCTYPE html>
   @media(max-width:900px){.app{grid-template-columns:1fr}}
   .sidebar{position:sticky;top:16px}
   .main>.card+.card{margin-top:16px}
+  .plotresize{height:12px;display:flex;align-items:center;justify-content:center;cursor:ns-resize;
+              touch-action:none;user-select:none}
+  .plotresize::after{content:"";width:44px;height:3px;border-radius:99px;background:var(--line)}
+  .plotresize:hover::after,.plot-resizing .plotresize::after{background:var(--acc)}
+  .plot-resizing,.plot-resizing *{cursor:ns-resize!important;user-select:none!important}
+  .plotresize + .card{margin-top:0}
   .hint{padding:9px 14px;color:var(--mut);font-size:11px;border-top:1px solid var(--line)}
   /* peak list — one row per peak; 'details' reveals extra columns to the right
      without moving the rows (same <li>, extra cells appended) */
@@ -917,6 +923,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <span class="mut" id="tracehint" style="display:none">drag to pan · scroll to zoom · sideways-scroll to pan · drag an interval edge to resize · ⌘/Ctrl-drag to add · Del to remove selected</span>
     </div>
   </div>
+
+  <div class="plotresize" id="plotresize" role="separator" aria-orientation="horizontal"
+       aria-label="Resize plot and context card" aria-valuemin="280" aria-valuemax="560"
+       aria-valuenow="540" title="Drag to resize the plot and card below"></div>
 
   <!-- context card: identification (spectrum tab) -->
   <div class="card" id="idcard">
@@ -1257,6 +1267,12 @@ const TINSET=(()=>{ const disc=PC.discriminator; if(!disc) return null;
 
 // ---- shared plot state ----
 const plotC=document.getElementById("plot");
+const plotResize=document.getElementById("plotresize");
+const PLOT_HEIGHT_KEY="ptrms-plot-height";
+const MIN_PLOT_HEIGHT=280, MIN_CONTEXT_HEIGHT=110;
+let plotHeight=(()=>{ try{ const n=Number(localStorage.getItem(PLOT_HEIGHT_KEY));
+  return Number.isFinite(n)&&n>0?n:null; }catch(e){ return null; } })();
+let splitDrag=null;
 let tab="trace";                        // "spec" | "trace" — intervals reviewed first, then peaks
 let vSpec={lo:0,hi:1};                   // domain in m/z
 let vTrace={lo:axisAtCycle(1),hi:axisAtCycle(NCYC)}; // domain in the selected x-axis unit
@@ -1278,18 +1294,41 @@ function drawMain(){ if(tab==="spec") drawSpec(); else drawTrace(); }
 let drawQueued=false;
 function scheduleDraw(){ if(drawQueued) return; drawQueued=true;
   requestAnimationFrame(()=>{ drawQueued=false; drawMain(); }); }
-// size the plot + the context card so the whole app fits the viewport (only cards scroll internally)
+// Size the plot + context card so the whole app fits the viewport (only cards scroll internally).
 function relayout(){ if(!plotC.isConnected) return;
   const vh=window.innerHeight, canvasTop=plotC.getBoundingClientRect().top;
   const foot=document.querySelector(".plotfoot"), footH=foot?foot.offsetHeight:34;
   const hintH=(tab==="trace")?34:0;                 // intervals card shows a hint line, ID card doesn't
-  const leftover=vh-canvasTop-footH-16/*gap*/-40/*ctx header*/-hintH-18/*bottom pad*/-2;
-  let bodyH=Math.max(110,Math.min(300,Math.round(leftover*0.34)));
-  let ph=Math.max(280,Math.min(560,leftover-bodyH));
+  const splitH=plotResize?plotResize.offsetHeight:12;
+  const leftover=vh-canvasTop-footH-splitH-40/*ctx header*/-hintH-18/*bottom pad*/-2;
+  const minPlot=Math.min(MIN_PLOT_HEIGHT,Math.max(120,leftover-MIN_CONTEXT_HEIGHT));
+  const maxPlot=Math.max(minPlot,Math.min(560,leftover-MIN_CONTEXT_HEIGHT));
+  let bodyH, ph;
+  if(plotHeight===null){
+    bodyH=Math.max(MIN_CONTEXT_HEIGHT,Math.min(300,Math.round(leftover*0.34)));
+    ph=Math.max(minPlot,Math.min(560,leftover-bodyH));
+  } else {
+    ph=Math.max(minPlot,Math.min(maxPlot,Math.round(plotHeight)));
+    bodyH=Math.max(MIN_CONTEXT_HEIGHT,leftover-ph);
+  }
   plotC.dataset.h=ph;
+  if(plotResize){ plotResize.setAttribute("aria-valuemin",String(Math.round(minPlot)));
+    plotResize.setAttribute("aria-valuemax",String(Math.round(maxPlot)));
+    plotResize.setAttribute("aria-valuenow",String(Math.round(ph))); }
   document.querySelectorAll("#intcard .scroll").forEach(s=>s.style.maxHeight=bodyH+"px");
   const idp=document.getElementById("idpanel"); if(idp){ idp.style.maxHeight=bodyH+"px"; idp.style.overflowY="auto"; }
   drawMain(); }
+function savePlotHeight(){ try{ localStorage.setItem(PLOT_HEIGHT_KEY,String(Math.round(plotHeight))); }catch(e){} }
+function endSplitDrag(e){ if(!splitDrag) return; if(plotResize&&plotResize.releasePointerCapture){
+    try{ plotResize.releasePointerCapture(e.pointerId); }catch(err){} }
+  splitDrag=null; document.body.classList.remove("plot-resizing"); savePlotHeight(); }
+if(plotResize){
+  plotResize.onpointerdown=e=>{ e.preventDefault(); splitDrag={y:e.clientY,h:plotC.offsetHeight};
+    if(plotResize.setPointerCapture) plotResize.setPointerCapture(e.pointerId);
+    document.body.classList.add("plot-resizing"); };
+  plotResize.onpointermove=e=>{ if(!splitDrag) return; plotHeight=splitDrag.h+e.clientY-splitDrag.y; relayout(); };
+  plotResize.onpointerup=endSplitDrag; plotResize.onpointercancel=endSplitDrag;
+}
 window.addEventListener("resize",relayout);
 // cache the selected peak's computed traces — recompute only when the data
 // (peak/apex/K/…) changes, NOT when the view pans or zooms

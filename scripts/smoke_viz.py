@@ -805,6 +805,22 @@ def main() -> int:
             },
             "peak header controls are not laid out as requested",
         )
+        splitter = _eval(
+            session,
+            "(() => { const r=document.querySelector('#plotresize'); "
+            "return {role:r.getAttribute('role'), orientation:r.getAttribute('aria-orientation'), "
+            "min:+r.getAttribute('aria-valuemin'), max:+r.getAttribute('aria-valuemax'), "
+            "height:+document.querySelector('#plot').dataset.h, handlers:typeof r.onpointerdown==='function'}; })()",
+        )
+        _assert(
+            splitter["role"] == "separator"
+            and splitter["orientation"] == "horizontal"
+            and splitter["min"] >= 120
+            and splitter["max"] > splitter["min"]
+            and splitter["height"] >= splitter["min"]
+            and splitter["handlers"],
+            "plot/card resize splitter is missing or unbounded",
+        )
         abundance_format = _eval(
             session,
             "({grouped:fmtAbundance(12345.6), ordinary:fmtAbundance(999.9)})",
