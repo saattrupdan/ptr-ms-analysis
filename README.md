@@ -71,6 +71,11 @@ peaks/segments. Skip it and run `analyze` directly only for a headless/no-browse
 a hand-off file. There is no one-shot command; the delivered CSV always comes from
 `analyze`, never the browser.
 
+A served `viz` review waits indefinitely for *Done* by default. After a laptop sleep/wake
+cycle, the localhost server remains available once the laptop is awake; stop it with
+Ctrl-C. Pass `--timeout SECONDS` only when an opt-in upper bound is wanted; it is not
+relevant to standalone `--html` output.
+
 `viz` offers a configurable x-axis unit for the browser review. The default is cycle
 display. Accepted values are exactly `cycle`, `relative`, and `absolute`. Relative time
 uses elapsed acquisition time from valid `SPECdata/PCTime` values, falling back to the
@@ -98,7 +103,9 @@ compact list shows only the active sort field; the details view shows both m/z a
 abundance. The m/z and abundance values follow the Mass spectrum tab's selected
 average-over interval; isolated peaks use that interval's apex and clustered peaks
 retain their fixed model centres. The choice is saved as `viz.peak_order` and does not
-change the peak order in the analysis config or CSV.
+change the peak order in the analysis config or CSV. The Peaks sidebar also has a
+check/uncheck-all toggle. This is display-only: it changes which peak markers are shown
+in the review, not the peaks saved to the analysis config or included in the CSV.
 
 An analysis config may include an `analyze` object with `R`, `R_phys`, `K`,
 `molar_volume`, `primary_mz`, `kinetic`, `k_anchor`, `humidity_correct`, `humidity_p`,
