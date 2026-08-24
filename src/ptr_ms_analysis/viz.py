@@ -716,6 +716,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .hbtn:hover{border-color:var(--acc);color:var(--fg)}
   .hbtn:disabled{opacity:.4;cursor:default}
   .hbtn.ic{padding:5px 9px;font-size:15px;line-height:1}
+  #tourBtn{color:var(--fg)}
   .themewrap{position:relative;display:inline-flex}
   .menu{position:absolute;top:calc(100% + 6px);right:0;z-index:50;min-width:150px;
         background:var(--panel);border:1px solid var(--line);border-radius:10px;
