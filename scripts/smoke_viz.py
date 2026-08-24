@@ -1412,7 +1412,6 @@ def main() -> int:
         assigned = _eval(
             session,
             "{conf:document.querySelector('#idconf').innerText, "
-            "assignment:document.querySelector('#idpanel .idnote').innerText, "
             "config:buildConfig()}",
         )
         _assert_config_round_trip(assigned["config"])

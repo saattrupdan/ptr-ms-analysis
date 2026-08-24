@@ -632,6 +632,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   .row+.row{margin-top:10px}
   label.ctl{color:var(--mut);font-size:12px;display:inline-flex;gap:7px;align-items:center}
+  #specrangewrap{margin-left:auto!important}
   /* professional inputs */
   input[type=text],input[type=number],select{
     background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:8px;
@@ -947,7 +948,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <div class="scroll">
       <table id="rngtbl"><thead><tr><th class="l">label</th><th class="l">class</th><th id="rngunit">cycles</th></tr></thead><tbody></tbody></table>
     </div>
-    <div class="hint">⌘/Ctrl-drag the plot to add · click to select, then Del to remove</div>
   </div>
   </main>
 </div>
@@ -1790,7 +1790,7 @@ function renderId(){ const el=document.getElementById("idpanel"), conf=document.
     ? 'only generated formula candidate — not a confidence estimate'
     : 'relative candidate score/share (not identification confidence)'}</span>`+
     (p.id_ambiguous?' <span class="pill hi">ambiguous</span>':'');
-  el.innerHTML=provenance+clusterNote+'<div class="idnote"><b>Assignment:</b> '+(assigned?'formula assigned — click another candidate to replace it.':'not assigned — click a candidate row to assign its formula.')+'</div>';
+  el.innerHTML=provenance+clusterNote;
   p.candidates.forEach(c=>{ const row=document.createElement("div");
     const chosen=!!(p.formula&&c.formula===p.formula);
     row.className="cand"+(chosen?" chosen":"");
