@@ -119,7 +119,8 @@ ptr segments FILE.h5                   # stable plateaus to label
 # 3. DEFAULT: browser review of YOUR config -> the USER clicks Done -> analyze -> CSV.
 #    BLOCKS on the browser, so run it backgrounded, give the user the URL, and stop —
 #    never drive this app yourself and never click 'Done' for them:
-ptr viz FILE.h5 --config analysis-config.json --out results.csv   # localhost app; waits for 'Done'
+ptr viz FILE.h5 --config analysis-config.json --out results.csv
+#    localhost app; waits indefinitely for 'Done'
 
 # 3-alt. No review — ONLY when the user explicitly wants headless/no-browser output, or a
 #        portable file to hand off. Same curated config, straight to CSV:
@@ -133,13 +134,16 @@ ptr analyze FILE.h5 --config analysis-config.json --include-cycle-rows --out res
 ptr analyze FILE.h5 --auto-peaks --auto-segments --include-cycle-rows --out results.csv
 ```
 
-**`viz` is long-running and interactive** (it waits for a human to click *Done* in the
-browser). Run it as a background command and tell the user to open the URL it prints; the
-CSV is written when they finish. Do not wait for it to return before responding — hand
-over the URL and let the user drive. **"Let the user drive" is literal**: your last action
-for this file is printing the URL. Do not automate the browser, inspect the app, or click
-*Done* yourself (see the callout above), and do not poll for the CSV afterwards — the user
-tells you when they are finished.
+**`viz` is long-running and interactive** (it waits indefinitely by default for a human
+to click *Done* in the browser). Run it as a background command and tell the user to open
+the URL it prints; the CSV is written when they finish. The served review remains
+available after a laptop sleep/wake cycle once the laptop is awake, and the process can be
+stopped with Ctrl-C. Pass `--timeout SECONDS` only when an opt-in upper bound is wanted;
+it is not relevant to standalone `--html` output. Do not wait for it to return before
+responding — hand over the URL and let the user drive. **"Let the user drive" is literal**:
+your last action for this file is printing the URL. Do not automate the browser, inspect the
+app, or click *Done* yourself (see the callout above), and do not poll for the CSV
+afterwards — the user tells you when they are finished.
 
 **Startup takes ~30-90 s on a large file** — `viz` loads the whole file and pre-computes
 traces *before* the server accepts connections. It prints `ptr: preparing the review …` to
@@ -397,14 +401,18 @@ compact list shows only the active sort field; the details view shows both m/z a
 abundance. The m/z and abundance values follow the Mass spectrum tab's selected
 average-over interval; isolated peaks use that interval's apex and clustered peaks
 retain their fixed model centres. The choice is saved as `viz.peak_order` and does not
-change the peak order in the analysis config or CSV.
+change the peak order in the analysis config or CSV. The sidebar also has a
+check/uncheck-all toggle. This is display-only: it changes which peak markers are shown
+in the review, not the peaks saved to the analysis config or included in the CSV.
 
 By default `viz` runs a localhost server, opens the browser, and **writes every change
 straight into the `--config` file**; when the expert clicks **Done** it runs the
-full-precision analysis and writes `--out` (the CLI prints the URL and blocks until
-*Done*/`--timeout`, so run it backgrounded). For a portable file to email to someone
-offline, use `--html review.html` instead (no server, no CSV; the expert tweaks and
-clicks **Download config.json** to hand back for a later `ptr analyze`).
+full-precision analysis and writes `--out`. The CLI prints the URL and waits indefinitely
+for *Done* by default, so run it backgrounded. After a laptop sleep/wake cycle, the
+served review remains available once the laptop is awake; stop it with Ctrl-C. Use
+`--timeout SECONDS` only when an opt-in upper bound is wanted. For a portable file to email
+to someone offline, use `--html review.html` instead (no server, no CSV; the expert tweaks
+and clicks **Download config.json** to hand back for a later `ptr analyze`).
 
 **Put your review points in the config's `checklist`, not in a wall of chat text.** The
 long message you would otherwise write *after* launching `viz` is bad UX — it lands after
