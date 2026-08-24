@@ -611,13 +611,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
            display:flex;align-items:center;gap:10px;font-weight:700}
   .card h2 .sub{text-transform:none;letter-spacing:0;font-weight:400;color:var(--mut);font-size:11.5px}
   .card h2 .grow{flex:1}
-  .card h2.pkhead{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
-           align-items:end;column-gap:10px}
-  .pkhead .pktitle{justify-self:start;align-self:start;line-height:1.1}
+  .card h2.pkhead{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+  .pkhead .pktitle{align-self:flex-end;line-height:1.1}
   .pktitle .mut{text-transform:none;letter-spacing:0;font-size:10px;font-weight:400}
-  .pkcontrols{justify-self:center;display:flex;align-items:flex-end;gap:8px}
-  .pkcontrols .pkorder{align-items:center;text-align:center}
-  .pkhead > .pkheadbtn{justify-self:end}
+  .pkcontrols{align-self:flex-end;display:flex;align-items:center;gap:8px}
+  .pkcontrols .pkorder{flex-direction:row;align-items:center;gap:5px;text-align:left}
   .pkheadbtn{padding:4px 7px;font-size:10px}
   .pad{padding:14px 15px}
   canvas{width:100%;display:block;background:var(--panel2)}
@@ -860,7 +858,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <h2 class="pkhead">
         <span class="pktitle">Peaks <span class="mut" id="pkcount"></span></span>
         <span class="pkcontrols">
-          <button class="ghost pkheadbtn" id="pkcheckall" type="button">Check all</button>
           <label class="pkorder" title="Abundance is the mean per-cycle integrated Raw signal">
             order by
             <select id="pkorder" aria-label="Peak ordering">
@@ -868,8 +865,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
               <option value="abundance">abundance</option>
             </select>
           </label>
-        </span>
-        <button class="ghost pkheadbtn" id="pkdetails">Details</button></h2>
+          <button class="ghost pkheadbtn" id="pkcheckall" type="button">Check all</button>
+          <button class="ghost pkheadbtn" id="pkdetails">Details</button>
+        </span></h2>
       <div class="scroll" id="peaksbody" style="max-height:calc(100vh - 190px);overflow-x:hidden"></div>
       <div class="hint">Click a peak to select &amp; zoom · ⌘/Ctrl-drag the mass spectrum to add · remove via ✕ in details</div>
     </div>

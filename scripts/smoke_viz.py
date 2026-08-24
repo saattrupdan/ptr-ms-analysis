@@ -785,20 +785,23 @@ def main() -> int:
             "(() => { const h=document.querySelector('.pkhead').getBoundingClientRect(); "
             "const t=document.querySelector('.pktitle').getBoundingClientRect(); "
             "const c=document.querySelector('.pkcontrols').getBoundingClientRect(); "
-            "const d=document.querySelector('#pkdetails').getBoundingClientRect(); "
+            "const o=document.querySelector('.pkorder'); "
             "return {display:getComputedStyle(document.querySelector('.pkhead')).display, "
-            "children:Array.from(document.querySelector('.pkhead').children).map(e=>e.id||e.className), "
-            "titleTop:t.top<=c.top, controlsCentre:Math.abs(c.left+c.width/2-(h.left+h.width/2))<20, "
-            "detailsRight:Math.abs(d.right-h.right)<1}; })()",
+            "direction:getComputedStyle(document.querySelector('.pkhead')).flexDirection, "
+            "titleRight:Math.abs(t.right-h.right)<1, controlsRight:Math.abs(c.right-h.right)<1, "
+            "twoRows:t.bottom<=c.top, orderDirection:getComputedStyle(o).flexDirection, "
+            "controlOrder:Array.from(document.querySelector('.pkcontrols').children).map(e=>e.id||e.className)}; })()",
         )
         _assert(
             header_layout
             == {
-                "display": "grid",
-                "children": ["pktitle", "pkcontrols", "pkdetails"],
-                "titleTop": True,
-                "controlsCentre": True,
-                "detailsRight": True,
+                "display": "flex",
+                "direction": "column",
+                "titleRight": True,
+                "controlsRight": True,
+                "twoRows": True,
+                "orderDirection": "row",
+                "controlOrder": ["pkorder", "pkcheckall", "pkdetails"],
             },
             "peak header controls are not laid out as requested",
         )
