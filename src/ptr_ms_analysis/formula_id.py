@@ -23,8 +23,38 @@ stands on its own with an estimated k.
 from __future__ import annotations
 
 import math
+import re
 
 PROTON = 1.007276
+
+# the auto-generated "unknown m/z 73.029" placeholder, and nothing looser
+UNKNOWN_PLACEHOLDER = re.compile(r"^\s*unknown m/z\s+\d+(?:\.\d+)?\s*$", re.IGNORECASE)
+
+
+def is_unknown_label(label):
+    """True for the auto-generated ``unknown m/z ...`` placeholder name.
+
+    Deliberately strict: an expert's own wording ("Unknown terpenes") is a label
+    with meaning, not a placeholder, and must never be rewritten by tooling.
+    """
+    return bool(UNKNOWN_PLACEHOLDER.match(label or ""))
+
+
+def identity_label(label, formula):
+    """Return one name for a compound - never both "unknown" and a formula.
+
+    The auto-generated ``unknown m/z ...`` placeholder on a peak that carries an
+    assigned formula is replaced by that formula: a peak with a known composition
+    is not unknown, and "unknown C3H8O" reads as an identification that was never
+    made. Anything the expert wrote is kept verbatim, and a peak with neither a
+    label nor a formula keeps the placeholder it has.
+    """
+    lab = (label or "").strip()
+    f = (formula or "").strip()
+    if f and is_unknown_label(lab):
+        return f
+    return lab or f
+
 
 # monoisotopic masses of the most abundant isotope
 MONO = {

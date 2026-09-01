@@ -213,7 +213,9 @@ is a ready-to-use label** — drop it straight into your config's peaks (it is t
 compound name, a reagent/cluster name, a near-certain **formula** when the composition is
 sure but the compound is unnamed, or an honest `unknown m/z 75.046` with a clean 3-dp m/z),
 so you do **not** hand-format labels or round floats yourself. Override it when your
-chemistry judgment differs. When a peak has no library name but one plain **C/H/N/O** formula
+chemistry judgment differs. A label never mixes the two: `unknown m/z …` says nothing is
+identified, so it is not combined with a formula or a compound name — if a formula is
+known, name the peak by that formula (or the compound) instead. When a peak has no library name but one plain **C/H/N/O** formula
 wins decisively (top candidate, ≥2 candidates considered, `id_confidence ≥ 0.9`, not
 ambiguous), that formula is offered as both `suggested_label` and `suggested_formula` and
 carried into `--auto-peaks` configs — a confident composition is a real identity, far better
@@ -383,8 +385,9 @@ ptr viz FILE.h5 --config analysis-config.json --out results.csv    # serve; Done
 ```
 
 Browser review provides an x-axis unit selector. Its default is cycle. The accepted
-values are exactly `cycle`, `relative`, and `absolute`. Relative time uses elapsed acquisition time from valid `SPECdata/PCTime` values, falling back to the
-spectrum duration when it is finite and positive, or one second otherwise. Absolute time
+values are exactly `cycle`, `relative`, and `absolute`. Relative time uses elapsed
+acquisition time from valid `SPECdata/PCTime` values, falling back to the spectrum
+duration when it is finite and positive, or one second otherwise. Absolute time
 uses validated `PCTime` values plus the file's root `UTC_Offset` (when available) for
 lab-PC local time, and is unavailable when they are missing, invalid, or outside the
 four-digit ISO year range (0000–9999).
@@ -393,7 +396,10 @@ The config shape is `viz.x_axis_unit`, with a matching `--x-axis-unit` option fo
 `ptr viz`; precedence is CLI override > config value > cycle default. The selector is
 shown only on the **Signal over time** tab and updates that plot and the **Intervals**
 card only. It does not change saved ranges or CSV `Cycle` rows: those remain integer,
-1-based, inclusive cycle boundaries.
+1-based, inclusive cycle boundaries. The Intervals card is kept in chronological order
+(by first cycle, then last cycle) after adds, edge drags, undo, and a change of x-axis
+unit, and a row's range text updates while its edge is dragged, so the card always
+shows what the plot shows.
 
 The **Peaks** sidebar can also be ordered by descending abundance or alphabetically by
 label. Abundance is the mean per-cycle integrated Raw signal (the peak integral), with
@@ -401,9 +407,31 @@ m/z used to break ties. The compact list shows only the active sort field; the d
 view shows both m/z and abundance. The m/z and abundance values follow the Mass spectrum tab's selected
 average-over interval; isolated peaks use that interval's apex and clustered peaks
 retain their fixed model centres. The choice is saved as `viz.peak_order` and does not
-change the peak order in the analysis config or CSV. The sidebar also has a
-check/uncheck-all toggle for choosing which peaks are active in the review and included
-in the saved analysis config and CSV.
+change the peak order in the analysis config or CSV.
+
+The Raw / Corrected / Conc / µg selector applies to both tabs: it rescales the mass
+spectrum (with its y-axis label) and the sidebar abundance values. In Conc and µg the
+sidebar figure is the mean of that compound's own converted trace over the cycles being
+shown — transmission, then **K** divided by the primary current cycle by cycle, then the
+molar-volume factor — so it is the number the CSV reports as `Average` for that
+interval, not an estimate of it. The humidity correction belongs to individual
+near-thermoneutral (`humid`) compounds, so it is applied per compound on the traces and
+the sidebar; the shared spectrum axis cannot carry it and says so. Where a value cannot
+be converted (no correction curve, no **K**, or no primary signal), the sidebar shows
+the Raw value and says why in its tooltip instead of inventing one.
+
+Each peak's box in the sidebar is a **per-sample** tick, not a plain on/off box:
+ticked means the compound is included in every sample interval, empty in none, and a
+partial (dash) tick means some samples only — which is also how a mixed selection from
+the check/uncheck-all toggle reads. Clicking cycles empty → all → none → all, and the
+▾ menu in the Details view picks the individual sample intervals. A peak recorded in
+every sample writes no extra config field; a partial one writes `samples`, the list of
+interval labels it belongs to. Either way a compound selected for at least one sample
+still appears in the summary CSV exactly as before — the per-sample split is recorded
+now so that per-sample output can be built on it later. Interval labels key this
+selection, so a rename that would duplicate a label is rejected, and a `samples` list
+whose labels no longer exist falls back to every sample rather than silently dropping
+the compound.
 
 By default `viz` runs a localhost server, opens the browser, and **writes every change
 straight into the `--config` file**; when the expert clicks **Done** it runs the
@@ -443,6 +471,18 @@ transmission fallback, concentration availability, manual-window behaviour, and
 clustered fixed-centre behaviour. **Done**
 performs the authoritative full-precision `analyze` rerun and writes the CSV. The
 delivered CSV always comes from `analyze`, never the browser.
+
+A compound label must never contradict its identification. A peak whose formula was
+assigned keeps that identity: the placeholder name `unknown m/z …` is dropped in favour
+of the assigned formula (or the top candidate's name when the formula is not curated),
+and a hand-written label is never rewritten. A hand-drawn peak is named from the
+library only when its measured mass really matches a library compound within 10 mDa,
+and gets no formula at all otherwise, so an unlabelled peak cannot end up claiming an
+identity. A label that names a *different* formula than the assigned one is surfaced as
+a name/formula conflict in the sidebar and the Identification card rather than being
+presented as an identification, and the Mass spectrum's "Average over" list tracks
+interval renames, colour changes and resizes, so a renamed interval is never offered
+under its old name.
 
 ### 6. Calibrate concentration when accurate ppb/µg matters
 

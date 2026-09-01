@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The Peaks sidebar tick is now sample-specific: ticked means the compound is part
+  of every sample interval, a dash means some of them, and a ▾ menu picks the
+  individual intervals. A compound in only some samples records `samples` in the
+  config; a compound in every sample needs no new field, and the summary output is
+  unchanged either way.
+
+### Changed
+
+- The Intervals card updates while an interval edge is dragged and keeps its rows in
+  chronological order, so the table no longer lags behind the plot.
+- The Mass spectrum "Average over" list follows interval renames, recolouring and
+  resizes instead of showing stale names, and re-averages the spectrum when the
+  interval it points at changes shape.
+- The Raw / Corrected / Conc / µg selector now also drives the mass spectrum and the
+  sidebar values. In Conc and µg the sidebar figure is the mean of the compound's own
+  converted trace over the cycles being shown — the number the CSV reports as `Average`
+  for that interval. The shared spectrum axis carries only the conversion every compound
+  shares, and says so; the per-compound humidity correction stays per compound.
+- A compound name never contradicts its identification: an auto-generated
+  `unknown m/z …` label on a peak with an assigned formula is replaced by that
+  formula, a hand-drawn peak is named from the library only within 10 mDa of a library
+  mass, and a label naming a different formula than the assigned one is flagged.
+- Interval labels must be unique, because they key the per-sample selection.
+
 ## [0.4.0] - 2026-08-24
 
 ### Added

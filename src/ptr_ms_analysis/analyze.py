@@ -926,7 +926,10 @@ def cmd_analyze(args):
             )
         masses = [float(p["mz"]) for p in peaks]
         labels = {
-            float(p["mz"]): (p.get("label") or p.get("formula") or "") for p in peaks
+            float(p["mz"]): formula_id.identity_label(
+                p.get("label"), p.get("formula")
+            )
+            for p in peaks
         }
         ranges = _resolve_ranges(f, _load_ranges(args, f))
 
@@ -1483,7 +1486,10 @@ def analyze_config_to_csv(h5_path, config, out, sep=";", include_cycle_rows=True
     with h5py.File(h5_path, "r") as f:
         masses = [float(p["mz"]) for p in peaks]
         labels = {
-            float(p["mz"]): (p.get("label") or p.get("formula") or "") for p in peaks
+            float(p["mz"]): formula_id.identity_label(
+                p.get("label"), p.get("formula")
+            )
+            for p in peaks
         }
         ranges = _resolve_ranges(f, ranges_cfg)
         R = settings["R"]

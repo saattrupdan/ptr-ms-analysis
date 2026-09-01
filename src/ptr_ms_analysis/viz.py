@@ -275,8 +275,14 @@ def build_viz_data(
                 # measure while retaining the trace's exact window/deconvolution
                 # semantics.
                 "abundance": (None if abundance is None else round(abundance, 5)),
-                "label": p.get("label") or p.get("formula") or f"m{m:.3f}",
+                "label": formula_id.identity_label(
+                    p.get("label"), p.get("formula")
+                )
+                or f"m{m:.3f}",
                 "formula": p.get("formula", ""),
+                # which sample intervals this compound is part of; null means every
+                # sample interval, which is what pre-sample-specific configs meant
+                "samples": list(p["samples"]) if isinstance(p.get("samples"), list) else None,
                 "k": p.get("k") if p.get("k") is not None else info.get("k"),
                 "k_estimated": (
                     bool(p.get("k_estimated"))
@@ -775,6 +781,14 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .plist .dc.kv{min-width:50px;text-align:right}
   .plist .dc.win{min-width:92px;text-align:right}
   .plist .dc.pills{display:flex;gap:4px;flex:0 0 var(--tag-width,1px);min-width:var(--tag-width,1px);overflow:visible}
+  .plist .dc.smpbtn{flex:0 0 42px;text-align:center;padding:3px 4px;font-size:10px;border:1px solid var(--line);
+    border-radius:5px;background:var(--panel2);color:var(--mut);cursor:pointer}
+  .plist .dc.smpbtn.some{color:var(--hi);border-color:var(--hi)}
+  .plist .dc.smpbtn.none{opacity:.55}
+  #smpmenu{position:absolute;z-index:60;display:grid;grid-template-columns:auto auto;gap:3px 12px;padding:9px 11px;
+    background:var(--panel2);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 26px rgba(0,0,0,.35);
+    max-height:300px;overflow:auto}
+  #smpmenu label{display:flex;align-items:center;gap:6px;font-size:10.5px;white-space:nowrap;color:var(--fg)}
   .plist .dc.del{display:inline-flex;align-items:center;justify-content:center;flex:0 0 28px;width:28px;
                  cursor:pointer;color:var(--mut);background:none;border:0;font-size:12px;padding:2px 4px;text-align:center}
   .plist .dc.del:hover{color:#f87171}
@@ -901,15 +915,18 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <span class="sub" id="plotsub"></span>
       <label class="ctl" id="xaxiswrap" style="margin-left:4px">x-axis
         <select id="xaxisunit" style="width:auto"></select></label>
-      <span class="grow"></span>
-      <label class="ctl" id="specrangewrap" style="margin-left:4px">average over
-        <select id="specrange" style="width:auto"></select></label>
-      <span class="tabs" id="qtabs" style="display:none">
+      <!-- the unit tabs sit with the other plot controls so that 'average over'
+           (Mass spectrum) and the x-axis selector (Signal over time) keep the
+           right-hand slot they have always had -->
+      <span class="tabs" id="qtabs">
         <button data-q="raw" class="on">Raw</button>
         <button data-q="cor">Corrected</button>
         <button data-q="con">Conc</button>
         <button data-q="ug">Conc µg</button>
       </span>
+      <span class="grow"></span>
+      <label class="ctl" id="specrangewrap" style="margin-left:4px">average over
+        <select id="specrange" style="width:auto"></select></label>
     </h2>
     <canvas id="plot" data-h="540"></canvas>
     <div id="specspin" hidden><span class="spin"></span><span id="specspinmsg">averaging interval…</span></div>
@@ -950,6 +967,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <h2>Intervals <span class="sub">— name / classify; drag edges in the plot to set the range</span></h2>
     <div class="scroll">
       <table id="rngtbl"><thead><tr><th class="l">label</th><th class="l">class</th><th id="rngunit">cycles</th></tr></thead><tbody></tbody></table>
+      <p id="rngwarn" class="warn" style="font-size:11.5px;margin:6px 0 0" hidden></p>
     </div>
   </div>
   </main>
@@ -1099,23 +1117,74 @@ function renderXAxis(){ const el=document.getElementById("xaxisunit"); if(!el) r
 function formatRange(r){ return formatAxis(axisAtCycle(r.start),true)+"–"+formatAxis(axisAtCycle(r.end),true); }
 const tb2m = tb => Math.pow((tb-B)/A, 2);
 
+// Intervals are always listed in x-axis order. Cycle order is the same order for
+// relative and absolute time, so one chronological sort serves every display unit.
+function sortRanges(){ ranges.sort((a,b)=>(a.start-b.start)||(a.end-b.end)
+  ||String(a.label).localeCompare(String(b.label))); }
+
+let ranges = DATA.ranges.map((r,i) => ({...r, _id:i}));
+sortRanges();
+let nextRangeId = ranges.length;
+// Inclusion has two independent parts. p.use says whether the compound is in the
+// analysis at all - exactly what the CSV has always keyed on - and p.samples refines
+// that to the sample intervals it is part of. The checkbox shows: empty = off, tick =
+// every sample, dash = some samples. Keeping `use` separate matters: an interval edit
+// (reclassifying the last sample, deleting a range) can leave no sample labels to
+// match, and that must never drop a curated compound from the analysis.
+function sampleIntervals(){ const s=ranges.filter(r=>r.class==="sample"); return s.length?s:ranges; }
+function sampleLabels(){ return sampleIntervals().map(r=>r.label); }
+// the samples a compound is part of, in interval order; an empty sample set (no
+// sample intervals at all) or stale labels fall back to every sample rather than
+// silently un-including the compound
+function selectedSamples(p){ const k=sampleLabels(); if(!k.length) return k;
+  const want=(Array.isArray(p.samples)?p.samples:k).filter(l=>k.indexOf(l)>=0);
+  return want.length?want:k; }
+function selState(p){ if(!p.use) return "none"; const k=sampleLabels(); if(!k.length) return "all";
+  const sel=selectedSamples(p);
+  return sel.length===k.length?"all":"some"; }
+function setSel(p,labels){ const k=sampleLabels(), s=new Set(labels);
+  if(!k.length){ p.use=true; p.samples=[]; return; }
+  p.samples=k.filter(l=>s.has(l)); p.use=p.samples.length>0; }
+function selAll(p){ p.use=true; p.samples=sampleLabels(); }
+function selNone(p){ p.use=false; p.samples=[]; }
+// a partial box becomes a plain tick, the next click clears it, the next ticks all
+function toggleSel(p){ if(selState(p)==="all") selNone(p); else selAll(p); }
+// a sample interval that appears, disappears or is renamed must not strand compounds.
+// These keep `use` where it was: a compound that was in cannot be edited out of the
+// analysis by touching an interval, and one that was off stays off.
+// a compound that was in every sample stays in every sample when a new one appears
+// (one recorded as "all" by omission needs nothing); a partial one is left alone
+function adoptSampleKey(label,wasAll){ peaks.forEach((p,i)=>{ if(!p.use || !wasAll[i]
+  || !Array.isArray(p.samples)) return;
+  const k=selectedSamples(p); if(k.indexOf(label)<0) p.samples=k.concat([label]); }); }
+function dropSampleKey(label){ peaks.forEach(p=>{ if(!Array.isArray(p.samples)) return;
+  const kept=p.samples.filter(l=>l!==label);
+  if(kept.length===0 && p.use) return;     // do not switch a compound off via an interval
+  p.samples=kept; }); }
+function renameSampleKey(from,to){ peaks.forEach(p=>{ if(!Array.isArray(p.samples)) return;
+  const kept=p.samples.map(l=>l===from?to:l);
+  if(kept.length===0 && p.use) return;
+  p.samples=kept; }); }
+
 let peaks = DATA.peaks.map(p => { const dw=p.apex/(2*DATA.meta.R);
   const l=(p.win_l!=null?p.win_l:dw), r=(p.win_r!=null?p.win_r:dw);
-  return {...p, use:true, _apex0:p.apex, winL:l, winR:r, _winL0:l, _winR0:r, winManual:!!p.win_manual}; });
-let ranges = DATA.ranges.map((r,i) => ({...r, _id:i}));
-let nextRangeId = ranges.length;
+  const q={...p, _apex0:p.apex, winL:l, winR:r, _winL0:l, _winR0:r, winManual:!!p.win_manual};
+  q.use = p.use !== false;                       // the analysis includes it or not
+  q.samples = Array.isArray(p.samples) ? p.samples.filter((l,i)=>p.samples.indexOf(l)===i) : null;
+  return q; });
 let selRange = null;   // selected interval id
 let selId = peaks.length ? peaks[0].id : null;
 let nextId = peaks.reduce((a,p)=>Math.max(a,p.id),-1)+1;
 // default the time trace to the actual deliverable (concentration) when available
 let quant = M.concentration_available ? "con" : "cor";
 let showDetails = false;   // peaks sidebar: labels only until 'details'
-let peakTagWidth = 0, peakDetailWidth = 0;
+let peakTagWidth = 0, peakDetailWidth = 0, peakRowPad = 2;
 let peakOrder = ((DATA.config_base||{}).viz||{}).peak_order;
 if(peakOrder!=="abundance" && peakOrder!=="label" && peakOrder!=="mz") peakOrder="mz";
 let hoverRange = null;     // interval hovered in the trace (to show its label)
 let hoverPeakId = null;    // peak whose window is hovered in the spectrum (highlight, mirror of hoverRange)
 const QSHORT = {raw:"Raw",cor:"Corrected",con:"Conc",ug:"Conc µg"};
+const QAXIS  = {raw:"cps",cor:"cps (T-corrected)",con:"ppb",ug:"µg/m³"};
 // Effective settings were resolved by the CLI. PREVIEW_INITIAL is immutable: it
 // records the extraction settings represented by the embedded data. cfg is the
 // live/final configuration sent to save and to the authoritative Done rerun.
@@ -1168,7 +1237,7 @@ if(window.matchMedia){ const mq=window.matchMedia("(prefers-color-scheme: dark)"
 // ---- undo (peak/interval add/remove/move/resize/edit) ----
 const undoStack = [];
 function snapshot(){ return {
-  peaks: peaks.map(p=>({...p})), ranges: ranges.map(r=>({...r})),
+  peaks: peaks.map(p=>({...p, samples:(p.samples||[]).slice()})), ranges: ranges.map(r=>({...r})),
   selId, selRange, nextId, nextRangeId }; }
 function pushUndo(){ undoStack.push(snapshot()); if(undoStack.length>60) undoStack.shift();
   const b=document.getElementById("undoBtn"); if(b) b.disabled=false; }
@@ -1176,7 +1245,8 @@ function pushUndo(){ undoStack.push(snapshot()); if(undoStack.length>60) undoSta
 // current (pre-undo) peaks/ranges against the snapshot being restored and returns
 // the first differing / added-back / removed item.
 function undoFocus(curP,curR,newP,newR){
-  const pk=(a,b)=>a.apex!==b.apex||a.winL!==b.winL||a.winR!==b.winR||a.label!==b.label||a.use!==b.use||a.formula!==b.formula||a.mz!==b.mz||a.k!==b.k;
+  const pk=(a,b)=>a.apex!==b.apex||a.winL!==b.winL||a.winR!==b.winR||a.label!==b.label||a.use!==b.use||a.formula!==b.formula||a.mz!==b.mz||a.k!==b.k
+                    ||(a.samples||[]).join("|")!==(b.samples||[]).join("|");
   const rg=(a,b)=>a.start!==b.start||a.end!==b.end||a.label!==b.label||a.class!==b.class;
   for(const p of curP) if(!newP.some(q=>q.id===p.id)) return {kind:"peak",apex:p.apex,gone:true};   // undo of an added peak
   for(const p of newP){ const c=curP.find(q=>q.id===p.id);
@@ -1187,7 +1257,8 @@ function undoFocus(curP,curR,newP,newR){
   return null; }
 function undo(){ const s=undoStack.pop(); if(!s) return;
   const f=undoFocus(peaks,ranges,s.peaks,s.ranges);
-  peaks=s.peaks.map(p=>({...p})); ranges=s.ranges.map(r=>({...r}));
+  peaks=s.peaks.map(p=>({...p, samples:(p.samples||[]).slice()})); ranges=s.ranges.map(r=>({...r}));
+  sortRanges(); syncSpecRange();
   selId=s.selId; selRange=s.selRange; nextId=s.nextId; nextRangeId=s.nextRangeId;
   const b=document.getElementById("undoBtn"); if(b) b.disabled=undoStack.length===0;
   traceCache.key=null;
@@ -1230,6 +1301,28 @@ function computeTraces(p){ const raw=rawTrace(p); if(!raw) return null;
   return {raw,cor,con,ug,T}; }
 function nearestCompound(mz){ let best=null,bd=0.05;
   for(const c of DATA.rate_constants){ const d=Math.abs(c.mz-mz); if(d<bd){bd=d;best=c;} } return best; }
+// A hand-drawn peak is only named when its measured mass really sits on a library
+// compound (the same 10 mDa the sidebar flags in amber). Otherwise it is an honest
+// 'unknown m/z …' with no formula, so a generated name can never contradict the
+// formula candidates shown in the Identification card.
+const NAME_MDA=10;
+function nameNewPeak(apex){ const c=nearestCompound(apex), dda=c?Math.abs(apex-c.mz)*1000:1e9;
+  if(c && dda<=NAME_MDA) return {label:c.name||c.formula, formula:c.formula||"",
+    k:c.k||null, k_estimated:!!c.k_estimated, flags:c.flags||[]};
+  return {label:"unknown m/z "+apex.toFixed(3), formula:"", k:null, k_estimated:false, flags:[]}; }
+// the name and the assigned formula must tell the same story: 'acetone' is C3H6O, so a
+// peak whose label belongs to a different compound than its assigned formula is a
+// mistake to show, not a detail hidden one card away. 'unknown …' plus a formula counts
+// as a contradiction — either the compound is identified or it is not.
+const NAME2F=(()=>{ const m={}; for(const c of DATA.rate_constants){ if(c.name&&c.formula) m[c.name.toLowerCase()]=c.formula.toUpperCase(); } return m; })();
+const KNOWNF=(()=>{ const s=new Set(); for(const c of DATA.rate_constants){ if(c.formula) s.add(c.formula.toUpperCase()); } return s; })();
+function labelConflict(p){ const f=(p.formula||'').toUpperCase(); if(!f) return null;
+  const lab=(p.label||'').trim(); if(!lab) return null;
+  if(/^unknown\b/i.test(lab)) return "the name still says 'unknown' while "+p.formula+" is assigned — use the formula or a name, not both";
+  const nf=NAME2F[lab.toLowerCase()];
+  if(nf && nf!==f) return "'"+lab+"' is "+nf+", but "+p.formula+" is assigned — the name and the assigned formula disagree";
+  if(KNOWNF.has(lab.toUpperCase()) && lab.toUpperCase()!==f) return "the label is the formula "+lab+", but "+p.formula+" is assigned";
+  return null; }
 function selPeak(){ return peaks.find(p=>p.id===selId); }
 function fmt(v){ if(v==null||!isFinite(v))return '—'; const a=Math.abs(v);
   if(a>=1000)return v.toFixed(0); if(a>=1)return v.toFixed(2); return v.toPrecision(3); }
@@ -1416,9 +1509,10 @@ function specXAtMz(m){ const w=plotC.clientWidth, padL=56, plotW=w-padL-10;
 function drawSpec(){
   const [x,w,h]=fit(plotC), padL=56, padB=22; grid(x,w,h,padL,padB);
   const S=SHOWSPEC, lo=vSpec.lo, hi=vSpec.hi, plotW=w-padL-10, top=8, plotH=h-top-padB;
+  const U=unitScale(), SC=(i,v)=>v*U.f(tb2m(i));   // show the spectrum in the selected unit
   const X=m=>padL+(m-lo)/(hi-lo)*plotW, Y=v=>(top+plotH)-(v/vmax)*plotH;
   let tbA=Math.max(0,Math.floor(m2tb(lo))), tbB=Math.min(S.length-1,Math.ceil(m2tb(hi)));
-  var vmax=1; for(let i=tbA;i<=tbB;i++) if(S[i]>vmax)vmax=S[i];
+  var vmax=1; for(let i=tbA;i<=tbB;i++){ const v=SC(i,S[i]); if(v>vmax)vmax=v; }
   x.save(); x.beginPath(); x.rect(padL,top,plotW,plotH); x.clip();
   // integration windows for visible assigned peaks (per-peak half-width)
   for(const p of peaks){ if(!p.use||p.mz<lo-.5||p.mz>hi+.5) continue;
@@ -1436,7 +1530,7 @@ function drawSpec(){
   const step=Math.max(1,Math.floor((tbB-tbA)/(plotW*2||1)));
   x.strokeStyle=TH.spec; x.lineWidth=1.5; x.beginPath(); let started=false;
   for(let i=tbA;i<=tbB;i+=step){ let m=0; const e=Math.min(i+step,tbB+1);
-    for(let j=i;j<e;j++) if(S[j]>m)m=S[j];
+    for(let j=i;j<e;j++){ const v=SC(j,S[j]); if(v>m)m=v; }
     const px=X(tb2m(i)), py=Y(m); started?x.lineTo(px,py):x.moveTo(px,py); started=true; }
   x.stroke();
   // apex / assigned markers + labels for visible peaks
@@ -1458,7 +1552,10 @@ function drawSpec(){
   // axes labels
   x.fillStyle=TH.axis; x.font="10px sans-serif";
   x.fillText(lo.toFixed(hi-lo<5?3:1),padL,h-6); x.fillText(hi.toFixed(hi-lo<5?3:1),w-46,h-6);
-  x.fillText("m/z",(padL+w)/2,h-6); x.fillText(vmax.toPrecision(3),6,16); x.fillText("cps",6,top+plotH);
+  x.fillText("m/z",(padL+w)/2,h-6); x.fillText(vmax.toPrecision(3),6,16);
+  // the shared axis cannot carry the per-compound humidity correction, so it says so
+  x.fillText((U.ok?QSHORT[quant]+" · "+QAXIS[quant]:"cps · "+QSHORT[quant]+" unavailable")
+    +(U.ok && quant!=="raw" && quant!=="cor" && cfg.humid && cfg.href>0 ? " (without per-compound humidity)":""),6,top+plotH);
   drawInset(x,w,h,INSET,INSET.lo,INSET.hi,vSpec.lo,vSpec.hi);
   if(cursor){ const mz=lo+(cursor.x-padL)/plotW*(hi-lo), cps=(top+plotH-cursor.y)/plotH*vmax;
     crosshair(x,w,h,padL,top,plotH, mz.toFixed(hi-lo<5?4:3), Math.max(0,cps).toPrecision(3)); }
@@ -1584,7 +1681,8 @@ plotC.addEventListener("mousemove",e=>{ const x=e.offsetX, y=e.offsetY;
     if(drag.mode==="inset"){ insetPanTo(x); return; }
     if(drag.mode==="edge"){ if(!drag.moved && Math.abs(x-drag.x)>3){ pushUndo(); drag.moved=true; }
       if(drag.moved){ const c=clampCyc(cycleAtX(x)); drag.r[drag.side]=c;
-        if(drag.r.start>drag.r.end){const t=drag.r.start;drag.r.start=drag.r.end;drag.r.end=t;} drawTrace(); } return; }
+        if(drag.r.start>drag.r.end){const t=drag.r.start;drag.r.start=drag.r.end;drag.r.end=t;}
+        updateRangeRow(drag.r); drawTrace(); } return; }
     if(drag.mode==="newseg"){ drag.c1=clampCyc(cycleAtX(x)); drawTrace(); return; }
     if(drag.mode==="newpeak"){ drag.m1=specMzAtX(x); scheduleDraw(); return; }
     if(drag.mode==="win"){ const p=drag.p, mz=specMzAtX(x), ax=dispApex(p);
@@ -1619,20 +1717,23 @@ window.addEventListener("mouseup",e=>{ if(!drag) return; setCur("grab");
     else selRange=null;
     renderRanges(); drawMain(); return; }
   if(d.mode==="newpeak"){ const lo=Math.min(d.m0,d.m1), hi=Math.max(d.m0,d.m1);
-    if(hi-lo>0.004){ pushUndo(); const apex=+((lo+hi)/2).toFixed(4), hw=(hi-lo)/2, c=nearestCompound(apex);
-      peaks.push({id:nextId++,mz:apex,apex:apex,_apex0:apex,label:c?c.name:("m"+apex.toFixed(3)),
-        formula:c?c.formula:"",k:c?c.k:null,k_estimated:c?!!c.k_estimated:false,flags:c?c.flags:[],clustered:false,trace:null,use:true,
-        winL:hw,winR:hw,_winL0:hw,_winR0:hw,winManual:true});
-      selId=nextId-1; renderPeaks(); }
+    if(hi-lo>0.004){ pushUndo(); const apex=+((lo+hi)/2).toFixed(4), hw=(hi-lo)/2, nm=nameNewPeak(apex);
+      const p={id:nextId++,mz:apex,apex:apex,_apex0:apex,label:nm.label,
+        formula:nm.formula,k:nm.k,k_estimated:nm.k_estimated,flags:nm.flags,clustered:false,trace:null,
+        winL:hw,winR:hw,_winL0:hw,_winR0:hw,winManual:true};
+      p.use=true; p.samples=sampleLabels();
+      peaks.push(p); selId=p.id; renderPeaks(); }
     else drawMain();
     return; }
   if(d.mode==="newseg"){ const s=Math.min(d.c0,d.c1), en=Math.max(d.c0,d.c1);
-    if(en-s>=5){ pushUndo(); const nr={label:"sample_"+String(ranges.filter(r=>r.class==='sample').length+1).padStart(2,'0'),
-      class:"sample",start:s,end:en,_id:nextRangeId++}; ranges.push(nr); selRange=nr._id;
-      renderRanges(); refreshSpecRange(); redraw(); } else drawMain();
+    if(en-s>=5){ const wasAll=peaks.map(p=>selState(p)==="all"); pushUndo();
+      const nr={label:newSampleLabel(),
+        class:"sample",start:s,end:en,_id:nextRangeId++}; ranges.push(nr); selRange=nr._id;
+      sortRanges(); adoptSampleKey(nr.label,wasAll); renderRanges(); redraw(); } else drawMain();
     return; }
   if(d.mode==="win"){ renderPeaks(); redraw(); return; }
-  if(d.mode==="edge"){ if(!d.moved){ selRange=d.r._id; renderRanges(); drawMain(); } else redraw(); return; } });
+  if(d.mode==="edge"){ if(!d.moved){ selRange=d.r._id; renderRanges(); drawMain(); }
+    else { sortRanges(); renderRanges(); syncSpecRange(); redraw(); } return; } });
 plotC.addEventListener("dblclick",e=>{ if(tab!=="spec") return; const p=selPeak(); if(!p) return;
   pushUndo(); p.apex=+specMzAtX(e.offsetX).toFixed(4);
   if(!p.winManual){ const hw=p.apex/(2*cfg.R); p.winL=hw; p.winR=hw; } renderPeaks(); redraw(); });
@@ -1655,8 +1756,9 @@ function dupPeak(p){ const f=(p.formula||'').toUpperCase(), nm=(p.label||'').toL
   return peaks.find(q=>q!==p && q.use && (f?((q.formula||'').toUpperCase()===f)
                                            :((q.label||'').toLowerCase()===nm))) || null; }
 function peakPills(p){
-  const dup=dupPeak(p);
-  return (p.flags||[]).map(fl=>`<span class="pill ${fl}" title="${fl==='humid'?'proton affinity near water — a fixed k is humidity/temperature dependent':(fl==='frag'?'fragments off the parent ion':'')}">${fl==='humid'?'humid-sensitive':fl}</span>`).join(' ')+
+  const dup=dupPeak(p), conf=labelConflict(p);
+  return (conf?`<span class="pill ovl" title="${conf.replace(/"/g,'&quot;')}">⚠ name ≠ formula</span>`:'')+
+    (p.flags||[]).map(fl=>`<span class="pill ${fl}" title="${fl==='humid'?'proton affinity near water — a fixed k is humidity/temperature dependent':(fl==='frag'?'fragments off the parent ion':'')}">${fl==='humid'?'humid-sensitive':fl}</span>`).join(' ')+
     (dup?`<span class="pill ovl" title="same compound also assigned to m/z ${dup.mz.toFixed(3)}">⚠ duplicate</span>`:'')+
     (p.id_ambiguous?`<span class="pill hi" title="ambiguous identification; top candidate relative score/share">? ${Math.round((p.id_confidence||0)*100)}% share</span>`:'')+
     (p.overlap&&p.overlap.level==='unresolved'?'<span class="pill hi" title="unresolved overlap">⚠ overlap</span>':
@@ -1667,8 +1769,9 @@ function peakPills(p){
 function deletePeak(p){ if(!p) return; pushUndo(); peaks=peaks.filter(q=>q!==p);
   if(selId===p.id) selId=peaks[0]?.id??null; renderPeaks(); redraw(); }
 function deleteRange(id){ const idx=ranges.findIndex(r=>r._id===id); if(idx<0) return;
-  pushUndo(); if(selRange===id) selRange=null; ranges.splice(idx,1);
-  hoverRange=null; renderRanges(); redraw(); }
+  pushUndo(); if(selRange===id) selRange=null; const r=ranges[idx];
+  ranges.splice(idx,1); dropSampleKey(r.label);
+  hoverRange=null; renderRanges(); syncSpecRange(); redraw(); }
 function selectPeak(p){
   if(tab==="trace" && selId===p.id){ selId=null; renderPeaks(); drawMain(); return; } // click again to deselect
   const changed=selId!==p.id; selId=p.id;
@@ -1681,10 +1784,79 @@ function peakSpectrumIntegral(p){
   let sum=0; for(let i=lo;i<hi;i++) sum+=SHOWSPEC[i];
   return sum;
 }
-function peakAbundance(p){
-  if(SHOWSPEC===SPEC && Number.isFinite(p.abundance)) return p.abundance;
-  return peakSpectrumIntegral(p);
+// ---- display unit for the spectrum and the Peaks sidebar (mirrors computeTraces) ----
+// The time trace and the CSV convert cycle by cycle, so the sidebar value is the mean
+// of the compound's own converted trace over the spectrum being shown - the number the
+// delivered CSV reports for that interval, not an approximation of it. A shared
+// spectrum curve can only carry the conversion every compound shares.
+let SPECWIN={lo:1,hi:NCYC};
+let _unitCache=null, _unitKey="";
+// every setting the conversion below reads, so no edit can leave an old value shown
+function unitKey(){ return [quant,SPECWIN.lo,SPECWIN.hi,cfg.K,cfg.Vm,cfg.kinetic,cfg.kanchor,
+  cfg.humid,cfg.href,cfg.hump,DATA.transmission.masses.length].join("|"); }
+// means over the cycles being shown, recomputed only when something that affects them
+// changes. PC is the per-cycle data embedded at load and never reassigned, so it needs
+// no key term.
+function unitContext(){ const key=unitKey();
+  if(_unitCache && _unitKey===key) return _unitCache; _unitKey=key;
+  const o={ps:0,pn:0,hs:0,hn:0}, lo=SPECWIN.lo-1, hi=Math.min(NCYC,SPECWIN.hi);
+  if(PC.primary) for(let i=lo;i<hi;i++){ const v=PC.primary[i]; if(v>0&&isFinite(v)){ o.ps+=1/v; o.pn++; } }
+  if(cfg.humid && cfg.href>0 && PC.humidity) for(let i=lo;i<hi;i++){ const v=PC.humidity[i];
+    if(v>0&&isFinite(v)){ o.hs+=Math.pow(v/cfg.href,cfg.hump); o.hn++; } }
+  return (_unitCache=o); }
+// `p` is optional: a shared spectrum axis cannot carry the per-compound humidity
+// correction, which only 'humid' compounds get, exactly as in the traces and in
+// ptrms.quantify.
+function unitScale(p){
+  if(quant==="raw") return {f:()=>1, ok:true};
+  if(!DATA.transmission.masses.length)
+    return {f:()=>1, ok:false, why:"no transmission curve in this file"};
+  if(quant==="cor") return {f:m=>1/interpT(m), ok:true};
+  const c=unitContext();
+  if(cfg.K==null) return {f:()=>1, ok:false, why:"no K (proton-transfer rate constant) is set"};
+  if(!c.pn) return {f:()=>1, ok:false, why:"no primary-ion signal in the selected spectrum"};
+  const kf=cfg.K*c.ps/c.pn;
+  const hum=!!(p && cfg.humid && cfg.href>0 && c.hn && (p.flags||[]).includes("humid"));
+  const hf=hum ? c.hs/c.hn : 1;
+  if(quant==="con") return {f:m=>(1/interpT(m))*kf*hf, ok:true, hum};
+  if(!cfg.Vm) return {f:()=>1, ok:false, why:"no molar volume is set"};
+  return {f:m=>(1/interpT(m))*kf*hf*((m-M.proton)/cfg.Vm), ok:true, hum};
 }
+// per-compound kinetic scaling cannot be folded into a shared spectrum, but it is the
+// compound's own concentration correction, so it belongs on the sidebar value
+function peakKfac(p){ return (quant==="con"||quant==="ug") && cfg.kinetic && p.k && !p.k_estimated
+  ? cfg.kanchor/p.k : 1.0; }
+function peakRaw(p){ return (SHOWSPEC===SPEC && Number.isFinite(p.abundance))
+  ? p.abundance : peakSpectrumIntegral(p); }
+// a value that cannot be converted is shown as Raw and says why, never as a dash that
+// could be read as a measurement of zero
+function peakAbundance(p){
+  const s=unitScale(p);
+  if(quant==="raw") return peakRaw(p);
+  if(quant==="cor") return peakRaw(p)/interpT(peakDisplayMz(p));
+  if(!s.ok) return peakRaw(p);
+  const tr=p.trace ? rawTrace(p) : null;
+  if(!tr) return peakRaw(p)*s.f(peakDisplayMz(p))*peakKfac(p);   // hand-drawn: no trace
+  const key=unitKey()+"|"+p.mz+"|"+p.apex+"|"+p.winL+"|"+p.winR+"|"+(p.flags||[]).join(",")
+    +"|"+p.k+"|"+p.k_estimated+(SHOWSPEC===SPEC?"":"|iv");
+  if(p._uKey===key) return p._uVal;
+  const T=interpT(p.apex), lo=Math.max(0,SPECWIN.lo-1), hi=Math.min(NCYC,SPECWIN.hi);
+  let sum=0, n=0;
+  for(let i=lo;i<hi;i++){ const raw=tr[i], ip=PC.primary?PC.primary[i]:NaN;
+    if(!isFinite(raw) || !(ip>0)) continue;                       // no primary, no ppb
+    let hf=1;
+    if(s.hum && PC.humidity && PC.humidity[i]>0) hf=Math.pow(PC.humidity[i]/cfg.href,cfg.hump);
+    const con=(raw/T)*(cfg.K/ip)*peakKfac(p)*hf;
+    sum += quant==="ug" ? con*(p.mz-M.proton)/cfg.Vm : con; n++;
+  }
+  const v = n ? sum/n : peakRaw(p)*s.f(peakDisplayMz(p))*peakKfac(p);
+  p._uKey=key; p._uVal=v; return v;
+}
+function peakAbundanceNote(p){ const s=unitScale(p);
+  if(!s.ok) return `Raw shown: ${s.why}.`;
+  if(quant!=="raw" && quant!=="cor" && !p.trace)
+    return "Converted from the displayed spectrum: this peak has no per-cycle trace.";
+  return ""; }
 function orderedPeaks(){
   return [...peaks].sort((a,b)=>{
     if(peakOrder==="abundance") return peakAbundance(b)-peakAbundance(a) || peakDisplayMz(a)-peakDisplayMz(b);
@@ -1696,42 +1868,55 @@ function orderedPeaks(){
   });
 }
 function peakValue(p, kind){
-  if(kind==="abundance") return `<span class="mini abundance" title="integrated Raw signal for the selected spectrum">${fmtAbundance(peakAbundance(p))}</span>`;
+  if(kind==="abundance"){ const note=peakAbundanceNote(p);
+    return `<span class="mini abundance" title="${QSHORT[quant]} for the selected spectrum (${QAXIS[quant]})${note?" · "+note:""}">${fmtAbundance(peakAbundance(p))}</span>`; }
   return `<span class="mini mz" title="mass-to-charge ratio for the selected spectrum">${peakDisplayMz(p).toFixed(3)}</span>`;
 }
 function setAppColumns(tagWidth,rowWidth=peakDetailWidth){ const app=document.getElementById("app"); if(!app) return;
   if(window.innerWidth<=900){ app.style.gridTemplateColumns="1fr"; return; }
-  const available=Math.max(360,window.innerWidth-38), desired=showDetails?Math.max(620,600+tagWidth,rowWidth+2):360;
+  // a row measured while clipped reports its full content width but loses ~2px to
+  // rounding once it fits, so the row needs a real margin, not just +2
+  const available=Math.max(360,window.innerWidth-38), desired=showDetails?Math.max(620,600+tagWidth,rowWidth+peakRowPad):360;
   const width=Math.min(available,desired);
   app.style.gridTemplateColumns=width+"px minmax(0,1fr)"; }
 function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box) return;
+  refreshSampleMenu();
   const dt=document.getElementById("pkdetails"); if(dt) dt.textContent=showDetails?"Hide details":"Details";
   box.innerHTML="";
   const esc=s=>(s||'').replace(/"/g,'&quot;');
   const ul=document.createElement("ul"); ul.className="plist"+(showDetails?" det":"");
   for(const p of orderedPeaks()){ const li=document.createElement("li");
     li.className=(p.id===selId?"sel ":"")+(p.use?"":"off");
-    const dup=dupPeak(p);
+    const dup=dupPeak(p), st=selState(p), k=sampleLabels(), nSel=selectedSamples(p).length;
     const dot=dup?`<span class="dot ovl" title="duplicate: same compound also at m/z ${dup.mz.toFixed(3)}"></span>`:
               (p.id_ambiguous?'<span class="dot amb" title="ambiguous identification"></span>':
               (p.overlap?'<span class="dot ovl" title="spectral overlap"></span>':'<span class="dot"></span>'));
     const ro = p.id===selId ? "" : "readonly";   // only the selected row is editable (text caret); others show the finger cursor
-    let h=`<input type="checkbox" data-a="use" ${p.use?"checked":""}>`+dot+
+    let h=`<input type="checkbox" data-a="use" ${st!=="none"?"checked":""} title="`+
+      (st==="all"?`included in all ${k.length} sample interval${k.length===1?"":"s"}`:
+       st==="some"?`included in ${nSel} of ${k.length} sample intervals — click for all`:
+       `included in no sample interval — click for all`)+`">`+dot+
       `<input type="text" class="lbl" data-a="label" ${ro} value="${esc(p.label)}">`;
     if(showDetails){ const cand=nearestCompound(p.mz), dmda=cand?((p.mz-cand.mz)*1000):null;
       h+=peakValue(p,"mz")+peakValue(p,"abundance")+
         `<span class="dc dmda ${dmda!=null&&Math.abs(dmda)>10?'warn':''}" title="mass error vs nearest known compound">${dmda!=null?((dmda>=0?'+':'')+dmda.toFixed(1)+' mDa'):'—'}</span>`+
         `<span class="dc kv" title="proton-transfer rate constant (~ = estimated)">${p.k?('k '+(+p.k).toFixed(2)+(p.k_estimated?'~':'')):'k —'}</span>`+
         `<span class="dc win" title="integration half-widths — drag the dashed handles in the spectrum">−${p.winL.toFixed(3)}/+${p.winR.toFixed(3)}${p.winManual?'*':''}</span>`+
+        `<button class="dc smpbtn ${st}" data-a="smp" title="choose which sample intervals include this compound">${nSel}/${k.length}</button>`+
         `<span class="dc pills">${peakPills(p)}</span>`+
         `<button class="dc del" data-a="del" title="remove peak">✕</button>`;
     } else { h+=`<span class="sp"></span>${peakValue(p,peakOrder)}<span class="go">›</span>`; }
     li.innerHTML=h;
+    const cb=li.querySelector("[data-a=use]");
+    cb.indeterminate=(st==="some");   // empty -> all -> none -> all
     li.onclick=ev=>{ if(ev.target.dataset.a) return; selectPeak(p); };
-    li.querySelector("[data-a=use]").onchange=e=>{ pushUndo(); p.use=e.target.checked; renderPeaks(); redraw(); };
+    // decided from the selection itself: a checkbox click in the browser would
+    // otherwise depend on checkedness, which says nothing about 'partial'
+    cb.onclick=e=>{ e.preventDefault(); pushUndo(); toggleSel(p); renderPeaks(); redraw(); };
     const lbl=li.querySelector("[data-a=label]");
     lbl.onclick=()=>selectPeak(p);                                   // clicking the label selects (no re-render if already selected)
     lbl.onchange=()=>{ pushUndo(); p.label=lbl.value; renderPeaks(); redraw(); };
+    const sm=li.querySelector("[data-a=smp]"); if(sm) sm.onclick=e=>{ e.stopPropagation(); sampleMenu(p,sm); };
     const del=li.querySelector("[data-a=del]"); if(del) del.onclick=e=>{ e.stopPropagation(); deletePeak(p); };
     ul.appendChild(li); }
   box.appendChild(ul);
@@ -1740,8 +1925,13 @@ function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box)
       peakTagWidth=Math.max(peakTagWidth,el.scrollWidth); });
     ul.style.setProperty("--tag-width",Math.ceil(peakTagWidth)+"px");
     setAppColumns(peakTagWidth);
-    peakDetailWidth=0; ul.querySelectorAll(".plist li").forEach(el=>{
+    // scrollWidth covers content and padding but not the border, so the borders are
+    // added explicitly instead of padding the estimate by guesswork
+    peakDetailWidth=0; let liBorder=0;
+    ul.querySelectorAll(".plist li").forEach((el,i)=>{ if(i===0){ const cs=getComputedStyle(el);
+        liBorder=Math.ceil((parseFloat(cs.borderLeftWidth)||0)+(parseFloat(cs.borderRightWidth)||0)); }
       peakDetailWidth=Math.max(peakDetailWidth,el.scrollWidth); });
+    peakRowPad=liBorder+1;
     setAppColumns(peakTagWidth,peakDetailWidth);
   } else { peakTagWidth=0; peakDetailWidth=0; setAppColumns(0); }
   updatePeakToggle();
@@ -1759,11 +1949,42 @@ function evText(c){ if(!c.iso_obs) return '<span class="mut">no isotope data</sp
          `M+2 <span class="${cls(c.iso_obs[1],c.iso_pred[1])}">${pct(c.iso_obs[1])}</span>/${pct(c.iso_pred[1])}`; }
 function updatePeakToggle(){
   const btn=document.getElementById("pkcheckall"); if(!btn) return;
-  const allChecked=peaks.length>0 && peaks.every(p=>p.use);
+  const all=peaks.length>0 && peaks.every(p=>selState(p)==="all");
   btn.disabled=peaks.length===0;
-  btn.textContent=allChecked?"Uncheck all":"Check all";
+  btn.textContent=all?"Uncheck all":"Check all";
   btn.setAttribute("aria-label",btn.textContent);
 }
+// an open per-sample menu mirrors the selection, wherever it changed
+function refreshSampleMenu(){ const el=document.getElementById("smpmenu"); if(!el) return;
+  const p=peaks.find(q=>q.id===_smpFor); if(!p) return; const cur=selectedSamples(p);
+  const k=sampleIntervals();
+  el.querySelectorAll("input").forEach((cb,i)=>{ if(k[i]) cb.checked=cur.indexOf(k[i].label)>=0; }); }
+// per-sample tick list for one compound, floated over the list so the row layout and
+// the measured column widths are untouched
+function sampleMenu(p,btn){ const open=document.getElementById("smpmenu");
+  if(open){ open.remove(); if(_smpFor===p.id) { _smpFor=null; return; } }
+  _smpFor=p.id;
+  const el=document.createElement("div"); el.id="smpmenu";
+  const k=sampleIntervals();
+  k.forEach(r=>{ const lab=document.createElement("label"), cb=document.createElement("input");
+    cb.type="checkbox"; cb.checked=selectedSamples(p).indexOf(r.label)>=0;
+    cb.onchange=()=>{ pushUndo(); const cur=selectedSamples(p);   // read it fresh: the
+      // other boxes in this menu may already have changed the selection
+      setSel(p, cb.checked ? cur.concat([r.label]) : cur.filter(l=>l!==r.label));
+      renderPeaks(); redraw(); };
+    lab.appendChild(cb);
+    lab.appendChild(document.createTextNode(" "+r.label+" ("+r.start+"–"+r.end+")"));
+    el.appendChild(lab); });
+  if(!k.length){ el.textContent="no sample intervals"; }
+  document.body.appendChild(el);
+  const b=btn.getBoundingClientRect();
+  el.style.left=Math.max(6,Math.min(b.left,window.innerWidth-el.offsetWidth-8))+"px";
+  el.style.top=(b.bottom+4+window.scrollY)+"px";
+  setTimeout(()=>document.addEventListener("mousedown",closeSampleMenu),0); }
+let _smpFor=null;
+function closeSampleMenu(e){ const el=document.getElementById("smpmenu"); if(!el) return;
+  if(e && el.contains(e.target)) return;
+  el.remove(); _smpFor=null; document.removeEventListener("mousedown",closeSampleMenu); }
 function renderId(){ const el=document.getElementById("idpanel"), conf=document.getElementById("idconf"), p=selPeak();
   const esc=s=>(s||'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
   const assigned=!!(p&&p.formula);
@@ -1774,6 +1995,8 @@ function renderId(){ const el=document.getElementById("idpanel"), conf=document.
   const clusterNote=p&&p.clustered
     ? '<div class="idnote warn"><b>Clustered peak:</b> Gaussian/deconvolved fitted component at a fixed model centre. It may not form a visible local maximum in every selected interval; this model centre is not a measured apex.</div>'
     : '';
+  const nameConf=p?labelConflict(p):null;
+  const confNote=nameConf?'<div class="idnote warn" style="margin-bottom:8px"><b>Name and formula disagree:</b> '+esc(nameConf)+'.</div>':'';
   if(!el) return;
   if(!p){ el.innerHTML='<div class="mut">Select a peak to see candidate formulas, ranked by measured exact mass, isotope evidence, and chemistry plausibility.</div>';
     if(conf) conf.textContent=""; return; }
@@ -1784,19 +2007,22 @@ function renderId(){ const el=document.getElementById("idpanel"), conf=document.
     // mass outside the organic window) — still surface the current assignment rather
     // than a bare "nothing here", so every peak shows its identity.
     if(p.formula||p.label){
-      el.innerHTML=provenance+clusterNote+'<div class="cand chosen"><span class="f">'+esc(p.formula||p.label)+'</span>'+
-        ((p.formula&&p.label&&p.label!==p.formula)?'<span class="cname">'+esc(p.label)+'</span>':'')+
+      // a compound with an assigned formula is not 'unknown': show the formula, and
+      // only add a name when the label actually carries one
+      const showName=p.formula&&!/^unknown\b/i.test(p.label||'')?p.label:(p.formula?'':p.label);
+      el.innerHTML=provenance+confNote+clusterNote+'<div class="cand chosen"><span class="f">'+esc(p.formula||p.label)+'</span>'+
+        (showName?'<span class="cname">'+esc(showName)+'</span>':'')+
         '<span class="meta">'+(assigned?'current formula assignment':'label only; not formula-assigned')+'</span></div>'+
         '<div class="idnote" style="margin-top:8px">No enumerated formula candidates for this m/z — it looks like a reagent/inorganic ion, a manually-added peak, or a mass outside the organic window. The existing '+(assigned?'formula assignment':'label')+' is kept as-is.</div>';
     } else {
-      el.innerHTML=provenance+clusterNote+'<div class="mut">No candidate formulas for this peak (a reagent/inorganic ion, added manually, or outside the mass window).</div>';
+      el.innerHTML=provenance+confNote+clusterNote+'<div class="mut">No candidate formulas for this peak (a reagent/inorganic ion, added manually, or outside the mass window).</div>';
     }
     return; }
   if(conf) conf.innerHTML=status+` <span class="mut">· ${p.candidates.length===1
     ? 'only generated formula candidate — not a confidence estimate'
     : 'relative candidate score/share (not identification confidence)'}</span>`+
     (p.id_ambiguous?' <span class="pill hi">ambiguous</span>':'');
-  el.innerHTML=provenance+clusterNote;
+  el.innerHTML=provenance+confNote+clusterNote;
   p.candidates.forEach(c=>{ const row=document.createElement("div");
     const chosen=!!(p.formula&&c.formula===p.formula);
     row.className="cand"+(chosen?" chosen":"");
@@ -1824,6 +2050,7 @@ function assignCandidate(p,c){
   if(c.k) p.k=c.k; p.k_estimated=!!c.k_estimated; if(c.flags) p.flags=c.flags; renderPeaks(); redraw(); }
 let _lastScrolledRange=null;
 function renderRanges(){ const tb=document.querySelector("#rngtbl tbody"); if(!tb) return; tb.innerHTML="";
+  for(const k in _rngRow) delete _rngRow[k];
   let selTr=null;
   ranges.forEach((r)=>{ const tr=document.createElement("tr");
     if(r._id===selRange){ tr.className="sel"; selTr=tr; }
@@ -1832,13 +2059,37 @@ function renderRanges(){ const tb=document.querySelector("#rngtbl tbody"); if(!t
         `<option value="background" ${r.class==='background'?'selected':''}>background</option></select></td>`+
       `<td class="mini" title="drag the interval edges in the plot to change">${formatRange(r)}</td>`;
     tr.onclick=ev=>{ if(ev.target.dataset.a) return; selRange=r._id; renderRanges(); jumpToInterval(r); };
-    tr.querySelectorAll("[data-a]").forEach(el=>{ const act=el.dataset.a;
-      el.onchange=()=>{ pushUndo(); r[act]=el.value;
-        if(act==="class"){ renderRanges(); refreshSpecRange(); } redraw(); }; });
-    tb.appendChild(tr); }); refreshSpecRange();
+    tr.querySelectorAll("[data-a]").forEach(el=>{ const act=el.dataset.a, was=r[act];
+      el.onchange=()=>{ const wasAll=peaks.map(p=>selState(p)==="all");
+        // interval labels key the per-sample ticks, so a duplicate would merge two
+        // intervals' selections into one - keep the old name and say so, and do not
+        // spend an undo level on an edit that never happened
+        if(act==="label" && ranges.some(q=>q!==r && q.label===el.value)){
+          el.value=was; flashWarn(`Interval labels must be unique: "${was}" is already taken`);
+          renderRanges(); return; }
+        pushUndo(); r[act]=el.value;
+        // keep the sample-specific tick state pointing at the same interval, and
+        // restate the 'average over' options so their names are never stale
+        if(act==="label") renameSampleKey(was,el.value);
+        else if(act==="class"){ if(el.value==="background") dropSampleKey(r.label); else adoptSampleKey(r.label,wasAll); }
+        renderRanges(); redraw(); }; });
+    tb.appendChild(tr); _rngRow[r._id]=tr; }); refreshSpecRange();
   // when the selection changes, scroll that row into view in the Intervals card
   if(selTr && selRange!==_lastScrolledRange){ selTr.scrollIntoView({block:"nearest",behavior:"smooth"}); }
   _lastScrolledRange=selRange; }
+// rows by interval id, so a plot edit can refresh just its own range cell
+const _rngRow={};
+let _warnTimer=null;
+// the app has no toast layer, so a rejected edit is said where it happened
+function flashWarn(msg){ const el=document.getElementById("rngwarn"); if(!el) return;
+  el.textContent=msg; el.hidden=false;
+  if(_warnTimer) clearTimeout(_warnTimer);
+  _warnTimer=setTimeout(()=>{ el.hidden=true; el.textContent=""; _warnTimer=null; }, 6000); }
+function updateRangeRow(r){ const tr=_rngRow[r._id]; if(!tr) return;
+  const td=tr.querySelector("td.mini"); if(td) td.textContent=formatRange(r); }
+// sample_NN, skipping any label already in use (labels key the per-sample ticks)
+function newSampleLabel(){ let n=ranges.filter(r=>r.class==='sample').length+1, lbl;
+  do{ lbl="sample_"+String(n++).padStart(2,'0'); }while(ranges.some(r=>r.label===lbl)); return lbl; }
 function jumpToInterval(r){ const pad=Math.max(8,(r.end-r.start)*0.6);
   if(tab!=="trace") setTab("trace"); animateTo(axisAtCycle(Math.max(1,r.start-pad)), axisAtCycle(Math.min(NCYC,r.end+pad)), 300); }
 
@@ -1847,6 +2098,8 @@ function buildConfig(){ return {
   ...DATA.config_base,
   peaks: peaks.filter(p=>p.use).map(p=>{ const o={mz:p.mz,label:p.label};
     if(p.formula)o.formula=p.formula; if(p.k){o.k=p.k; o.k_estimated=!!p.k_estimated;}
+    const k=sampleLabels(), sel=selectedSamples(p);   // all samples is the implicit default, as in older configs
+    if(sel.length<k.length) o.samples=sel.slice();
     if(p.winManual){ if(Math.abs(p.winL-p.winR)<1e-6) o.window=+(p.winL*2).toFixed(5);
       else o.window={left:+p.winL.toFixed(5),right:+p.winR.toFixed(5)}; } return o; }),
   ranges: ranges.map(r=>({label:r.label,start:r.start,end:r.end,unit:"cycle"})),
@@ -1921,7 +2174,9 @@ function updateCalNote(){
     ? `K = ${fmt(cfg.K)} (${kSource}); Conc uses the primary-ion-normalised model.`
     : `No primary-ion / K available — Conc columns are unavailable for this file or until K is entered.`;
 }
-function redraw(){ updateMethods(); updateCalNote(); drawMain(); scheduleSave(); }
+// the sidebar figures are derived from the same settings as the plots, so a settings
+// edit repaints both; leaving them behind would show two different concentrations
+function redraw(){ updateMethods(); updateCalNote(); renderPeaks(); drawMain(); scheduleSave(); }
 
 // ---- per-interval mass spectrum (served: fetched on demand; standalone: whole run only) ----
 const specCache={};
@@ -1929,7 +2184,8 @@ function refreshSpecRange(){ const sel=document.getElementById("specrange"); if(
   const prev=sel.value; sel.innerHTML="";
   const add=(v,t)=>{ const o=document.createElement("option"); o.value=v; o.textContent=t; sel.appendChild(o); };
   add("all","whole run");
-  if(SERVED){ ranges.forEach((r,i)=>add(""+i, r.label+" ("+r.start+"–"+r.end+")")); }
+  // keyed by interval id, not row index, so re-sorting the list keeps the selection
+  if(SERVED){ ranges.forEach(r=>add("i"+r._id, r.label+" ("+r.start+"–"+r.end+")")); }
   else { const o=document.createElement("option"); o.value="_"; o.disabled=true;
     o.textContent="per-interval needs live mode"; sel.appendChild(o); }
   if([...sel.options].some(o=>o.value===prev)) sel.value=prev;
@@ -1942,11 +2198,11 @@ function showSpin(on,msg){ const el=document.getElementById("specspin"); if(!el)
   else el.hidden=true; }
 function setSpecRange(val){
   const tok=++_specTok; if(_spinTimer){ clearTimeout(_spinTimer); _spinTimer=null; } showSpin(false);
-  const useWhole=()=>{ SHOWSPEC=SPEC; refineIntervalApexes(SHOWSPEC); renderPeaks(); drawSpec(); };
-  if(val==="all"||val===""||val==null){ useWhole(); return; }
-  const r=ranges[+val]; if(!r){ useWhole(); return; }
+  const useWhole=()=>{ SHOWSPEC=SPEC; SPECWIN={lo:1,hi:NCYC}; refineIntervalApexes(SHOWSPEC); renderPeaks(); drawSpec(); };
+  const r=(val==="all"||val===""||val==null)?null:ranges.find(rr=>("i"+rr._id)===val);
+  if(!r){ useWhole(); return; }
   const key=r.start+"_"+r.end;
-  if(specCache[key]){ SHOWSPEC=specCache[key]; refineIntervalApexes(SHOWSPEC); renderPeaks(); drawSpec(); return; }
+  if(specCache[key]){ SHOWSPEC=specCache[key]; SPECWIN={lo:r.start,hi:r.end}; refineIntervalApexes(SHOWSPEC); renderPeaks(); drawSpec(); return; }
   // keep the currently-shown spectrum until the interval average loads, so the
   // peaks jump only once (straight to the real value) instead of via whole-run.
   // Only flash a spinner if the averaging actually takes a moment (>180ms).
@@ -1954,23 +2210,30 @@ function setSpecRange(val){
   fetch("/spectrum?lo="+r.start+"&hi="+r.end).then(x=>x.json()).then(arr=>{
     specCache[key]=arr;
     if(tok===_specTok && document.getElementById("specrange").value===val){
-      SHOWSPEC=arr; refineIntervalApexes(SHOWSPEC); renderPeaks(); drawSpec(); }
+      SHOWSPEC=arr; SPECWIN={lo:r.start,hi:r.end}; refineIntervalApexes(SHOWSPEC); renderPeaks(); drawSpec(); }
   }).catch(()=>{}).finally(()=>{ if(tok===_specTok){ if(_spinTimer){ clearTimeout(_spinTimer); _spinTimer=null; } showSpin(false); } }); }
 // (re)load the spectrum for whatever interval is selected — called when the
 // mass-spectrum tab is opened, so interval edits made on the trace tab are
 // picked up in one batch rather than recomputing on every edit
 function ensureSpecLoaded(){ const sel=document.getElementById("specrange"); if(sel) setSpecRange(sel.value); }
+// an interval resize (or a delete that fell back to the whole run) must not leave the
+// shown spectrum, the sidebar values and the unit conversion averaging over old cycles
+function syncSpecRange(){ const sel=document.getElementById("specrange"); if(!sel) return;
+  const v=sel.value, r=(v==="all"||v==="")?null:ranges.find(rr=>("i"+rr._id)===v);
+  const lo=r?r.start:1, hi=r?r.end:NCYC;
+  if(SPECWIN.lo!==lo || SPECWIN.hi!==hi) setSpecRange(v); }
 document.getElementById("specrange").onchange=e=>setSpecRange(e.target.value);
 
 // ---- tab switching ----
 function setTab(t){ tab=t; anim=null; hoverRange=null; hoverPeakId=null;
   document.querySelectorAll("#maintabs button").forEach(b=>b.classList.toggle("on",b.dataset.tab===t));
   const spec=t==="spec";
-  document.getElementById("qtabs").style.display=spec?"none":"";
   document.getElementById("leg-spec").style.display=spec?"":"none";
   document.getElementById("leg-trace").style.display=spec?"none":"";
   document.getElementById("spechint").style.display=spec?"":"none";
   document.getElementById("tracehint").style.display=spec?"none":"";
+  // the unit selector drives the spectrum, the sidebar values and the trace alike
+  document.getElementById("qtabs").style.display="";
   document.getElementById("specrangewrap").style.display=spec?"":"none";
   document.getElementById("xaxiswrap").style.display=spec?"none":"";
   document.getElementById("idcard").style.display=spec?"":"none";     // ID is spectrum-only
@@ -2104,7 +2367,8 @@ function updateMethods(){
 }
 document.querySelectorAll("#qtabs button").forEach(b=>b.onclick=()=>{ quant=b.dataset.q;
   document.querySelectorAll("#qtabs button").forEach(x=>x.classList.remove("on")); b.classList.add("on");
-  document.getElementById("tracelbl").textContent=QSHORT[quant]; if(tab==="trace") drawTrace(); });
+  document.getElementById("tracelbl").textContent=QSHORT[quant];
+  renderPeaks(); drawMain(); });
 document.getElementById("zoomout").onclick=()=>zoomBy(1.6);
 document.getElementById("zoomin").onclick=()=>zoomBy(1/1.6);
 document.getElementById("zoomreset").onclick=()=>{
@@ -2119,8 +2383,8 @@ document.getElementById("pkorder").onchange=e=>{
   renderPeaks(); scheduleSave();
 };
 document.getElementById("pkcheckall").onclick=()=>{
-  const checked=peaks.length>0 && peaks.every(p=>p.use);
-  pushUndo(); peaks.forEach(p=>{ p.use=!checked; });
+  const all=peaks.length>0 && peaks.every(p=>selState(p)==="all");
+  pushUndo(); peaks.forEach(p=>{ if(all) selNone(p); else selAll(p); });
   renderPeaks(); redraw();
 };
 document.getElementById("pkdetails").onclick=()=>{ showDetails=!showDetails;

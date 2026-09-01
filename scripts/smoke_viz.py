@@ -102,7 +102,9 @@ def _synthetic_data() -> dict[str, Any]:
         },
         "transmission": {"masses": [50.0, 200.0], "factors": [1.0, 1.0]},
         "per_cycle": {
-            "primary": [100.0, 100.0, 100.0, 100.0],
+            # not flat: the concentration conversion divides cycle by cycle, so a
+            # drifting primary current separates mean(K/I_p) from K/mean(I_p)
+            "primary": [100.0, 104.0, 98.0, 102.0],
             "humidity": [1.0, 1.0, 1.0, 1.0],
             "discriminator": [1.0, 1.0, 1.0, 1.0],
         },
@@ -253,7 +255,26 @@ def _synthetic_data() -> dict[str, Any]:
             "analyze": {"unknown_setting": "keep"},
         },
         "checklist": [],
-        "rate_constants": [],
+        # two library entries far from the fixture peaks: enough for name/formula
+        # consistency and hand-drawn naming, without moving any existing mDa column
+        "rate_constants": [
+            {
+                "name": "toluene",
+                "formula": "C7H8",
+                "mz": 93.0699,
+                "k": 2.2,
+                "k_estimated": False,
+                "flags": [],
+            },
+            {
+                "name": "acetone",
+                "formula": "C3H6O",
+                "mz": 59.0491,
+                "k": 3.9,
+                "k_estimated": False,
+                "flags": [],
+            },
+        ],
     }
 
 
@@ -311,22 +332,60 @@ def _browser(session: str, *args: str, stdin: str | None = None) -> str:
     return completed.stdout.strip()
 
 
-def _eval(session: str, expression: str) -> dict[str, Any]:
-    """Evaluate JSON.stringify(expression) in the actual browser page."""
+def _eval_json(session: str, expression: str) -> Any:
+    """Evaluate ``JSON.stringify(expression)`` in the page and return the value."""
     raw = _browser(
         session, "eval", "--stdin", stdin="JSON.stringify(" + expression + ")"
     )
     value: Any = json.loads(raw)
     if isinstance(value, str):
         value = json.loads(value)
+    return value
+
+
+def _eval(session: str, expression: str) -> dict[str, Any]:
+    """Evaluate JSON.stringify(expression) in the actual browser page."""
+    value: Any = _eval_json(session, expression)
     if not isinstance(value, dict):
         raise TypeError("browser expression did not return an object")
     return value
 
 
+def _freeze_animations(session: str) -> None:
+    """Disable CSS transitions/animations for deterministic layout measurements.
+
+    The sidebar animates ``grid-template-columns`` (~0.28 s), and headless Chrome
+    only advances a transition when it is handed rendering frames, so geometry read
+    straight after a click can report a mid-flight - or frozen - column width. The
+    layout assertions here are about the settled geometry the app asks for, so the
+    cosmetics are switched off instead of raced.
+    """
+    _browser(
+        session,
+        "eval",
+        "(() => { const s=document.createElement('style'); "
+        "s.textContent='*,*::before,*::after{transition:none!important;"
+        "animation:none!important}'; document.head.appendChild(s); "
+        "void document.body.offsetHeight; })()",
+    )
+
+
+def _open(session: str, url: str) -> None:
+    """Open a page; callers freeze animations once the page has settled."""
+    _browser(session, "open", url)
+
+
 def _assert(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def _assert_eq(actual: Any, expected: Any, message: str) -> None:
+    """Assert equality, reporting the actual value so layout drift is diagnosable."""
+    if actual != expected:
+        raise AssertionError(
+            "{}: got {}".format(message, json.dumps(actual, sort_keys=True))
+        )
 
 
 def _assert_complete_posts(expected: dict[str, Any], path: str, start: int) -> int:
@@ -376,10 +435,11 @@ def _standalone_browser_pass(data: dict[str, Any]) -> None:
         html_path.write_text(viz.render_html(data), encoding="utf-8")
         download_path = Path(directory) / "downloaded-config.json"
         try:
-            _browser(session, "open", html_path.as_uri())
+            _open(session, html_path.as_uri())
             _browser(session, "wait", "--load", "networkidle")
             _browser(session, "eval", "localStorage.setItem('ptrms-onboarded', '1')")
             _browser(session, "reload")
+            _freeze_animations(session)   # the reload dropped the injected override
             _browser(session, "wait", "--load", "networkidle")
             _assert(
                 _eval(
@@ -572,6 +632,8 @@ def _standalone_browser_pass(data: dict[str, Any]) -> None:
             _browser(session, "wait", "700")
             payload = _eval(session, "({config:buildConfig()})")["config"]
             _assert_config_round_trip(payload)
+            # the panel overlays the top bar, so close it before clicking the export row
+            _browser(session, "eval", "document.querySelector('#methodClose').click()")
             _browser(
                 session,
                 "eval",
@@ -614,6 +676,440 @@ def _standalone_browser_pass(data: dict[str, Any]) -> None:
             _browser(session, "close")
 
 
+def _review_round_browser_pass(session: str) -> None:
+    """Regress interval edits, unit-aware values, sample ticks and naming.
+
+    Every mutation made here is undone before the pass returns, so the served
+    page keeps handing its original state to the Done checks that follow.
+    """
+    # --- interval edits: the card must show what the plot now shows, in time order ---
+    _browser(
+        session,
+        "eval",
+        "document.querySelector('#maintabs button[data-tab=trace]').click()",
+    )
+    _browser(
+        session,
+        "eval",
+        "selRange=ranges.find(r=>r.label==='sample_01')._id; renderRanges(); drawMain();",
+    )
+    # a synthetic drag along the trace plot, dispatched on the canvas so the app's own
+    # offset math and edge hit-testing run exactly as they do for a real drag
+    drag_js = (
+        "(() => { const rect=plotC.getBoundingClientRect(); "
+        "const send=(t,x,tgt)=>tgt.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,"
+        "view:window,clientX:rect.left+x,clientY:rect.top+20})); "
+        "const xAt=c=>traceX(plotC.clientWidth)(axisAtCycle(c)); "
+        "const drag=(x0,x1)=>{ send('mousedown',x0,plotC); send('mousemove',(x0+x1)/2,plotC); "
+        "send('mousemove',x1,plotC); send('mouseup',x1,window); }; return {drag,xAt}; })()"
+    )
+    _browser(session, "eval", "window.__drag=" + drag_js + ";")
+    # pull sample_01's start past its own end (the app swaps them), then start the
+    # interval later than sample_02 so the card rows have to reorder
+    _browser(
+        session,
+        "eval",
+        "window.__drag.drag(window.__drag.xAt(1), window.__drag.xAt(3.9)); "
+        "window.__drag.drag(window.__drag.xAt(3.95), window.__drag.xAt(3.99));",
+    )
+    reorder = _eval(
+        session,
+        "({dom:Array.from(document.querySelectorAll('#rngtbl tbody tr')).map(tr=>"
+        "[tr.querySelector('.lbl').value, tr.querySelector('td.mini').textContent]), "
+        "order:ranges.map(r=>r.label), sorted:ranges.every((r,i,a)=>!i||a[i-1].start<=r.start), "
+        "cells:ranges.map(r=>formatRange(r))})",
+    )
+    _assert(
+        reorder["sorted"] and [row[0] for row in reorder["dom"]] == reorder["order"],
+        "interval rows are not kept in chronological order after a resize: "
+        + str(reorder["dom"]),
+    )
+    _assert(
+        [row[1] for row in reorder["dom"]] == reorder["cells"],
+        "the intervals table still shows stale ranges after resizing: "
+        + str(reorder["dom"]),
+    )
+    _browser(
+        session,
+        "eval",
+        "ranges.forEach(r=>{ if(r.label==='sample_01'){ r.start=1; r.end=2; } "
+        "else { r.start=3; r.end=4; } }); sortRanges(); renderRanges(); redraw();",
+    )
+    restored = _eval(
+        session,
+        "({rows:Array.from(document.querySelectorAll('#rngtbl tbody tr td.mini'))"
+        ".map(td=>td.textContent), expect:ranges.map(r=>formatRange(r))})",
+    )
+    _assert(
+        restored["rows"] == restored["expect"],
+        "interval restore did not return the table to its original ranges",
+    )
+
+    # --- the 'average over' names follow interval renames ---
+    _browser(
+        session,
+        "eval",
+        "(() => { const i=document.querySelector('#rngtbl tbody tr .lbl'); "
+        "i.value='breath_01'; i.dispatchEvent(new Event('change',{bubbles:true})); })()",
+    )
+    renamed = _eval(
+        session,
+        "({options:Array.from(document.querySelectorAll('#specrange option'))"
+        ".map(o=>o.textContent), ticks:buildConfig().peaks.map(p=>p.samples||null)})",
+    )
+    _assert(
+        any(o.startswith("breath_01 (") for o in renamed["options"]),
+        "average-over options kept a stale interval name: " + str(renamed["options"]),
+    )
+    _assert(
+        all(t is None for t in renamed["ticks"]) and len(renamed["ticks"]) == 6,
+        "renaming an interval changed which samples include each compound: "
+        + str(renamed["ticks"]),
+    )
+    _browser(
+        session,
+        "eval",
+        "(() => { const i=document.querySelector('#rngtbl tbody tr .lbl'); "
+        "i.value='sample_01'; i.dispatchEvent(new Event('change',{bubbles:true})); })()",
+    )
+    back = _eval(
+        session,
+        "({options:Array.from(document.querySelectorAll('#specrange option'))"
+        ".map(o=>o.textContent), config:buildConfig()})",
+    )
+    _assert(
+        any(o.startswith("sample_01 (") for o in back["options"]),
+        "interval rename did not round-trip into the average-over list",
+    )
+    _assert_config_round_trip(back["config"])
+
+    # --- an interval edit must never drop a curated compound from the analysis ---
+    interval_edit = _eval(
+        session,
+        "(() => { const snap=ranges.map(r=>({...r})); const before=buildConfig().peaks.length; "
+        "ranges.forEach(r=>{ r.class='background'; }); renderRanges(); redraw(); "
+        "const allBackground=buildConfig().peaks.length; "
+        "ranges.length=0; ranges.push({...snap[0]}); renderRanges(); redraw(); "
+        "const oneDeleted=buildConfig().peaks.length; "
+        "ranges.length=0; snap.forEach(r=>ranges.push({...r})); sortRanges(); "
+        "renderRanges(); syncSpecRange(); redraw(); "
+        "return {before, allBackground, oneDeleted, restored:buildConfig().peaks.length}; })()",
+    )
+    for key, label in (
+        ("allBackground", "every interval became a background"),
+        ("oneDeleted", "an interval was deleted"),
+    ):
+        _assert(
+            interval_edit[key] == interval_edit["before"],
+            "the curated peak list changed because {}: {} peaks before, {} after".format(
+                label, interval_edit["before"], interval_edit[key]
+            ),
+        )
+    _assert(
+        interval_edit["restored"] == interval_edit["before"],
+        "the interval edit round trip lost compounds",
+    )
+
+    # --- a new sample interval keeps 'every sample' compounds in every sample ---
+    new_interval = _eval(
+        session,
+        "(() => { const all=peaks[0], part=peaks[1]; setSel(part,[sampleLabels()[0]]); "
+        "const was={all:selState(all), part:selState(part)}; "
+        "const wasAll=peaks.map(p=>selState(p)==='all'); "
+        "ranges.push({label:'sample_03', class:'sample', start:3, end:4, _id:nextRangeId++}); "
+        "sortRanges(); adoptSampleKey('sample_03', wasAll); renderRanges(); redraw(); "
+        "const now={all:selState(all), part:selState(part)}; "
+        "const i=ranges.findIndex(r=>r.label==='sample_03'); if(i>=0) ranges.splice(i,1); "
+        "dropSampleKey('sample_03'); peaks.forEach(p=>selAll(p)); sortRanges(); "
+        "renderRanges(); syncSpecRange(); renderPeaks(); redraw(); "
+        "return {was, now, n:ranges.length, back:peaks.every(p=>selState(p)==='all')}; })()",
+    )
+    _assert(
+        new_interval["was"] == {"all": "all", "part": "some"}
+        and new_interval["now"] == {"all": "all", "part": "some"},
+        "adding a sample interval changed which compounds were in every sample: "
+        + str(new_interval),
+    )
+    _assert(
+        new_interval["n"] == 2 and new_interval["back"],
+        "the new-interval check did not restore the review state: " + str(new_interval),
+    )
+
+    # --- sample-specific ticks: empty, partial and ticked, one click at a time ---
+    _browser(session, "eval", "document.querySelector('#pkdetails').click()")
+    _browser(
+        session,
+        "eval",
+        "(() => { const li=Array.from(document.querySelectorAll('#peaksbody li'))"
+        ".find(e=>e.querySelector('.lbl').value==='Curated solvent'); "
+        "li.querySelector('[data-a=smp]').click(); })()",
+    )
+    menu = _eval(
+        session,
+        "({items:Array.from(document.querySelectorAll('#smpmenu label')).length})",
+    )
+    _assert(menu["items"] == 2, "the per-sample list does not offer every sample interval")
+    _browser(
+        session,
+        "eval",
+        "document.querySelectorAll('#smpmenu input')[0].click(); closeSampleMenu();",
+    )
+    partial = _eval(
+        session,
+        "({state:selState(peaks.find(p=>p.label==='Curated solvent')), "
+        "flags:Array.from(document.querySelectorAll('#peaksbody li')).map(li=>["
+        "li.querySelector('.lbl').value, li.querySelector('[data-a=use]').checked, "
+        "li.querySelector('[data-a=use]').indeterminate]), "
+        "samples:(buildConfig().peaks.find(p=>p.label==='Curated solvent')||{}).samples})",
+    )
+    _assert(
+        partial["state"] == "some"
+        and [row for row in partial["flags"] if row[0] == "Curated solvent"]
+        == [["Curated solvent", True, True]],
+        "a compound in only some samples is not shown as a partial tick: "
+        + str(partial["flags"]),
+    )
+    _assert(
+        partial["samples"] == ["sample_02"],
+        "partial selection did not reach the config: " + str(partial["samples"]),
+    )
+    _browser(
+        session,
+        "eval",
+        "(() => { const li=Array.from(document.querySelectorAll('#peaksbody li'))"
+        ".find(e=>e.querySelector('.lbl').value==='Curated solvent'); "
+        "li.querySelector('[data-a=use]').click(); })()",
+    )
+    ticked = _eval(
+        session,
+        "({state:selState(peaks.find(p=>p.label==='Curated solvent')), "
+        "has:('samples' in (buildConfig().peaks.find(p=>p.label==='Curated solvent')||{}))})",
+    )
+    _assert(
+        ticked["state"] == "all" and not ticked["has"],
+        "clicking a partial tick did not include every sample: " + str(ticked),
+    )
+
+    # ticking one sample and unticking another in one open menu must not cancel the
+    # compound out of the analysis
+    two_toggles = _eval(
+        session,
+        "(() => { const p=peaks.find(q=>q.label==='Curated solvent'); "
+        "setSel(p,[sampleLabels()[0]]); renderPeaks(); "
+        "const row=()=>Array.from(document.querySelectorAll('#peaksbody li'))"
+        ".find(e=>e.querySelector('.lbl').value==='Curated solvent'); "
+        "row().querySelector('[data-a=smp]').click(); "
+        "const boxes=Array.from(document.querySelectorAll('#smpmenu input')); "
+        "const before=boxes.map(b=>b.checked); "
+        "boxes[1].click(); boxes[0].click(); closeSampleMenu(); "
+        "const written=buildConfig().peaks.find(q=>q.label==='Curated solvent'); "
+        "const out={before, state:selState(p), samples:written?written.samples:null, "
+        "listed:!!written}; selAll(p); renderPeaks(); redraw(); return out; })()",
+    )
+    _assert(
+        two_toggles["before"] == [True, False]
+        and two_toggles["state"] == "some"
+        and two_toggles["samples"] == ["sample_02"],
+        "ticking one sample and unticking another in the same menu lost the compound: "
+        + str(two_toggles),
+    )
+
+    # --- the selected unit drives the sidebar values and the spectrum alike ---
+    # Details stays open: the abundance cells and the pills only render there
+    _browser(
+        session,
+        "eval",
+        "document.querySelector('#maintabs button[data-tab=spec]').click()",
+    )
+    units = _eval(
+        session,
+        "(() => { const p=peaks.find(x=>x.label==='Curated solvent'); "
+        "cfg.humid=true; /* never depend on an earlier click */ "
+        "setSpecRange('all'); /* the whole-run trace, not an interval's */ "
+        "const shown=()=>Array.from(document.querySelectorAll('#peaksbody li'))"
+        ".find(li=>li.querySelector('.lbl').value==='Curated solvent')"
+        ".querySelector('.abundance').textContent; "
+        "const traceMean=a=>Array.from(a).filter(v=>isFinite(v)).reduce((x,y)=>x+y,0)"
+        "/a.length; "
+        "document.querySelector('#qtabs button[data-q=raw]').click(); "
+        "const raw=peakAbundance(p), rawText=shown(); "
+        "document.querySelector('#qtabs button[data-q=cor]').click(); "
+        "const cor=peakAbundance(p), corText=shown(); "
+        "document.querySelector('#qtabs button[data-q=con]').click(); "
+        "const con=peakAbundance(p), conText=shown(); "
+        # the factor is the mean of K/I_p, not K over the mean I_p
+        "const pinv=Array.from(PC.primary).filter(v=>v>0).map(v=>1/v); "
+        "const meanRecip=pinv.reduce((a,b)=>a+b,0)/pinv.length; "
+        # the humidity correction belongs to near-thermoneutral compounds only, so a
+        # flagged and an unflagged compound must each match their own trace
+        "const flags=p.flags; p.flags=['humid']; "
+        "const conHum=peakAbundance(p), conHumTrace=traceMean(computeTraces(p).con); "
+        "p.flags=['not-humid']; "
+        "const conDry=peakAbundance(p), conDryTrace=traceMean(computeTraces(p).con); "
+        "p.flags=flags; "
+        "return {raw,cor,con,rawText,corText,conText,changed:rawText!==conText, "
+        "corExpect:raw/interpT(p.mz), conExpect:raw/interpT(p.mz)*cfg.K*meanRecip, "
+        "humidDiffers:Math.abs(conHum-conDry)>1e-12, conHum, conHumTrace, conDry, conDryTrace, "
+        "qtabsVisible:getComputedStyle(document.querySelector('#qtabs')).display}; })()",
+    )
+    _assert(
+        units["qtabsVisible"] != "none",
+        "the Raw/Corrected/Conc selector is missing from the Mass spectrum tab",
+    )
+    _assert(
+        units["changed"],
+        "the sidebar abundance does not follow the selected unit: "
+        + str([units["rawText"], units["corText"], units["conText"]]),
+    )  # transmission is flat in this fixture, so only Conc must differ
+
+    # Every setting the concentration conversion reads must move the sidebar, not
+    # only the plots: a cached value from the previous setting is a wrong number.
+    for control, value, unit in (
+        ("K", "2.5", "con"),
+        ("Vm", "49.0", "ug"),      # molar volume only enters through µg/m³
+        ("kanchor", "3.4", "con"),
+    ):
+        edited = _eval(
+            session,
+            "(() => { const p=peaks.find(x=>x.label==='Curated solvent'); "
+            "document.querySelector('#qtabs button[data-q=" + unit + "]').click(); "
+            "const el=document.querySelector('#" + control + "'), keep=el.value; "
+            "el.value='" + value + "'; "
+            "el.dispatchEvent(new Event('change',{bubbles:true})); "
+            "const cell=Array.from(document.querySelectorAll('#peaksbody li'))"
+            ".find(li=>li.querySelector('.lbl').value==='Curated solvent')"
+            ".querySelector('.abundance'); "
+            "const dom=cell?cell.textContent:null, shown=peakAbundance(p); "
+            "const tr=computeTraces(p)." + unit + "; "
+            "const trace=Array.prototype.reduce.call(tr,(a,b)=>a+b,0)/tr.length; "
+            "el.value=keep; el.dispatchEvent(new Event('change',{bubbles:true})); "
+            "const back=computeTraces(p)." + unit + "; "
+            "return {dom, shown, trace, restored:peakAbundance(p), "
+            "traceBack:Array.prototype.reduce.call(back,(a,b)=>a+b,0)/back.length}; })()",
+        )
+        _assert(
+            abs(edited["shown"] - edited["trace"]) <= abs(edited["trace"]) * 1e-9,
+            "after editing {} the sidebar value is not the mean of the compound's own "
+            "trace: {} vs {}".format(control, edited["shown"], edited["trace"]),
+        )
+        if edited["dom"] is not None:
+            _assert(
+                abs(float(edited["dom"]) - edited["shown"])
+                <= abs(edited["shown"]) * 0.02,
+                "the sidebar row kept an old value after {} was edited: DOM says {}, "
+                "the trace says {}".format(control, edited["dom"], edited["shown"]),
+            )
+        _assert(
+            abs(edited["restored"] - edited["traceBack"])
+            <= abs(edited["traceBack"]) * 1e-9,
+            "restoring {} did not restore the sidebar value: {} vs {}".format(
+                control, edited["restored"], edited["traceBack"]
+            ),
+        )
+
+    kinetic = _eval(
+        session,
+        "(() => { const p=peaks.find(x=>x.label==='Curated solvent'); "
+        "const el=document.querySelector('#kinetic'), keep=el.checked; "
+        "el.checked=!keep; el.dispatchEvent(new Event('change',{bubbles:true})); "
+        "const shown=peakAbundance(p), tr=computeTraces(p).con; "
+        "const trace=Array.prototype.reduce.call(tr,(a,b)=>a+b,0)/tr.length; "
+        "el.checked=keep; el.dispatchEvent(new Event('change',{bubbles:true})); "
+        "return {shown, trace, restored:peakAbundance(p)}; })()",
+    )
+    for field in ("shown", "restored"):
+        _assert(
+            abs(kinetic[field] - kinetic["trace"]) <= abs(kinetic["trace"]) * 1e-9,
+            "{} the kinetic correction left a stale sidebar value: {} vs {}".format(
+                "toggling" if field == "shown" else "restoring",
+                kinetic[field],
+                kinetic["trace"],
+            ),
+        )
+
+    for key, expect in (("cor", "corExpect"), ("con", "conExpect")):
+        _assert(
+            abs(units[key] - units[expect]) <= abs(units[expect]) * 1e-9,
+            "sidebar {} does not use the trace conversion: {} vs {}".format(
+                key, units[key], units[expect]
+            ),
+        )
+    _assert(
+        units["humidDiffers"],
+        "the humidity correction is not applied to a near-thermoneutral compound",
+    )
+    for sidebar, trace, kind in (
+        ("conHum", "conHumTrace", "near-thermoneutral"),
+        ("conDry", "conDryTrace", "ordinary"),
+    ):
+        _assert(
+            abs(units[sidebar] - units[trace]) <= abs(units[trace]) * 1e-9,
+            "the sidebar Conc for a {} compound disagrees with its own trace: "
+            "{} vs {}".format(kind, units[sidebar], units[trace]),
+        )
+
+    # --- a generated name must not contradict the assigned formula ---
+    naming = _eval(
+        session,
+        "(() => { const p=peaks.find(x=>x.label==='Curated solvent'); "
+        "const row=()=>Array.from(document.querySelectorAll('#peaksbody li'))"
+        ".find(li=>li.querySelector('.lbl').value===p.label); "
+        "const set=v=>{ const i=row().querySelector('.lbl'); i.value=v; "
+        "i.dispatchEvent(new Event('change',{bubbles:true})); }; "
+        "const pills=()=>Array.from(row().querySelectorAll('.pill')).map(e=>e.textContent); "
+        "set('toluene'); const wrongName=pills(); const note=document.querySelector('#idpanel').innerText; "
+        "set('unknown m/z 120.000'); const unknownWithFormula=pills(); "
+        "set('Curated solvent'); return {wrongName, unknownWithFormula, note, "
+        "restored:pills(), label:p.label, formula:p.formula}; })()",
+    )
+    _assert(
+        any("name" in t and "formula" in t for t in naming["wrongName"])
+        and "disagree" in naming["note"],
+        "a label that belongs to another formula is not flagged: "
+        + str(naming["wrongName"]),
+    )
+    _assert(
+        any("name" in t and "formula" in t for t in naming["unknownWithFormula"]),
+        "'unknown' next to an assigned formula is presented as if it were identified: "
+        + str(naming["unknownWithFormula"]),
+    )
+    _assert(
+        not any("name" in t and "formula" in t for t in naming["restored"]),
+        "the corrected label still shows a name/formula warning",
+    )
+
+    # --- a hand-drawn peak is only named when its mass really sits on the library ---
+    hand = _eval(
+        session,
+        "(() => { setTab('spec'); const rect=plotC.getBoundingClientRect(); "
+        "const send=(t,x)=>plotC.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,"
+        "view:window,ctrlKey:true,clientX:rect.left+x,clientY:rect.top+120})); "
+        "const add=(m,span)=>{ vSpec={lo:m-0.07, hi:m+0.07}; clampView(); drawSpec(); "
+        "const x0=specXAtMz(m-span/2), x1=specXAtMz(m+span/2); "
+        "send('mousedown',x0); send('mousemove',(x0+x1)/2); send('mousemove',x1); "
+        "window.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,"
+        "clientX:rect.left+x1,clientY:rect.top+120})); "
+        "const p=peaks[peaks.length-1]; return {apex:p.apex, label:p.label, formula:p.formula}; }; "
+        "const named=add(93.0699, 0.04); const unnamed=add(115.55, 0.04); "
+        "peaks.splice(peaks.length-2, 2); "
+        "if(!peaks.some(p=>p.id===selId)) selId=peaks.length?peaks[0].id:null; "
+        "renderPeaks(); initSpecView(); clampView(); drawSpec(); "
+        "return {named, unnamed}; })()",
+    )
+    _assert(
+        hand["named"]["label"] == "toluene" and hand["named"]["formula"] == "C7H8",
+        "a hand-drawn peak on a library mass was not named consistently: "
+        + str(hand["named"]),
+    )
+    _assert(
+        hand["unnamed"]["label"].startswith("unknown m/z 115.")
+        and hand["unnamed"]["formula"] == "",
+        "a hand-drawn peak off the library carries a name or formula it cannot justify: "
+        + str(hand["unnamed"]),
+    )
+    _browser(session, "eval", "document.querySelector('#pkdetails').click()")
+
+
 def _provenance_browser_pass() -> None:
     """Regress effective file sources and explicit reset provenance."""
     session = f"{SESSION}-provenance-{threading.get_ident()}"
@@ -642,10 +1138,11 @@ def _provenance_browser_pass() -> None:
         equal_path.write_text(viz.render_html(equal), encoding="utf-8")
 
         try:
-            _browser(session, "open", omitted_path.as_uri())
+            _open(session, omitted_path.as_uri())
             _browser(session, "wait", "--load", "networkidle")
             _browser(session, "eval", "localStorage.setItem('ptrms-onboarded', '1')")
             _browser(session, "reload")
+            _freeze_animations(session)   # the reload dropped the injected override
             _browser(session, "wait", "--load", "networkidle")
             _browser(session, "eval", "document.querySelector('#methodBtn').click()")
             omitted_state = _eval(
@@ -664,7 +1161,7 @@ def _provenance_browser_pass() -> None:
             )
             _assert_config_round_trip(omitted_state["config"])
 
-            _browser(session, "open", equal_path.as_uri())
+            _open(session, equal_path.as_uri())
             _browser(session, "wait", "--load", "networkidle")
             _browser(session, "eval", "document.querySelector('#methodBtn').click()")
             initial = _eval(
@@ -741,11 +1238,12 @@ def main() -> int:
 
     try:
         port = server.server_address[1]
-        _browser(session, "open", f"http://127.0.0.1:{port}/")
+        _open(session, f"http://127.0.0.1:{port}/")
         # The first-visit tour is useful to people but would make this regression
         # nondeterministic; mark it complete before reloading the generated page.
         _browser(session, "eval", "localStorage.setItem('ptrms-onboarded', '1')")
         _browser(session, "reload")
+        _freeze_animations(session)   # the reload dropped the injected override
         _browser(session, "wait", "--load", "networkidle")
         # Discard any delayed request from the previous page/session before the
         # first controlled edit; every request below has a matching snapshot.
@@ -782,13 +1280,15 @@ def main() -> int:
         )
         header_layout = _eval(
             session,
-            "(() => { const h=document.querySelector('.pkhead').getBoundingClientRect(); "
+            "(() => { const head=document.querySelector('.pkhead'); const h=head.getBoundingClientRect(); "
+            "const cs=getComputedStyle(head); "
+            "const left=h.left+(parseFloat(cs.paddingLeft)||0), right=h.right-(parseFloat(cs.paddingRight)||0); "
             "const t=document.querySelector('.pktitle').getBoundingClientRect(); "
             "const c=document.querySelector('.pkcontrols').getBoundingClientRect(); "
             "const o=document.querySelector('.pkorder'); "
-            "return {display:getComputedStyle(document.querySelector('.pkhead')).display, "
-            "direction:getComputedStyle(document.querySelector('.pkhead')).flexDirection, "
-            "titleLeft:Math.abs(t.left-h.left)<1, controlsRight:Math.abs(c.right-h.right)<1, "
+            "return {display:cs.display, "
+            "direction:cs.flexDirection, "
+            "titleLeft:Math.abs(t.left-left)<1, controlsRight:Math.abs(c.right-right)<1, "
             "twoRows:t.bottom<=c.top, orderDirection:getComputedStyle(o).flexDirection, "
             "controlOrder:Array.from(document.querySelector('.pkcontrols').children).map(e=>e.id||e.className)}; })()",
         )
@@ -961,9 +1461,9 @@ def main() -> int:
             "(document.querySelectorAll('#peaksbody .plist li')).every(e=>e.scrollWidth<=e.clientWidth+1), "
             "deletion:getComputedStyle(document.querySelector('#peaksbody .dc.del')).width})",
         )
-        _assert(
-            details
-            == {
+        _assert_eq(
+            details,
+            {
                 "mz": 6,
                 "abundance": 6,
                 "wide": True,
@@ -1311,7 +1811,8 @@ def main() -> int:
         _browser(
             session,
             "eval",
-            "(() => { const s=document.querySelector('#specrange'); s.value='0'; "
+            "(() => { const s=document.querySelector('#specrange'); "
+            "s.value=[...s.options].find(o=>o.value!=='all').value; "
             "s.dispatchEvent(new Event('change')); })()",
         )
         _browser(session, "wait", "1000")
@@ -1329,7 +1830,6 @@ def main() -> int:
             "li.querySelector('.lbl').value==='Isolated control'); "
             "return {windows:ws, overlap:intersection/union, isolated:dispApex(peaks[5]), "
             "isolatedValue:isolatedRow.querySelector('.mini').textContent, "
-            "isolatedAbundance:peakAbundance(peaks[5]), "
             "note:document.querySelector('#idpanel').innerText}; })()",
         )
         _assert(
@@ -1348,8 +1848,18 @@ def main() -> int:
             clustered["isolatedValue"] == "140.020",
             "sidebar m/z did not follow the selected spectrum",
         )
+        # The sidebar number tracks the spectrum actually on screen. Measured in Raw
+        # so the value is the interval integral itself, not a unit conversion.
+        abundance_raw = _eval(
+            session,
+            "(() => { const q0=quant; "
+            "document.querySelector('#qtabs button[data-q=raw]').click(); "
+            "const v=peakAbundance(peaks[5]); "
+            "document.querySelector('#qtabs button[data-q='+q0+']').click(); "
+            "return {v}; })()",
+        )["v"]
         _assert(
-            clustered["isolatedAbundance"] > 25,
+            abundance_raw > 25,
             "sidebar abundance did not follow the selected spectrum",
         )
         _assert(
@@ -1458,7 +1968,10 @@ def main() -> int:
             "assigned formula is not marked in the candidate card",
         )
 
-        done_cursor = len(_ReviewHandler.posts)
+        # Interval edits, unit-aware values, sample-specific ticks and compound
+        # naming are exercised against the same served page.
+        _review_round_browser_pass(session)
+        post_cursor = len(_ReviewHandler.posts)
         _browser(session, "find", "role", "button", "click", "--name", "Done")
         _browser(session, "wait", "800")
         posted = _eval(session, "({config:buildConfig()})")
@@ -1469,7 +1982,7 @@ def main() -> int:
             "latest save body differs from the browser's complete buildConfig()",
         )
         done_posts = [
-            body for path, body in _ReviewHandler.posts[done_cursor:] if path == "/done"
+            body for path, body in _ReviewHandler.posts[post_cursor:] if path == "/done"
         ]
         _assert(
             done_posts and all(body == posted["config"] for body in done_posts),

@@ -95,7 +95,9 @@ Set `viz.x_axis_unit` in the config, or use the matching `--x-axis-unit` option 
 
 Precedence is CLI override > config value > cycle default. The selector is shown only
 on the **Signal over time** tab and updates that plot and the Intervals card. Saved
-ranges and CSV `Cycle` rows remain integer, 1-based, inclusive cycle boundaries.
+ranges and CSV `Cycle` rows remain integer, 1-based, inclusive cycle boundaries. The
+Intervals card stays in chronological order as intervals are added, dragged and
+undone, and each row's range updates while you drag an edge.
 
 The **Peaks** sidebar can also be ordered by descending abundance or alphabetically by
 label. Abundance is the mean per-cycle integrated Raw signal (the peak integral), with
@@ -103,9 +105,34 @@ m/z used to break ties. The compact list shows only the active sort field; the d
 view shows both m/z and abundance. The m/z and abundance values follow the Mass spectrum tab's selected
 average-over interval; isolated peaks use that interval's apex and clustered peaks
 retain their fixed model centres. The choice is saved as `viz.peak_order` and does not
-change the peak order in the analysis config or CSV. The Peaks sidebar also has a
-check/uncheck-all toggle for choosing which peaks are active in the review and included
-in the saved analysis config and CSV.
+change the peak order in the analysis config or CSV.
+
+The Raw / Corrected / Conc / µg selector works on both tabs: it rescales the mass
+spectrum and the sidebar abundance values. In Conc and µg the sidebar figure is the mean
+of that compound's own converted trace over the cycles being shown — the same number the
+CSV reports as `Average` for that interval. The per-compound humidity correction is
+applied to the traces and the sidebar values; the shared spectrum axis cannot carry it
+and says so. A value that cannot be converted (no correction curve, no **K**, or no
+primary signal) is shown as Raw and says why in its tooltip.
+
+Each peak's box is a **per-sample** selection: ticked = included in every sample
+interval, empty = in none, and a dash = in some samples only. Clicking cycles
+empty → all → none → all, and the ▾ menu beside the tick chooses individual sample
+intervals; the header toggle checks or unchecks every compound at once. A peak in
+every sample needs no extra config; a partial one records `samples`, the interval
+labels it belongs to:
+
+```json
+{
+  "peaks": [
+    { "mz": 78.0469, "label": "benzene", "samples": ["sample_01"] }
+  ]
+}
+```
+
+The ▾ menu appears in the Details view of the sidebar. A compound selected for at
+least one sample is still part of the summary output exactly as before; the
+per-sample distinction is stored so per-sample output can build on it.
 
 An analysis config may include an `analyze` object with `R`, `R_phys`, `K`,
 `molar_volume`, `primary_mz`, `kinetic`, `k_anchor`, `humidity_correct`, `humidity_p`,
