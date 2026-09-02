@@ -420,14 +420,21 @@ the sidebar; the shared spectrum axis cannot carry it and says so. Where a value
 be converted (no correction curve, no **K**, or no primary signal), the sidebar shows
 the Raw value and says why in its tooltip instead of inventing one.
 
-Each peak's box in the sidebar is a **per-sample** tick, not a plain on/off box:
-ticked means the compound is included in every sample interval, empty in none, and a
-partial (dash) tick means some samples only — which is also how a mixed selection from
-the check/uncheck-all toggle reads. Clicking cycles empty → all → none → all, and the
-▾ menu in the Details view picks the individual sample intervals. A peak recorded in
-every sample writes no extra config field; a partial one writes `samples`, the list of
-interval labels it belongs to. Either way a compound selected for at least one sample
-still appears in the summary CSV exactly as before — the per-sample split is recorded
+Each peak's box in the sidebar is a **per-sample** tick, not a plain on/off box, and
+it follows the mass-spectrum **average over** choice: with one sample selected the box
+is that sample's own tick and touching it leaves every other interval alone; with the
+whole run (or a background) selected it is the aggregate — ticked when the compound is
+part of every sample interval, empty in none, and a partial (dash) tick when some
+samples only, which is also how a mixed selection from the check/uncheck-all toggle
+reads. Clicking an aggregate box only ever flicks it: a dash becomes a proper tick, the
+next click clears it, the next ticks it again. In the Details view each row also carries
+one small box per sample interval, labelled by interval number, so which samples a
+compound belongs to is visible without opening anything; clicking one changes that
+sample only. The heading says which of the two the boxes mean (`Peaks · all samples`,
+`Peaks · sample_03`). A peak recorded in every sample writes no extra config field; a
+partial one writes `samples`, the list of interval labels it belongs to. Either way a
+compound selected for at least one sample still appears in the summary CSV exactly as
+before — the per-sample split is recorded
 now so that per-sample output can be built on it later. Interval labels key this
 selection, so a rename that would duplicate a label is rejected, and a `samples` list
 whose labels no longer exist falls back to every sample rather than silently dropping

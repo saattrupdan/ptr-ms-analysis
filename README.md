@@ -115,11 +115,14 @@ applied to the traces and the sidebar values; the shared spectrum axis cannot ca
 and says so. A value that cannot be converted (no correction curve, no **K**, or no
 primary signal) is shown as Raw and says why in its tooltip.
 
-Each peak's box is a **per-sample** selection: ticked = included in every sample
-interval, empty = in none, and a dash = in some samples only. Clicking cycles
-empty → all → none → all, and the ▾ menu beside the tick chooses individual sample
-intervals; the header toggle checks or unchecks every compound at once. A peak in
-every sample needs no extra config; a partial one records `samples`, the interval
+Each peak's box is a **per-sample** selection, and it follows the **average over**
+choice: pick one sample and the box is that sample's own tick; pick the whole run and
+it is the aggregate — ticked = in every sample interval, empty = in none, a dash = in
+some samples only. Clicking the aggregate box only ever flicks it: a dash becomes a
+proper tick, the next click clears it, the next ticks it again. The Details view adds
+one small box per sample interval to every row, so a compound's sample list is visible
+in the sidebar itself; the header toggle works over whichever scope is showing. A peak
+in every sample needs no extra config; a partial one records `samples`, the interval
 labels it belongs to:
 
 ```json
@@ -130,9 +133,8 @@ labels it belongs to:
 }
 ```
 
-The ▾ menu appears in the Details view of the sidebar. A compound selected for at
-least one sample is still part of the summary output exactly as before; the
-per-sample distinction is stored so per-sample output can build on it.
+A compound selected for at least one sample is still part of the summary output exactly
+as before; the per-sample distinction is stored so per-sample output can build on it.
 
 An analysis config may include an `analyze` object with `R`, `R_phys`, `K`,
 `molar_volume`, `primary_mz`, `kinetic`, `k_anchor`, `humidity_correct`, `humidity_p`,

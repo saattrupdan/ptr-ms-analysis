@@ -624,6 +624,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .pkcontrols{align-self:flex-end;display:flex;align-items:center;gap:8px}
   .pkcontrols .pkorder{flex-direction:row;align-items:center;gap:5px;text-align:left}
   .pkheadbtn{padding:4px 7px;font-size:10px}
+  .pktitle .scope{font-size:10px;font-weight:400;color:var(--mut)}
+  .pktitle .scope.one{color:var(--hi)}
   .pad{padding:14px 15px}
   canvas{width:100%;display:block;background:var(--panel2)}
   #plot{cursor:grab} #plot.grabbing{cursor:grabbing}
@@ -781,14 +783,14 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .plist .dc.kv{min-width:50px;text-align:right}
   .plist .dc.win{min-width:92px;text-align:right}
   .plist .dc.pills{display:flex;gap:4px;flex:0 0 var(--tag-width,1px);min-width:var(--tag-width,1px);overflow:visible}
-  .plist .dc.smpbtn{flex:0 0 42px;text-align:center;padding:3px 4px;font-size:10px;border:1px solid var(--line);
-    border-radius:5px;background:var(--panel2);color:var(--mut);cursor:pointer}
-  .plist .dc.smpbtn.some{color:var(--hi);border-color:var(--hi)}
-  .plist .dc.smpbtn.none{opacity:.55}
-  #smpmenu{position:absolute;z-index:60;display:grid;grid-template-columns:auto auto;gap:3px 12px;padding:9px 11px;
-    background:var(--panel2);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 26px rgba(0,0,0,.35);
-    max-height:300px;overflow:auto}
-  #smpmenu label{display:flex;align-items:center;gap:6px;font-size:10.5px;white-space:nowrap;color:var(--fg)}
+  .plist .dc.smpsel{flex:0 1 auto;display:flex;flex-wrap:wrap;justify-content:flex-start;
+    gap:3px 2px;max-width:140px}
+  .plist .chip{width:17px;height:16px;padding:0;font-size:8.5px;line-height:14px;text-align:center;cursor:pointer;
+    border:1px solid var(--line);border-radius:4px;background:transparent;color:var(--mut);
+    -webkit-appearance:none;appearance:none}
+  .plist .chip.on{background:var(--hi);border-color:var(--hi);color:var(--bg);font-weight:600}
+  .plist .chip.cur{outline:1px solid var(--hi);outline-offset:1px}
+  .plist .chip:hover{border-color:var(--hi)}
   .plist .dc.del{display:inline-flex;align-items:center;justify-content:center;flex:0 0 28px;width:28px;
                  cursor:pointer;color:var(--mut);background:none;border:0;font-size:12px;padding:2px 4px;text-align:center}
   .plist .dc.del:hover{color:#f87171}
@@ -885,7 +887,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <aside class="sidebar">
     <div class="card">
       <h2 class="pkhead">
-        <span class="pktitle">Peaks</span>
+        <span class="pktitle">Peaks<span class="scope" id="pkscope" title="which sample intervals the tick boxes speak about"></span></span>
         <span class="pkcontrols">
           <label class="pkorder" title="Abundance is the mean per-cycle integrated Raw signal">
             order by
@@ -1137,18 +1139,42 @@ function sampleLabels(){ return sampleIntervals().map(r=>r.label); }
 // sample intervals at all) or stale labels fall back to every sample rather than
 // silently un-including the compound
 function selectedSamples(p){ const k=sampleLabels(); if(!k.length) return k;
+  if(!p.use) return [];                            // off is off, whatever is recorded
   const want=(Array.isArray(p.samples)?p.samples:k).filter(l=>k.indexOf(l)>=0);
   return want.length?want:k; }
-function selState(p){ if(!p.use) return "none"; const k=sampleLabels(); if(!k.length) return "all";
-  const sel=selectedSamples(p);
-  return sel.length===k.length?"all":"some"; }
+// The Peaks sidebar follows the mass-spectrum 'average over' choice: look at one
+// sample and the boxes speak about that sample alone; look at the whole run (or at a
+// background) and they show the aggregate across all samples.
+function scopeRange(){ const sel=document.getElementById("specrange");
+  const v=sel?sel.value:"all"; if(v==="all"||v===""||v==null) return null;
+  const r=ranges.find(rr=>("i"+rr._id)===v);
+  return r && sampleIntervals().indexOf(r)>=0 ? r : null; }
+// `r` = one sample interval to speak about, or null/undefined for the aggregate
+function selState(p,r){ r=(r===undefined?scopeRange():r);
+  if(r) return (p.use && selectedSamples(p).indexOf(r.label)>=0)?"all":"none";
+  if(!p.use) return "none"; const k=sampleLabels(); if(!k.length) return "all";
+  return selectedSamples(p).length===k.length?"all":"some"; }
 function setSel(p,labels){ const k=sampleLabels(), s=new Set(labels);
   if(!k.length){ p.use=true; p.samples=[]; return; }
   p.samples=k.filter(l=>s.has(l)); p.use=p.samples.length>0; }
 function selAll(p){ p.use=true; p.samples=sampleLabels(); }
 function selNone(p){ p.use=false; p.samples=[]; }
-// a partial box becomes a plain tick, the next click clears it, the next ticks all
-function toggleSel(p){ if(selState(p)==="all") selNone(p); else selAll(p); }
+// whole run: a partial box becomes a plain tick, the next click clears it, the next
+// ticks all - it only ever flicks between a tick and an empty box. One sample: the box
+// is that sample's own tick, and touching it leaves every other interval alone.
+function toggleSel(p,r){ r=(r===undefined?scopeRange():r);
+  if(r){ const cur=selectedSamples(p);
+    setSel(p, cur.indexOf(r.label)>=0?cur.filter(l=>l!==r.label):cur.concat([r.label])); return; }
+  if(selState(p,null)==="all") selNone(p); else selAll(p); }
+// the header button, over the same scope as the boxes
+function bulkSel(on,r){ r=(r===undefined?scopeRange():r);
+  peaks.forEach(p=>{ if(!r){ if(on) selAll(p); else selNone(p); return; }
+    const cur=selectedSamples(p);
+    setSel(p, on?cur.concat([r.label]):cur.filter(l=>l!==r.label)); }); }
+// 'sample_07' -> '07', so a row can carry one box per sample without widening much
+function sampleShort(r,i){ const m=/(\d+)\s*$/.exec(r.label||"");
+  if(m) return m[1].length>1?m[1]:m[1].padStart(2,"0");
+  return String(i+1).padStart(2,"0"); }
 // a sample interval that appears, disappears or is renamed must not strand compounds.
 // These keep `use` where it was: a compound that was in cannot be edited out of the
 // analysis by touching an interval, and one that was off stays off.
@@ -1726,7 +1752,7 @@ window.addEventListener("mouseup",e=>{ if(!drag) return; setCur("grab");
     else drawMain();
     return; }
   if(d.mode==="newseg"){ const s=Math.min(d.c0,d.c1), en=Math.max(d.c0,d.c1);
-    if(en-s>=5){ const wasAll=peaks.map(p=>selState(p)==="all"); pushUndo();
+    if(en-s>=5){ const wasAll=peaks.map(p=>selState(p,null)==="all"); pushUndo();
       const nr={label:newSampleLabel(),
         class:"sample",start:s,end:en,_id:nextRangeId++}; ranges.push(nr); selRange=nr._id;
       sortRanges(); adoptSampleKey(nr.label,wasAll); renderRanges(); redraw(); } else drawMain();
@@ -1880,21 +1906,21 @@ function setAppColumns(tagWidth,rowWidth=peakDetailWidth){ const app=document.ge
   const width=Math.min(available,desired);
   app.style.gridTemplateColumns=width+"px minmax(0,1fr)"; }
 function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box) return;
-  refreshSampleMenu();
   const dt=document.getElementById("pkdetails"); if(dt) dt.textContent=showDetails?"Hide details":"Details";
   box.innerHTML="";
   const esc=s=>(s||'').replace(/"/g,'&quot;');
   const ul=document.createElement("ul"); ul.className="plist"+(showDetails?" det":"");
   for(const p of orderedPeaks()){ const li=document.createElement("li");
     li.className=(p.id===selId?"sel ":"")+(p.use?"":"off");
-    const dup=dupPeak(p), st=selState(p), k=sampleLabels(), nSel=selectedSamples(p).length;
+    const dup=dupPeak(p), scope=scopeRange(), st=selState(p,scope), k=sampleLabels();
     const dot=dup?`<span class="dot ovl" title="duplicate: same compound also at m/z ${dup.mz.toFixed(3)}"></span>`:
               (p.id_ambiguous?'<span class="dot amb" title="ambiguous identification"></span>':
               (p.overlap?'<span class="dot ovl" title="spectral overlap"></span>':'<span class="dot"></span>'));
     const ro = p.id===selId ? "" : "readonly";   // only the selected row is editable (text caret); others show the finger cursor
     let h=`<input type="checkbox" data-a="use" ${st!=="none"?"checked":""} title="`+
-      (st==="all"?`included in all ${k.length} sample interval${k.length===1?"":"s"}`:
-       st==="some"?`included in ${nSel} of ${k.length} sample intervals — click for all`:
+      (scope?`${st==="all"?"included in":"not included in"} ${scope.label} — the other intervals keep their own ticks`:
+       st==="all"?`included in all ${k.length} sample interval${k.length===1?"":"s"}`:
+       st==="some"?`included in ${selectedSamples(p).length} of ${k.length} sample intervals — click for all`:
        `included in no sample interval — click for all`)+`">`+dot+
       `<input type="text" class="lbl" data-a="label" ${ro} value="${esc(p.label)}">`;
     if(showDetails){ const cand=nearestCompound(p.mz), dmda=cand?((p.mz-cand.mz)*1000):null;
@@ -1902,7 +1928,12 @@ function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box)
         `<span class="dc dmda ${dmda!=null&&Math.abs(dmda)>10?'warn':''}" title="mass error vs nearest known compound">${dmda!=null?((dmda>=0?'+':'')+dmda.toFixed(1)+' mDa'):'—'}</span>`+
         `<span class="dc kv" title="proton-transfer rate constant (~ = estimated)">${p.k?('k '+(+p.k).toFixed(2)+(p.k_estimated?'~':'')):'k —'}</span>`+
         `<span class="dc win" title="integration half-widths — drag the dashed handles in the spectrum">−${p.winL.toFixed(3)}/+${p.winR.toFixed(3)}${p.winManual?'*':''}</span>`+
-        `<button class="dc smpbtn ${st}" data-a="smp" title="choose which sample intervals include this compound">${nSel}/${k.length}</button>`+
+        `<span class="dc smpsel" title="one box per sample interval — click a box to change that sample only">`+
+        sampleIntervals().map((r,i)=>`<button class="chip${selState(p,r)==="all"?" on":""}`+
+          `${r._id===(scope&&scope._id)?" cur":""}" data-a="smp" data-smp="${r._id}" `+
+          `title="${esc(r.label)} (cycles ${r.start}–${r.end}): `+
+          `${selState(p,r)==="all"?"in this sample":"not in this sample"}">`+
+          `${esc(sampleShort(r,i))}</button>`).join("")+`</span>`+
         `<span class="dc pills">${peakPills(p)}</span>`+
         `<button class="dc del" data-a="del" title="remove peak">✕</button>`;
     } else { h+=`<span class="sp"></span>${peakValue(p,peakOrder)}<span class="go">›</span>`; }
@@ -1913,10 +1944,12 @@ function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box)
     // decided from the selection itself: a checkbox click in the browser would
     // otherwise depend on checkedness, which says nothing about 'partial'
     cb.onclick=e=>{ e.preventDefault(); pushUndo(); toggleSel(p); renderPeaks(); redraw(); };
+    li.querySelectorAll("[data-a=smp]").forEach(ch=>{ ch.onclick=e=>{ e.stopPropagation();
+      const r=ranges.find(rr=>rr._id===+ch.dataset.smp); if(!r) return;
+      pushUndo(); toggleSel(p,r); renderPeaks(); redraw(); }; });
     const lbl=li.querySelector("[data-a=label]");
     lbl.onclick=()=>selectPeak(p);                                   // clicking the label selects (no re-render if already selected)
     lbl.onchange=()=>{ pushUndo(); p.label=lbl.value; renderPeaks(); redraw(); };
-    const sm=li.querySelector("[data-a=smp]"); if(sm) sm.onclick=e=>{ e.stopPropagation(); sampleMenu(p,sm); };
     const del=li.querySelector("[data-a=del]"); if(del) del.onclick=e=>{ e.stopPropagation(); deletePeak(p); };
     ul.appendChild(li); }
   box.appendChild(ul);
@@ -1953,38 +1986,12 @@ function updatePeakToggle(){
   btn.disabled=peaks.length===0;
   btn.textContent=all?"Uncheck all":"Check all";
   btn.setAttribute("aria-label",btn.textContent);
+  // say which intervals the boxes mean, so a single-sample view is never mistaken
+  // for the whole-run answer
+  const sc=scopeRange(), el=document.getElementById("pkscope");
+  if(el){ el.textContent=" · "+(sc?sc.label:"all samples"); el.className="scope"+(sc?" one":""); }
 }
-// an open per-sample menu mirrors the selection, wherever it changed
-function refreshSampleMenu(){ const el=document.getElementById("smpmenu"); if(!el) return;
-  const p=peaks.find(q=>q.id===_smpFor); if(!p) return; const cur=selectedSamples(p);
-  const k=sampleIntervals();
-  el.querySelectorAll("input").forEach((cb,i)=>{ if(k[i]) cb.checked=cur.indexOf(k[i].label)>=0; }); }
-// per-sample tick list for one compound, floated over the list so the row layout and
-// the measured column widths are untouched
-function sampleMenu(p,btn){ const open=document.getElementById("smpmenu");
-  if(open){ open.remove(); if(_smpFor===p.id) { _smpFor=null; return; } }
-  _smpFor=p.id;
-  const el=document.createElement("div"); el.id="smpmenu";
-  const k=sampleIntervals();
-  k.forEach(r=>{ const lab=document.createElement("label"), cb=document.createElement("input");
-    cb.type="checkbox"; cb.checked=selectedSamples(p).indexOf(r.label)>=0;
-    cb.onchange=()=>{ pushUndo(); const cur=selectedSamples(p);   // read it fresh: the
-      // other boxes in this menu may already have changed the selection
-      setSel(p, cb.checked ? cur.concat([r.label]) : cur.filter(l=>l!==r.label));
-      renderPeaks(); redraw(); };
-    lab.appendChild(cb);
-    lab.appendChild(document.createTextNode(" "+r.label+" ("+r.start+"–"+r.end+")"));
-    el.appendChild(lab); });
-  if(!k.length){ el.textContent="no sample intervals"; }
-  document.body.appendChild(el);
-  const b=btn.getBoundingClientRect();
-  el.style.left=Math.max(6,Math.min(b.left,window.innerWidth-el.offsetWidth-8))+"px";
-  el.style.top=(b.bottom+4+window.scrollY)+"px";
-  setTimeout(()=>document.addEventListener("mousedown",closeSampleMenu),0); }
-let _smpFor=null;
-function closeSampleMenu(e){ const el=document.getElementById("smpmenu"); if(!el) return;
-  if(e && el.contains(e.target)) return;
-  el.remove(); _smpFor=null; document.removeEventListener("mousedown",closeSampleMenu); }
+// the per-sample boxes live inline in each row, so nothing to keep in sync here
 function renderId(){ const el=document.getElementById("idpanel"), conf=document.getElementById("idconf"), p=selPeak();
   const esc=s=>(s||'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
   const assigned=!!(p&&p.formula);
@@ -2060,7 +2067,7 @@ function renderRanges(){ const tb=document.querySelector("#rngtbl tbody"); if(!t
       `<td class="mini" title="drag the interval edges in the plot to change">${formatRange(r)}</td>`;
     tr.onclick=ev=>{ if(ev.target.dataset.a) return; selRange=r._id; renderRanges(); jumpToInterval(r); };
     tr.querySelectorAll("[data-a]").forEach(el=>{ const act=el.dataset.a, was=r[act];
-      el.onchange=()=>{ const wasAll=peaks.map(p=>selState(p)==="all");
+      el.onchange=()=>{ const wasAll=peaks.map(p=>selState(p,null)==="all");
         // interval labels key the per-sample ticks, so a duplicate would merge two
         // intervals' selections into one - keep the old name and say so, and do not
         // spend an undo level on an edit that never happened
@@ -2198,6 +2205,10 @@ function showSpin(on,msg){ const el=document.getElementById("specspin"); if(!el)
   else el.hidden=true; }
 function setSpecRange(val){
   const tok=++_specTok; if(_spinTimer){ clearTimeout(_spinTimer); _spinTimer=null; } showSpin(false);
+  // a programmatic call must move the control too, or the sidebar would read its scope
+  // from a dropdown that no longer says what is on screen
+  const dd=document.getElementById("specrange");
+  if(dd && [...dd.options].some(o=>o.value===val)) dd.value=val;
   const useWhole=()=>{ SHOWSPEC=SPEC; SPECWIN={lo:1,hi:NCYC}; refineIntervalApexes(SHOWSPEC); renderPeaks(); drawSpec(); };
   const r=(val==="all"||val===""||val==null)?null:ranges.find(rr=>("i"+rr._id)===val);
   if(!r){ useWhole(); return; }
@@ -2384,8 +2395,7 @@ document.getElementById("pkorder").onchange=e=>{
 };
 document.getElementById("pkcheckall").onclick=()=>{
   const all=peaks.length>0 && peaks.every(p=>selState(p)==="all");
-  pushUndo(); peaks.forEach(p=>{ if(all) selNone(p); else selAll(p); });
-  renderPeaks(); redraw();
+  pushUndo(); bulkSel(!all); renderPeaks(); redraw();
 };
 document.getElementById("pkdetails").onclick=()=>{ showDetails=!showDetails;
   const app=document.getElementById("app");
@@ -2482,9 +2492,8 @@ function tourSteps(){ const s=[];
   s.push({sel:"#maintabs",place:"bottom",tab:"spec",title:"Step 2 — the peaks",
     body:"Now switch to Mass spectrum to review each compound. Drag to pan, scroll to zoom."});
   s.push({sel:".sidebar .card",place:"right",tab:"spec",title:"Peaks",
-    body:"Every compound we detected. Click one to select it and zoom to its mass peak; the shaded band is the m/z window that’s integrated for it."});
-  s.push({sel:"#specrangewrap",place:"bottom",tab:"spec",title:"Review peaks per interval",
-    body:"“Average over” picks which spectrum you’re looking at — it starts on the whole run. Isolated peaks can move a little between intervals, so their apex line and window re-centre on the local maximum; clustered Gaussian/deconvolved components stay at fixed model centres (not measured apexes)."});
+    body:"Every compound we detected. Click one to select it and zoom to its mass peak; the shaded band is the m/z window that’s integrated for it."});  s.push({sel:"#specrangewrap",place:"bottom",tab:"spec",title:"Review peaks per interval",
+    body:"“Average over” picks which spectrum you’re looking at — it starts on the whole run. Isolated peaks can move a little between intervals, so their apex line and window re-centre on the local maximum; clustered Gaussian/deconvolved components stay at fixed model centres (not measured apexes). The tick boxes follow this choice: on one sample they are that sample’s own tick, on the whole run they show all / some / none."});
   s.push({sel:"#idcard",place:"top",tab:"spec",title:"Identification",
     body:"Candidate formulas for the selected peak, ranked by exact mass and isotope pattern. Click one to assign it."});
   s.push({sel:"#cfgBtn",place:"bottom",title:"Settings",

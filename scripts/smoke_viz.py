@@ -682,6 +682,9 @@ def _review_round_browser_pass(session: str) -> None:
     Every mutation made here is undone before the pass returns, so the served
     page keeps handing its original state to the Done checks that follow.
     """
+    # the ticks read their scope from the 'average over' control, so this pass owns it
+    # from here on and starts from the whole-run view like any fresh review
+    _browser(session, "eval", "setSpecRange('all')")
     # --- interval edits: the card must show what the plot now shows, in time order ---
     _browser(
         session,
@@ -835,43 +838,32 @@ def _review_round_browser_pass(session: str) -> None:
         "the new-interval check did not restore the review state: " + str(new_interval),
     )
 
-    # --- sample-specific ticks: empty, partial and ticked, one click at a time ---
+    # --- the boxes are per sample interval, and shown in the row itself ---
     _browser(session, "eval", "document.querySelector('#pkdetails').click()")
-    _browser(
+    chips = _eval(
         session,
-        "eval",
-        "(() => { const li=Array.from(document.querySelectorAll('#peaksbody li'))"
+        "(() => { const row=()=>Array.from(document.querySelectorAll('#peaksbody li'))"
         ".find(e=>e.querySelector('.lbl').value==='Curated solvent'); "
-        "li.querySelector('[data-a=smp]').click(); })()",
-    )
-    menu = _eval(
-        session,
-        "({items:Array.from(document.querySelectorAll('#smpmenu label')).length})",
-    )
-    _assert(menu["items"] == 2, "the per-sample list does not offer every sample interval")
-    _browser(
-        session,
-        "eval",
-        "document.querySelectorAll('#smpmenu input')[0].click(); closeSampleMenu();",
-    )
-    partial = _eval(
-        session,
-        "({state:selState(peaks.find(p=>p.label==='Curated solvent')), "
-        "flags:Array.from(document.querySelectorAll('#peaksbody li')).map(li=>["
-        "li.querySelector('.lbl').value, li.querySelector('[data-a=use]').checked, "
-        "li.querySelector('[data-a=use]').indeterminate]), "
-        "samples:(buildConfig().peaks.find(p=>p.label==='Curated solvent')||{}).samples})",
+        "const p=peaks.find(q=>q.label==='Curated solvent'); "
+        "const boxes=()=>Array.from(row().querySelectorAll('[data-a=smp]')); "
+        "const on=boxes().map(b=>b.classList.contains('on')); "
+        "boxes()[0].click();                                   /* out of sample_01 only */ "
+        "const box=row().querySelector('[data-a=use]'); "
+        "const written=buildConfig().peaks.find(q=>q.label==='Curated solvent'); "
+        "return {n:boxes().length, on, "
+        "after:boxes().map(b=>b.classList.contains('on')), state:selState(p), "
+        "box:[box.checked,box.indeterminate], samples:written.samples}; })()",
     )
     _assert(
-        partial["state"] == "some"
-        and [row for row in partial["flags"] if row[0] == "Curated solvent"]
-        == [["Curated solvent", True, True]],
-        "a compound in only some samples is not shown as a partial tick: "
-        + str(partial["flags"]),
+        chips["n"] == 2 and chips["on"] == [True, True],
+        "the row does not carry one box per sample interval: " + str(chips),
     )
     _assert(
-        partial["samples"] == ["sample_02"],
-        "partial selection did not reach the config: " + str(partial["samples"]),
+        chips["after"] == [False, True]
+        and chips["state"] == "some"
+        and chips["box"] == [True, True]
+        and chips["samples"] == ["sample_02"],
+        "unticking one sample interval did not leave a partial tick: " + str(chips),
     )
     _browser(
         session,
@@ -890,7 +882,75 @@ def _review_round_browser_pass(session: str) -> None:
         "clicking a partial tick did not include every sample: " + str(ticked),
     )
 
-    # ticking one sample and unticking another in one open menu must not cancel the
+    # --- whole run: partial -> tick -> empty -> tick, never a dead end ---
+    cycle = _eval(
+        session,
+        "(() => { const p=peaks.find(q=>q.label==='Curated solvent'); "
+        "setSpecRange('all'); setSel(p,[sampleLabels()[0]]); renderPeaks(); "
+        "const state=()=>{ const li=Array.from(document.querySelectorAll('#peaksbody li'))"
+        ".find(e=>e.querySelector('.lbl').value==='Curated solvent'); "
+        "const b=li.querySelector('[data-a=use]'); "
+        "return [selState(p), b.checked, b.indeterminate]; }; "
+        "const click=()=>{ Array.from(document.querySelectorAll('#peaksbody li'))"
+        ".find(e=>e.querySelector('.lbl').value==='Curated solvent')"
+        ".querySelector('[data-a=use]').click(); }; "
+        "const was=state(); click(); const all=state(); click(); const none=state(); "
+        "click(); const again=state(); setSel(p,sampleLabels()); renderPeaks(); redraw(); "
+        "return {was, all, none, again}; })()",
+    )
+    _assert(
+        cycle["was"] == ["some", True, True]
+        and cycle["all"] == ["all", True, False]
+        and cycle["none"] == ["none", False, False]
+        and cycle["again"] == ["all", True, False],
+        "the whole-run box does not flick between tick and empty: " + str(cycle),
+    )
+
+    # --- one sample selected: the box speaks about that sample alone ---
+    _browser(
+        session,
+        "eval",
+        "(() => { const s=document.querySelector('#specrange'); "
+        "s.value=[...s.options].find(o=>o.value!=='all').value; "
+        "s.dispatchEvent(new Event('change')); })()",
+    )
+    _browser(session, "wait", "1000")
+    scoped = _eval(
+        session,
+        "(() => { const p=peaks.find(q=>q.label==='Curated solvent'); "
+        "const row=()=>Array.from(document.querySelectorAll('#peaksbody li'))"
+        ".find(e=>e.querySelector('.lbl').value==='Curated solvent'); "
+        "const scope=scopeRange(); const box=row().querySelector('[data-a=use]'); "
+        "const shown=[box.checked,box.indeterminate]; "
+        "const on=()=>Array.from(row().querySelectorAll('[data-a=smp]'))"
+        ".map(b=>b.classList.contains('on')); "
+        "const before=on(); "
+        "box.click();                                    /* out of this sample only */ "
+        "const out={scope:scope?scope.label:null, shown, before, "
+        "  chips:on(), here:selState(p), aggregate:selState(p,null), "
+        "  samples:(buildConfig().peaks.find(q=>q.label==='Curated solvent')||{}).samples}; "
+        "row().querySelector('[data-a=use]').click();    /* and back in */ "
+        "out.back=selState(p,null); setSpecRange('all'); renderPeaks(); return out; })()",
+    )
+    _assert(
+        scoped["scope"] == "sample_01"
+        and scoped["shown"] == [True, False]
+        and scoped["before"] == [True, True],
+        "with one sample averaged the box is not that sample's own tick: " + str(scoped),
+    )
+    _assert(
+        scoped["chips"] == [False, True]
+        and scoped["here"] == "none"
+        and scoped["aggregate"] == "some"
+        and scoped["samples"] == ["sample_02"],
+        "ticking a single sample changed the other samples too: " + str(scoped),
+    )
+    _assert(
+        scoped["back"] == "all",
+        "ticking the sample back did not restore the compound everywhere: " + str(scoped),
+    )
+
+    # ticking one sample and unticking another between renders must not cancel the
     # compound out of the analysis
     two_toggles = _eval(
         session,
@@ -898,20 +958,19 @@ def _review_round_browser_pass(session: str) -> None:
         "setSel(p,[sampleLabels()[0]]); renderPeaks(); "
         "const row=()=>Array.from(document.querySelectorAll('#peaksbody li'))"
         ".find(e=>e.querySelector('.lbl').value==='Curated solvent'); "
-        "row().querySelector('[data-a=smp]').click(); "
-        "const boxes=Array.from(document.querySelectorAll('#smpmenu input')); "
-        "const before=boxes.map(b=>b.checked); "
-        "boxes[1].click(); boxes[0].click(); closeSampleMenu(); "
+        "const boxes=()=>Array.from(row().querySelectorAll('[data-a=smp]')); "
+        "boxes()[1].click(); boxes()[0].click(); "
         "const written=buildConfig().peaks.find(q=>q.label==='Curated solvent'); "
-        "const out={before, state:selState(p), samples:written?written.samples:null, "
-        "listed:!!written}; selAll(p); renderPeaks(); redraw(); return out; })()",
+        "const out={after:boxes().map(b=>b.classList.contains('on')), state:selState(p), "
+        "samples:written?written.samples:null, listed:!!written}; "
+        "selAll(p); renderPeaks(); redraw(); return out; })()",
     )
     _assert(
-        two_toggles["before"] == [True, False]
+        two_toggles["after"] == [False, True]
         and two_toggles["state"] == "some"
-        and two_toggles["samples"] == ["sample_02"],
-        "ticking one sample and unticking another in the same menu lost the compound: "
-        + str(two_toggles),
+        and two_toggles["samples"] == ["sample_02"]
+        and two_toggles["listed"],
+        "ticking one sample and unticking another lost the compound: " + str(two_toggles),
     )
 
     # --- the selected unit drives the sidebar values and the spectrum alike ---

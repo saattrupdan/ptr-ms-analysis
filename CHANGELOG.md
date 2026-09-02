@@ -9,11 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- The Peaks sidebar tick is now sample-specific: ticked means the compound is part
-  of every sample interval, a dash means some of them, and a ▾ menu picks the
-  individual intervals. A compound in only some samples records `samples` in the
-  config; a compound in every sample needs no new field, and the summary output is
-  unchanged either way.
+- The Peaks sidebar tick is now sample-specific and follows the **average over**
+  choice: with one sample selected it is that sample's own tick, with the whole run
+  selected it is the aggregate — ticked for every sample interval, empty for none, a
+  dash for some. Clicking the aggregate box only ever flicks it between ticked and
+  empty, so a dash becomes a full tick rather than a dead end. The Details view shows
+  one box per sample interval in every row, and the heading names the scope. A
+  compound in only some samples records `samples` in the config; a compound in every
+  sample needs no new field, and the summary output is unchanged either way.
 
 ### Changed
 
