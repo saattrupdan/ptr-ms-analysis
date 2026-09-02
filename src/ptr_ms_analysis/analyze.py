@@ -772,6 +772,61 @@ def _merge_overlapping_windows(peaks, R=1200.0, thresh=0.6):
     return out
 
 
+def auto_peaks(f, *, min_height=1e-3, max_peaks=300, mz_min=15.0, mz_max=None,
+               R=None, R_phys=None):
+    """Deterministic peak panel for a file: detect, annotate, drop instrument-noise
+    artifacts, collapse windows that coincide, and carry the suggested name.
+
+    Reagent/cluster diagnostic ions are kept (labelled) — they are real ions and an
+    untargeted panel usually wants them. Returns [] for a blank/no-beam file, which
+    must never be turned into a fabricated analyte list."""
+    R = 1200.0 if R is None else R
+    R_phys = 2400.0 if R_phys is None else R_phys
+    a, b = ptrms.load_mass_cal(f)
+    avg = np.where(
+        np.isfinite(f["SPECdata/AverageSpec"][:]), f["SPECdata/AverageSpec"][:], 0.0
+    )
+    if not assess_signal(f, avg=avg, a=a, b=b)["signal_present"]:
+        return []
+    peaks = detect_peaks(f, min_height, max_peaks, mz_min, mz_max, R_phys=R_phys)
+    _, peaks = annotate_peaks(peaks, avgspec=avg, a=a, b=b, R=R, R_phys=R_phys)
+    peaks = [p for p in peaks if not _is_noise_artifact(p.get("likely_artifact"))]
+    peaks = _merge_overlapping_windows(peaks, R=R)
+    out = []
+    for p in peaks:
+        sl = p.get("suggested_label", "") or ""
+        # a real name -> label the channel; an "unknown m/z X" -> leave blank so the
+        # CSV shows a clean `m<mz>` (the mass is already the variable name)
+        o = {"mz": p["mz"], "label": "" if sl.startswith("unknown m/z") else sl}
+        if p.get("suggested_formula"):  # near-certain composition -> carry it
+            o["formula"] = p["suggested_formula"]
+        out.append(o)
+    return out
+
+
+def auto_ranges(f, *, min_duration=30, grad_thr=0.02, high_gap=0, low_gap=200):
+    """Deterministic interval list: stable plateaus, consolidated, and named
+    `sample_NN` / `background_NN` in chronological order. The name carries the class,
+    which is what the analysis blanks against, so these labels are load-bearing."""
+    segs = ptrms.detect_segments(f, min_duration=min_duration, grad_thr=grad_thr)
+    segs = ptrms.merge_adjacent_segments(segs, high_gap=high_gap, low_gap=low_gap)
+    out = []
+    counts = {"high": 0, "low": 0}
+    for s in segs:
+        kind = s["class"]
+        counts[kind] += 1
+        prefix = "sample" if kind == "high" else "background"
+        out.append(
+            {
+                "label": f"{prefix}_{counts[kind]:02d}",
+                "start": s["start_cycle"],
+                "end": s["end_cycle"],
+                "unit": "cycle",
+            }
+        )
+    return out
+
+
 def _auto_peaks(f, args, R=None, R_phys=None):
     """Peaks for the --auto-peaks fallback: detect, annotate, DROP instrument-noise
     artifacts (ringing combs / low-prominence ripples), and carry each peak's
@@ -780,32 +835,15 @@ def _auto_peaks(f, args, R=None, R_phys=None):
     they are real ions, and an untargeted export usually wants them. Hand-curating a
     config still gives finer chemistry and segment judgment; this is a safe default,
     not a substitute for it."""
-    R = R if R is not None else (getattr(args, "R", None) or 1200.0)
-    R_phys = R_phys if R_phys is not None else (getattr(args, "R_phys", None) or 2400.0)
-    a, b = ptrms.load_mass_cal(f)
-    avg = np.where(
-        np.isfinite(f["SPECdata/AverageSpec"][:]), f["SPECdata/AverageSpec"][:], 0.0
+    return auto_peaks(
+        f,
+        min_height=args.min_height,
+        max_peaks=args.max_peaks,
+        mz_min=args.mz_min,
+        mz_max=args.mz_max,
+        R=R,
+        R_phys=R_phys,
     )
-    if not assess_signal(f, avg=avg, a=a, b=b)["signal_present"]:
-        return []  # blank/no-beam file: nothing to extract
-    peaks = detect_peaks(
-        f, args.min_height, args.max_peaks, args.mz_min, args.mz_max, R_phys=R_phys
-    )
-    _, peaks = annotate_peaks(peaks, avgspec=avg, a=a, b=b, R=R, R_phys=R_phys)
-    peaks = [p for p in peaks if not _is_noise_artifact(p.get("likely_artifact"))]
-    # collapse near-duplicate peaks whose integration windows almost coincide
-    peaks = _merge_overlapping_windows(peaks, R=R)
-    out = []
-    for p in peaks:
-        sl = p.get("suggested_label", "") or ""
-        # a real name -> label the channel; an "unknown m/z X" -> leave blank so the
-        # CSV shows a clean `m<mz>` (the mass is already the variable name)
-        lbl = "" if sl.startswith("unknown m/z") else sl
-        o = {"mz": p["mz"], "label": lbl}
-        if p.get("suggested_formula"):  # near-certain composition -> carry it
-            o["formula"] = p["suggested_formula"]
-        out.append(o)
-    return out
 
 
 def _load_peaks(args, f, settings=None):
@@ -832,27 +870,7 @@ def _load_ranges(args, f):
         if cfg.get("ranges"):
             return cfg["ranges"]
     if getattr(args, "auto_segments", False):
-        segs = ptrms.detect_segments(f)
-        # always consolidate fragmented backgrounds; merge samples only if asked
-        segs = ptrms.merge_adjacent_segments(
-            segs, high_gap=getattr(args, "merge_high_gap", 0) or 0, low_gap=200
-        )
-        out = []
-        counts = {"high": 0, "low": 0}
-        for s in segs:
-            kind = s["class"]
-            counts[kind] += 1
-            prefix = "sample" if kind == "high" else "background"
-            lbl = f"{prefix}_{counts[kind]:02d}"
-            out.append(
-                {
-                    "label": lbl,
-                    "start": s["start_cycle"],
-                    "end": s["end_cycle"],
-                    "unit": "cycle",
-                }
-            )
-        return out
+        return auto_ranges(f, high_gap=getattr(args, "merge_high_gap", 0) or 0)
     return None
 
 
