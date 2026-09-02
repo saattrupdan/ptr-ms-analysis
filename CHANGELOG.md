@@ -36,6 +36,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   mass, and a label naming a different formula than the assigned one is flagged.
 - Interval labels must be unique, because they key the per-sample selection.
 
+### Fixed
+
+- ↑/↓ move the peak selection down and up the order the sidebar is showing. They had
+  always walked the stored m/z order, so with the list sorted by abundance or label
+  they jumped to compounds that were nowhere near the highlighted row.
+- The Raw / Corrected / Conc / µg buttons now sit in the same place on both tabs: the
+  x-axis selector moved to the right-hand slot that **average over** occupies on the
+  Mass spectrum tab, and a long interval list can no longer squeeze the tab buttons
+  sideways as a side effect.
+
 ## [0.4.0] - 2026-08-24
 
 ### Added

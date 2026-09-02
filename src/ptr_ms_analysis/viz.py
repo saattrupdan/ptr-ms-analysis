@@ -640,7 +640,12 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   .row+.row{margin-top:10px}
   label.ctl{color:var(--mut);font-size:12px;display:inline-flex;gap:7px;align-items:center}
-  #specrangewrap{margin-left:auto!important}
+  /* the header's flexible spacer right-aligns both plot selectors; the left group is
+     pinned so the unit tabs cannot slide when a tab changes the width of the
+     selector on the right, which is what a shrinking flex row would otherwise do */
+  #maintabs,#qtabs{flex:0 0 auto}
+  .card h2 label.ctl{min-width:0}
+  .card h2 label.ctl select{min-width:70px}
   /* professional inputs */
   input[type=text],input[type=number],select{
     background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:8px;
@@ -914,11 +919,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
         <button data-tab="spec">Mass spectrum</button>
       </span>
       <span class="sub" id="plotsub"></span>
-      <label class="ctl" id="xaxiswrap" style="margin-left:4px">x-axis
-        <select id="xaxisunit" style="width:auto"></select></label>
-      <!-- the unit tabs sit with the other plot controls so that 'average over'
-           (Mass spectrum) and the x-axis selector (Signal over time) keep the
-           right-hand slot they have always had -->
+      <!-- the unit tabs and the plot controls they belong to: the selector for this
+           tab's axis goes on the right in both tabs, so Raw/Corrected/Conc/µg keeps
+           exactly the same slot whichever tab is open -->
       <span class="tabs" id="qtabs">
         <button data-q="raw" class="on">Raw</button>
         <button data-q="cor">Corrected</button>
@@ -926,7 +929,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
         <button data-q="ug">Conc µg</button>
       </span>
       <span class="grow"></span>
-      <label class="ctl" id="specrangewrap" style="margin-left:4px">average over
+      <label class="ctl" id="xaxiswrap">x-axis
+        <select id="xaxisunit" style="width:auto"></select></label>
+      <label class="ctl" id="specrangewrap">average over
         <select id="specrange" style="width:auto"></select></label>
     </h2>
     <canvas id="plot" data-h="540"></canvas>
@@ -2432,12 +2437,15 @@ document.addEventListener("keydown",e=>{
   if(e.key==="Escape"){ if(tourArr){ endTour(); return; } closePanels(); if(themeMenu) themeMenu.hidden=true; return; }
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="z"){ e.preventDefault(); undo(); return; }
   // ↑/↓ move the peak selection to the previous/next compound in the sidebar
+  // ↑/↓ move the peak selection to the previous/next compound in the sidebar, which
+  // means the *displayed* order - m/z, abundance or label - not the stored one
   if(!typing && (e.key==="ArrowDown"||e.key==="ArrowUp") && peaks.length){
     e.preventDefault();
-    const i=peaks.findIndex(p=>p.id===selId);
-    const ni = i<0 ? (e.key==="ArrowDown"?0:peaks.length-1)
-      : (e.key==="ArrowDown"?Math.min(peaks.length-1,i+1):Math.max(0,i-1));
-    const np=peaks[ni]; if(np){ selectPeak(np);
+    const order=orderedPeaks();
+    const i=order.findIndex(p=>p.id===selId);
+    const ni = i<0 ? (e.key==="ArrowDown"?0:order.length-1)
+      : (e.key==="ArrowDown"?Math.min(order.length-1,i+1):Math.max(0,i-1));
+    const np=order[ni]; if(np){ selectPeak(np);
       const box=document.getElementById("peaksbody");
       const li=box&&box.querySelectorAll("li")[ni]; if(li) li.scrollIntoView({block:"nearest"}); }
     return; }

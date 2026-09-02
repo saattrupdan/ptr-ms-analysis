@@ -973,6 +973,91 @@ def _review_round_browser_pass(session: str) -> None:
         "ticking one sample and unticking another lost the compound: " + str(two_toggles),
     )
 
+    # --- arrow keys walk the list the user is looking at, not the stored order ---
+    nav = _eval(
+        session,
+        "(() => { const set=o => { peakOrder=o; "
+        "document.getElementById('pkorder').value=o; renderPeaks(); "
+        "return [...document.querySelectorAll('#peaksbody li .lbl')].map(i=>i.value); }; "
+        "const walk=o => { set(o); selId=orderedPeaks()[0].id; const seen=[]; "
+        "for(let i=0;i<3;i++){ seen.push((peaks.find(p=>p.id===selId)||{}).label); "
+        "document.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})); } "
+        "return seen; }; "
+        "const lists={}, walks={}; "
+        "for(const o of ['mz','abundance','label']){ lists[o]=set(o); walks[o]=walk(o); } "
+        "peakOrder='mz'; document.getElementById('pkorder').value='mz'; renderPeaks(); "
+        "return {lists, walks}; })()",
+    )
+    for order in ("mz", "abundance", "label"):
+        _assert(
+            nav["walks"][order] == nav["lists"][order][:3],
+            "arrow-down does not follow the {} order: {} down a list of {}".format(
+                order,
+                nav["walks"][order],
+                nav["lists"][order],
+            ),
+        )
+    _assert(
+        nav["lists"]["abundance"] != nav["lists"]["mz"]
+        and nav["lists"]["label"] != nav["lists"]["mz"],
+        "the fixture orders are indistinguishable, so the arrow test proves nothing",
+    )
+
+    # --- the unit selector keeps its slot across the two tabs, and whichever axis
+    # selector belongs to the tab sits on the right ---
+    header = _eval(
+        session,
+        "(() => { const q=document.querySelector('#qtabs'); const headEl=q.closest('h2'); "
+        "const head=headEl.getBoundingClientRect(); "
+        "const go=t => { document.querySelector('#maintabs button[data-tab='+t+']')"
+        ".click(); return Math.round(q.getBoundingClientRect().left); }; "
+        "const onTrace=go('trace'); "
+        "const xa=document.getElementById('xaxiswrap').getBoundingClientRect(); "
+        "const afterUnit=xa.left>q.getBoundingClientRect().right; "
+        "const onSpec=go('spec'); "
+        "const sr=document.getElementById('specrangewrap').getBoundingClientRect(); "
+        "/* squeeze the header: only a pinned left group can refuse to shrink when "
+        "nothing else on the line can give any more */ "
+        "const sel=document.getElementById('specrange'), keep=sel.style.minWidth; "
+        "sel.style.minWidth='1400px'; "
+        "const tightTrace=go('trace'), tightSpec=go('spec'); "
+        "sel.style.minWidth=keep; go('trace'); "
+        "return {onTrace, onSpec, tightTrace, tightSpec, afterUnit, "
+        "pinned:[...document.querySelectorAll('#maintabs,#qtabs')]"
+        ".every(el=>getComputedStyle(el).flexShrink==='0'), "
+        "xaxisGapFromRight:head.right-xa.right, specGapFromRight:head.right-sr.right}; })()",
+    )
+    _assert(
+        abs(header["onTrace"] - header["onSpec"]) <= 1,
+        "the Raw/Corrected/Conc selector shifts between the two tabs: "
+        "{} px vs {} px".format(header["onTrace"], header["onSpec"]),
+    )
+    _assert(
+        header["pinned"],
+        "the tab groups are free to shrink, so their slot depends on what else is "
+        "on the header line: " + str(header),
+    )
+    _assert(
+        abs(header["tightTrace"] - header["onTrace"]) <= 1
+        and abs(header["tightSpec"] - header["onSpec"]) <= 1,
+        "a cramped header slides the unit selector sideways: {} px vs {} px on the "
+        "trace tab, {} px vs {} px on the spectrum tab".format(
+            header["tightTrace"],
+            header["onTrace"],
+            header["tightSpec"],
+            header["onSpec"],
+        ),
+    )
+    _assert(
+        header["afterUnit"] and header["xaxisGapFromRight"] <= 24,
+        "the x-axis selector is not in the right-hand slot on the trace tab: "
+        + str(header),
+    )
+    _assert(
+        header["specGapFromRight"] <= 24,
+        "'average over' is no longer flush right: " + str(header),
+    )
+
     # --- the selected unit drives the sidebar values and the spectrum alike ---
     # Details stays open: the abundance cells and the pills only render there
     _browser(
