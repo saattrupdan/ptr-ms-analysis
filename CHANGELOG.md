@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **App mode: `ptr app`.** A persistent local review app for people who want the tool
+  rather than the chat. It opens on a start screen of recent files, takes a file from
+  there, and stays up between files. Each file's config lives beside it under the same
+  stem (`ptr.h5` → `ptr.json`, with an existing `<stem>-analysis-config.json` honoured),
+  so reopening a reviewed file returns exactly what was saved; a file that has never been
+  reviewed gets the deterministic peak and interval pipeline written to that path, with a
+  checklist that says plainly that nothing has been curated yet and which calls are still
+  a human's. The primary button is **Export** instead of Done: it writes `<stem>.csv`
+  beside the file and leaves the app open for more work. With `--agent URL` (or
+  `PTR_AGENT_URL`) a newly generated config is offered to an agent for curation first,
+  and the deterministic config is kept — visibly — whenever that endpoint is missing,
+  slow or unhelpful. The server binds to 127.0.0.1 and the only outbound request is to
+  the endpoint the user named.
+- `analyze.auto_peaks` / `analyze.auto_ranges`: the detection pipeline is now callable
+  without argparse, which is what lets the app build a config on the user's behalf.
 - The Peaks sidebar tick is now sample-specific and follows the **average over**
   choice: with one sample selected it is that sample's own tick, with the whole run
   selected it is the aggregate — ticked for every sample interval, empty for none, a

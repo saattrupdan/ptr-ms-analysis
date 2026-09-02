@@ -1321,6 +1321,29 @@ def cmd_viz(args):
         )
 
 
+def cmd_app(args):
+    """Run the persistent local review app, blocking until interrupted.
+
+    This is the mode for a user at a desk rather than an agent: the server stays up
+    between files, opening a file loads the config saved beside it or runs the
+    deterministic pipeline to make one, and exporting writes the CSV without shutting
+    anything down.
+    """
+    from . import app as app_mode
+
+    if args.h5 and not os.path.isfile(args.h5):
+        raise SystemExit(f"ptr: file not found: {args.h5}")
+    agent = args.agent or os.environ.get("PTR_AGENT_URL")
+    app_mode.serve_app(
+        port=args.port,
+        open_browser=not args.no_browser,
+        agent_url=agent,
+        agent_timeout=args.agent_timeout,
+        initial=args.h5,
+    )
+    return 0
+
+
 def cmd_rates(args):
     """Look up / list proton-transfer rate constants."""
     tbl = ptrms.load_rate_constants()
@@ -1980,6 +2003,35 @@ def main():
     pv.add_argument("--per-interval", dest="no_per_interval", action="store_false")
     pv.add_argument("--molar-volume", type=float, default=None)
     pv.set_defaults(func=cmd_viz)
+
+    pap = sub.add_parser(
+        "app",
+        help="Run the persistent review app; open files from its own start screen",
+    )
+    pap.add_argument("h5", nargs="?", help="Open this file immediately (optional)")
+    pap.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="Port for the localhost server (default 8765)",
+    )
+    pap.add_argument(
+        "--agent",
+        default=None,
+        help="URL to post a freshly detected config to for curation; the "
+        "deterministic config is kept if the endpoint fails (or set PTR_AGENT_URL)",
+    )
+    pap.add_argument(
+        "--agent-timeout",
+        dest="agent_timeout",
+        type=float,
+        default=300.0,
+        help="Seconds to wait for the agent endpoint (default 300)",
+    )
+    pap.add_argument(
+        "--no-browser", action="store_true", help="Do not open a browser window"
+    )
+    pap.set_defaults(func=cmd_app)
 
     pr = sub.add_parser(
         "rates",

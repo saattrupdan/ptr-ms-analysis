@@ -51,6 +51,29 @@ ptr compare   results.csv viewer.csv --per-mass   # accuracy vs a Viewer export
 ptr rates     benzaldehyde                # browse proton-transfer rate constants (k)
 ```
 
+### App mode — `ptr app`
+
+`ptr app` is the same review UI as a program you live in rather than a command you run
+once per file: one server that stays up, files opened from its own start screen, and
+**Export** where the CLI has Done.
+
+```bash
+ptr app                        # start screen: recent files, or type a path
+ptr app FILE.h5 --no-browser   # open one file immediately
+ptr app --port 8791            # fixed port (it probes upward if the port is taken)
+ptr app --agent URL            # let an agent curate a newly detected config
+```
+
+Each file's config sits beside it under the same name: `ptr.h5` → `ptr.json`. A
+`ptr-analysis-config.json` left by the CLI flow is found automatically, so a file that
+has been reviewed before reopens exactly as it was saved. A file that has never been
+reviewed gets the deterministic pipeline — detected peaks, detected intervals, honest
+checklist — written to that path and then loaded, so the panel starts as a starting
+point rather than an empty table. **Export** runs the full-precision analysis to
+`<name>.csv` beside the file and leaves everything open; nothing in app mode shuts the
+app down. Opening another file closes the current one, since a large run holds its
+data in memory.
+
 `viz` opens a browser review app for an existing peak list + ranges so an expert can
 visually check and tweak peaks / segments / calibration. K, molar volume, kinetic and
 humidity controls, R windowing, and peak/interval edits recompute from embedded preview

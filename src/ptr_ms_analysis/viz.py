@@ -387,11 +387,18 @@ def build_viz_data(
     }
 
 
-def render_html(data, config_path=None):
+def render_html(data, config_path=None, mode="review"):
+    """Render the review page.
+
+    ``mode="app"`` is the persistent app's page: the primary button exports and the
+    server stays up, instead of Done shutting the one-shot review down.
+    """
     payload = json.dumps(data, separators=(",", ":"))
     _validate_embedded_absolute_axis(payload)
-    return _TEMPLATE.replace("/*__DATA__*/", payload).replace(
-        "/*__CFGPATH__*/", json.dumps(config_path or "")
+    return (
+        _TEMPLATE.replace("/*__DATA__*/", payload)
+        .replace("/*__CFGPATH__*/", json.dumps(config_path or ""))
+        .replace("/*__APPMODE__*/", json.dumps(bool(mode == "app")))
     )
 
 
@@ -1120,6 +1127,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
 const DATA = /*__DATA__*/;
 const CFGPATH = /*__CFGPATH__*/;
 const SERVED = location.protocol.indexOf("http") === 0;
+// App mode: one long-lived server, so the primary action exports and keeps going.
+const APPMODE = /*__APPMODE__*/;
 const M = DATA.meta, PC = DATA.per_cycle, SPEC = DATA.spectrum;
 const A = M.a, B = M.b, NCYC = M.ncyc, NBIN = SPEC.length;
 const m2tb = m => A*Math.sqrt(m)+B;
@@ -2217,7 +2226,7 @@ function scheduleSave(){ if(!SERVED) return; setStat("saving…");
     headers:{"Content-Type":"application/json"},body:JSON.stringify(buildConfig())})
     .then(()=>setStat("saved ✓")).catch(()=>setStat("save failed")); },500); }
 function setStat(s){ const el=document.getElementById("savestat"); if(el) el.textContent=s; }
-function submitDone(){
+function submitRun(isExport){
   const ov=document.createElement("div"); ov.id="doneov";
   ov.innerHTML='<div class="ovcard"><div class="spinner"></div>'+
     '<h2 id="ovtitle">Running the analysis…</h2>'+
@@ -2234,32 +2243,41 @@ function submitDone(){
   const ackNow=()=>{ try{ if(navigator.sendBeacon) navigator.sendBeacon("/ack"); }catch(e){} };
   const poll=setInterval(()=>{ fetch("/status").then(r=>r.json()).then(st=>{
     if(st.status==="done"){
-      const openBtn=st.out?'<button class="primary" id="openclose" style="margin:16px 0 6px">Open results &amp; close tab</button>':'';
+      // the app never exits on its own, so the button reveals the file instead of
+      // the tab closing; the one-shot review keeps its original wording.
+      const btn=st.out?(isExport
+        ?'<button class="primary" id="openclose" style="margin:16px 0 6px">Show the CSV in the folder</button>'
+        :'<button class="primary" id="openclose" style="margin:16px 0 6px">Open results &amp; close tab</button>'):'';
       finish('<div class="check">✓</div><h2>Results ready</h2>'+
         '<p class="mut">The full-precision analysis is complete'+
         (st.out?' and was written to<br><code>'+st.out+'</code>':'')+'.</p>'+
-        openBtn+
-        '<p class="mut" style="font-size:12px">'+(st.out?'…or just ':'You can ')+'close this tab when you’re done.</p>');
+        btn+
+        '<p class="mut" style="font-size:12px">'+(isExport
+          ?'The app stays open — keep reviewing, and export again when you change something.'
+          :((st.out?'…or just ':'You can ')+'close this tab when you’re done.</p>')));
       const ob=document.getElementById("openclose");
       if(ob) ob.onclick=()=>{ ob.disabled=true; ob.textContent="Opening…";
         // open the file first and wait for the server's confirmation; only report
         // success once it actually launched. Browsers block window.close() on a tab
         // they opened (not script-opened), so we don't depend on it — we tell the
         // user they can close the tab, and try close() as a best-effort convenience.
-        fetch("/open",{method:"POST"}).then(r=>r.json()).catch(()=>({ok:false})).then(res=>{
+        fetch(isExport?"/reveal":"/open",{method:"POST"}).then(r=>r.json()).catch(()=>({ok:false})).then(res=>{
           if(res&&res.ok){ ob.textContent="Opened ✓ — you can close this tab";
-            setTimeout(()=>{ try{window.close()}catch(e){} },300); }
+            if(!isExport) setTimeout(()=>{ try{window.close()}catch(e){} },300); }
           else { ob.disabled=false; ob.textContent="Couldn’t open automatically — open it from: ";
             const code=document.createElement("code"); code.textContent=st.out||""; ob.after(code); } }); };
       // if the user just closes the tab (never clicks Open), let the CLI finish.
-      window.addEventListener("pagehide",ackNow); window.addEventListener("beforeunload",ackNow);
+      if(!isExport){
+        window.addEventListener("pagehide",ackNow); window.addEventListener("beforeunload",ackNow);
+      }
     }
     else if(st.status==="error"){ finish('<div class="xmark">!</div><h2>Analysis failed</h2>'+
       '<p class="mut">'+(st.error||"Unknown error")+'</p>'+
-      '<p class="mut" style="font-size:12px">Your edits were saved to the config; re-run from the terminal.</p>');
+      '<p class="mut" style="font-size:12px">Your edits are saved in the config'+
+      (isExport?'; fix the cause and export again.':'; re-run from the terminal.')+'</p>');
       ackNow(); }
   }).catch(()=>{}); },600);
-  fetch("/done",{method:"POST",headers:{"Content-Type":"application/json"},
+  fetch(isExport?"/export":"/done",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify(buildConfig())}).catch(()=>{});
 }
 function download(name,text){ const bl=new Blob([text],{type:"application/json"});
@@ -2729,13 +2747,21 @@ if(cfghelp) cfghelp.innerHTML=SERVED
   : "Values that can't be set by interacting with the plot. R, K, molar volume, and correction controls update the preview; primary m/z, R<sub>phys</sub>, and window mode are included in Download config for raw-file re-extraction.";
 updateCalNote();
 const erow=document.getElementById("exportrow");
-if(SERVED){ const b=document.createElement("button"); b.className="primary"; b.textContent="Done";
-  b.onclick=submitDone; erow.appendChild(b); setStat("saved ✓");
-  b.title="Changes save automatically"+(CFGPATH?` to ${CFGPATH}`:"")+
-    ". Click to run the full-precision analysis and export the CSV.";
+if(SERVED){ const b=document.createElement("button"); b.className="primary";
+  b.textContent=APPMODE?"Export":"Done";
+  b.onclick=()=>submitRun(APPMODE); erow.appendChild(b); setStat("saved ✓");
+  b.title=(APPMODE
+    ? "Edits save automatically"+(CFGPATH?` to ${CFGPATH}`:"")+
+      ". Export runs the full-precision analysis and writes the CSV next to the file, and the app stays open."
+    : "Changes save automatically"+(CFGPATH?` to ${CFGPATH}`:"")+
+      ". Click to run the full-precision analysis and export the CSV.");
 } else { const b=document.createElement("button"); b.className="primary"; b.textContent="Download config";
   b.onclick=()=>download("config.json",JSON.stringify(buildConfig(),null,2)); erow.appendChild(b);
   b.title="Hand this config back to the agent; it re-runs the analysis at full precision."; }
+if(APPMODE){ const hdr=document.querySelector("header");
+  const a=document.createElement("a"); a.className="hbtn"; a.href="/"; a.textContent="Open another file";
+  a.title="Nothing is lost: this file's config is already saved, and opening another file closes this one.";
+  const grow=hdr.querySelector(".grow"); hdr.insertBefore(a,grow); }
 renderXAxis();
 initSpecView(); clampView(); renderPeaks(); renderRanges();
 // initial mass-spectrum view: zoomed onto the first compound rather than the whole range

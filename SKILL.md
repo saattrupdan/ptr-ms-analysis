@@ -60,6 +60,11 @@ offer a standards calibration; do not suggest the Viewer as the answer.
 
 - **Everything is one CLI: `ptr <subcommand> …`.** Install it once (below); then call plain
   `ptr` from any directory — no path prefix, no env var.
+- **The user may prefer to drive the review themselves** with `ptr app` (§5c): one
+  long-lived localhost app that opens files from its own start screen, keeps each file's
+  config beside the `.h5`, and exports without exiting. Use it when the user wants the
+  tool rather than the chat; keep `ptr viz` for the agent-driven flow below, where you
+  curate a config and hand over a URL.
 - **Install once, first thing.** If `ptr` is not already on PATH (`command -v ptr`; on
   Windows PowerShell `Get-Command ptr`), run:
 
@@ -505,6 +510,42 @@ a name/formula conflict in the sidebar and the Identification card rather than b
 presented as an identification, and the Mass spectrum's "Average over" list tracks
 interval renames, colour changes and resizes, so a renamed interval is never offered
 under its old name.
+
+### 5c. App mode (`ptr app`) — the reviewer works in the tool, not in chat
+
+`ptr app` keeps one review server up and lets the user open files inside it:
+
+```bash
+ptr app                       # start screen: recent files, or type an absolute path
+ptr app FILE.h5 --no-browser  # open one file immediately (background it: ~30-90 s for 2 GB)
+ptr app --agent URL           # have an agent curate a newly detected config
+```
+
+- **The config lives beside the h5 file, same stem**: `ptr.h5` → `ptr.json`. An existing
+  `<stem>-analysis-config.json` is used when there is no `<stem>.json`, so a file
+  reviewed through the CLI reopens exactly as it was left. A same-stem JSON that is not a
+  ptr config is never overwritten — the app writes `<stem>.ptr.json` instead.
+- **Opening a never-reviewed file runs the deterministic pipeline** (the same detection
+  as `--auto-peaks`/`--auto-segments`) and writes that config before loading it. The
+  checklist it carries states that nothing has been curated yet, what was detected, and
+  which calls remain the reviewer's. A file with no beam is labelled as one rather than
+  presented as an empty panel.
+- **The optional agent endpoint** (`--agent URL`, or the `PTR_AGENT_URL` environment
+  variable) is posted the generated config as
+  `{"file": …, "config": …, "diagnostics": {n_peaks, n_ranges, ncyc, instrument}}` and
+  may answer with a bare config or `{"config": …}`. Any failure — unreachable, timeout,
+  or a reply with no peaks or ranges — keeps the deterministic config and says so in the
+  UI, so an offline agent never costs the user a file.
+- **Export replaces Done**: it runs the full-precision analysis to `<stem>.csv` beside
+  the file and leaves the app open, so the reviewer can keep working and export again.
+  Nothing in app mode exits the process; Ctrl-C does.
+- One file is open at a time (opening another closes the first, since a 2 GB run holds
+  its traces in memory), recents live in `~/.ptr-ms/recent.json`, and the server binds to
+  127.0.0.1 — nothing is uploaded anywhere.
+
+App mode does not replace the agent-driven flow. When you are the one curating, keep
+using `peaks` + `segments` → your config → `ptr viz`, where the review's Done ends the
+run and writes the CSV that was asked for.
 
 ### 6. Calibrate concentration when accurate ppb/µg matters
 
