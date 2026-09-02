@@ -783,8 +783,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .plist .dc.kv{min-width:50px;text-align:right}
   .plist .dc.win{min-width:92px;text-align:right}
   .plist .dc.pills{display:flex;gap:4px;flex:0 0 var(--tag-width,1px);min-width:var(--tag-width,1px);overflow:visible}
-  .plist .dc.smpsel{flex:0 1 auto;display:flex;flex-wrap:wrap;justify-content:flex-start;
-    gap:3px 2px;max-width:140px}
+  .plist .dc.smpsel{flex:0 0 auto;display:grid;justify-content:start;gap:3px 2px}
   .plist .chip{width:17px;height:16px;padding:0;font-size:8.5px;line-height:14px;text-align:center;cursor:pointer;
     border:1px solid var(--line);border-radius:4px;background:transparent;color:var(--mut);
     -webkit-appearance:none;appearance:none}
@@ -1928,7 +1927,10 @@ function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box)
         `<span class="dc dmda ${dmda!=null&&Math.abs(dmda)>10?'warn':''}" title="mass error vs nearest known compound">${dmda!=null?((dmda>=0?'+':'')+dmda.toFixed(1)+' mDa'):'—'}</span>`+
         `<span class="dc kv" title="proton-transfer rate constant (~ = estimated)">${p.k?('k '+(+p.k).toFixed(2)+(p.k_estimated?'~':'')):'k —'}</span>`+
         `<span class="dc win" title="integration half-widths — drag the dashed handles in the spectrum">−${p.winL.toFixed(3)}/+${p.winR.toFixed(3)}${p.winManual?'*':''}</span>`+
-        `<span class="dc smpsel" title="one box per sample interval — click a box to change that sample only">`+
+        // one row of boxes for the usual handful of samples, wrapped only past 12 so
+        // a long campaign cannot make every row a paragraph
+        `<span class="dc smpsel" style="grid-template-columns:repeat(${Math.min(sampleIntervals().length,12)},17px)"`+
+        ` title="one box per sample interval — click a box to change that sample only">`+
         sampleIntervals().map((r,i)=>`<button class="chip${selState(p,r)==="all"?" on":""}`+
           `${r._id===(scope&&scope._id)?" cur":""}" data-a="smp" data-smp="${r._id}" `+
           `title="${esc(r.label)} (cycles ${r.start}–${r.end}): `+
