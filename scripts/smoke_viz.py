@@ -973,6 +973,101 @@ def _review_round_browser_pass(session: str) -> None:
         "ticking one sample and unticking another lost the compound: " + str(two_toggles),
     )
 
+    # --- the interval in scope and its class are editable from the sidebar, in either
+    # tab, and reclassifying must be reversible ---
+    scope = _eval(
+        session,
+        "(() => { const p=peaks.find(q=>q.label==='Curated solvent'); "
+        "p.samples=sampleLabels().slice(); renderPeaks();  /* in both, recorded by hand */ "
+        "const before=JSON.stringify(buildConfig()); "
+        "const sel=document.getElementById('scoperange'); "
+        "const r=ranges.find(x=>x.label==='sample_02'); "
+        "sel.value='i'+r._id; sel.dispatchEvent(new Event('change')); "
+        "const mirror=document.getElementById('specrange').value==='i'+r._id; "
+        "const badge=document.getElementById('pkscope').textContent.trim(); "
+        "const chips=Array.from(document.querySelectorAll('#scopechips .chip'))"
+        ".map(b=>b.classList.contains('on')); "
+        "document.querySelector('#scopeclass button[data-c=background]').click(); "
+        "const off={cls:r.class, label:r.label, "
+        "saved:buildConfig().ranges.some(q=>q.label===r.label), "
+        "table:(document.querySelector('#rngtbl tbody tr.sel select')||{}).value, "
+        "on:[...document.querySelectorAll('#scopeclass button.on')].map(b=>b.dataset.c)}; "
+        "document.querySelector('#scopeclass button[data-c=sample]').click(); "
+        "const w=buildConfig().peaks.find(q=>q.label==='Curated solvent'); "
+        "return {mirror, badge, chips, off, "
+        "clsBack:r.class, labelBack:r.label, "
+        "samples:(w && 'samples' in w) ? w.samples : null, "
+        "untouched:JSON.stringify(buildConfig())===before}; })()",
+    )
+    _assert(
+        scope["mirror"] and scope["badge"] == "\u00b7 sample_02",
+        "the sidebar scope row does not follow the interval it names: " + str(scope),
+    )
+    _assert(
+        scope["chips"] == [True, True],
+        "the sidebar's per-sample boxes are not showing the compound's state: "
+        + str(scope),
+    )
+    # the class is carried by the interval name, which is what the analysis blanks on,
+    # so a class switch that did not rename would be lost on save
+    _assert(
+        scope["off"]["cls"] == "background"
+        and str(scope["off"]["label"]).startswith("background")
+        and scope["off"]["saved"]
+        and scope["off"]["table"] == "background"
+        and scope["off"]["on"] == ["background"],
+        "reclassifying from the sidebar did not rename the interval for the analysis: "
+        + str(scope["off"]),
+    )
+    _assert(
+        scope["clsBack"] == "sample" and scope["labelBack"] == "sample_02"
+        and scope["untouched"] and scope["samples"] is None,
+        "classing an interval background and back changed the config: " + str(scope),
+    )
+
+    # --- the faint composite VOC curve names itself and can be switched off ---
+    disc = _eval(
+        session,
+        "(() => { const b=document.getElementById('legDisc'); "
+        "const label=b.textContent.trim(); b.click(); "
+        "const off={state:showDisc, cfg:buildConfig().viz.show_disc, "
+        "aria:b.getAttribute('aria-pressed')}; "
+        "b.click(); return {label, off, on:showDisc, "
+        "cfgOn:buildConfig().viz.show_disc}; })()",
+    )
+    _assert(
+        "own scale" in disc["label"],
+        "the composite VOC legend does not say the curve is on its own scale: "
+        + str(disc),
+    )
+    _assert(
+        disc["off"]["state"] is False and disc["off"]["cfg"] is False
+        and disc["off"]["aria"] == "false" and disc["on"] is True
+        and disc["cfgOn"] is True,
+        "the composite VOC legend is not a working switch: " + str(disc),
+    )
+
+    # --- the context card shrinks as far as it is asked to, on a tall window ---
+    was_size = _eval(session, "({w:window.innerWidth, h:window.innerHeight})")
+    _browser(session, "set", "viewport", "1280", "1400")
+    split = _eval(
+        session,
+        "(() => { const keep=plotHeight; plotHeight=1e9; relayout(); "
+        "const ctx=document.getElementById('intcard'); "
+        "const head=ctx.querySelector('h2').offsetHeight; "
+        "const out={plot:+plotC.dataset.h, body:ctx.offsetHeight-head, min:MIN_CONTEXT_HEIGHT, "
+        "max:Number(plotResize.getAttribute('aria-valuemax'))}; "
+        "plotHeight=keep; relayout(); return out; })()",
+    )
+    _browser(
+        session, "set", "viewport", str(was_size["w"]), str(was_size["h"])
+    )
+    _assert(
+        split["plot"] > 560 and split["body"] <= split["min"] + 4
+        and abs(split["max"] - split["plot"]) <= 1,
+        "the plot stops growing before the card below is full: " + str(split),
+    )
+
     # --- arrow keys walk the list the user is looking at, not the stored order ---
     nav = _eval(
         session,

@@ -139,6 +139,23 @@ labels it belongs to:
 A compound selected for at least one sample is still part of the summary output exactly
 as before; the per-sample distinction is stored so per-sample output can build on it.
 
+Above the compound list the sidebar carries the **interval** the tick boxes and the Mass
+spectrum both speak about, with a **sample / background** switch beside it. It is the
+same choice as the class column in the Intervals card, but reachable whichever tab is
+open. Because the analysis blanks against `background_*` by name, switching class also
+renames the interval (`sample_07` → `background_05`) and moves the recorded `samples`
+labels with it; the name is the part that is saved, so a switch that renamed nothing
+would be lost on save. Switching the class back restores the previous name and the
+previous per-compound membership.
+
+The faint curve behind the Signal over time trace is the **composite VOC signal**: the
+mean of the strong m/z 40–200 traces, each divided by its own median so no single ion
+dominates. It sits near 1 while the instrument sees background and rises over a sample,
+and `ptr segments` places the intervals from it. It is a detector for *when* signal is
+present, not a concentration, and it is drawn against its own maximum rather than the
+axis it sits on. Its legend entry says so and doubles as a switch, remembered as
+`viz.show_disc`.
+
 An analysis config may include an `analyze` object with `R`, `R_phys`, `K`,
 `molar_volume`, `primary_mz`, `kinetic`, `k_anchor`, `humidity_correct`, `humidity_p`,
 `humidity_ref`, and `whole_run_windows`. Omitted CLI options do not replace these

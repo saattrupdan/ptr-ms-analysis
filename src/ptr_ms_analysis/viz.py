@@ -625,6 +625,22 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .pkcontrols .pkorder{flex-direction:row;align-items:center;gap:5px;text-align:left}
   .pkheadbtn{padding:4px 7px;font-size:10px}
   .pktitle .scope{font-size:10px;font-weight:400;color:var(--mut)}
+  /* the interval in scope, and its class, belong to the tick boxes rather than to one
+     tab, so they live in the always-visible Peaks sidebar */
+  .scoperow{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;padding:6px 12px;
+            border-bottom:1px solid var(--line);font-size:11px;color:var(--mut)}
+  .scoperow[hidden]{display:none}
+  .scoperow label.ctl{flex:1 1 auto;min-width:0;display:inline-flex;align-items:center;gap:5px}
+  .scoperow select{padding:4px 6px;font-size:11px;width:100%;min-width:0}
+  .scoperow .mini{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .scoperow .smpsel{flex:0 0 auto}
+  .scoperow .tabs{display:inline-flex;gap:2px}
+  .scoperow .tabs button{padding:3px 8px;font-size:10.5px;border:1px solid var(--line);
+            background:transparent;color:var(--mut);border-radius:6px;cursor:pointer}
+  .scoperow .tabs button:hover{border-color:var(--hi);color:var(--fg)}
+  .scoperow .tabs button.on{border-color:var(--hi);color:var(--bg);font-weight:600}
+  .scoperow .tabs button.on[data-c="sample"]{background:#f59e0b}
+  .scoperow .tabs button.on[data-c="background"]{background:#64748b}
   .pktitle .scope.one{color:var(--hi)}
   .pad{padding:14px 15px}
   canvas{width:100%;display:block;background:var(--panel2)}
@@ -636,6 +652,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
             display:flex;gap:14px;align-items:center;flex-wrap:wrap}
   .legs{display:inline-flex;gap:16px;align-items:center;flex-wrap:wrap}
   .legend{display:inline-flex;align-items:center;gap:6px}
+  button.legend{background:none;border:1px solid transparent;border-radius:99px;padding:2px 8px;
+        font:inherit;font-size:inherit;color:inherit;cursor:pointer}
+  button.legend:hover{border-color:var(--line)}
+  button.legend[aria-pressed="false"]{opacity:.45;text-decoration:line-through}
   .swatch{width:13px;height:3px;border-radius:2px;display:inline-block}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   .row+.row{margin-top:10px}
@@ -788,13 +808,14 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .plist .dc.kv{min-width:50px;text-align:right}
   .plist .dc.win{min-width:92px;text-align:right}
   .plist .dc.pills{display:flex;gap:4px;flex:0 0 var(--tag-width,1px);min-width:var(--tag-width,1px);overflow:visible}
-  .plist .dc.smpsel{flex:0 0 auto;display:grid;justify-content:start;gap:3px 2px}
-  .plist .chip{width:17px;height:16px;padding:0;font-size:8.5px;line-height:14px;text-align:center;cursor:pointer;
+  .smpsel{display:grid;justify-content:start;gap:3px 2px}
+  .plist .dc.smpsel{flex:0 0 auto}
+  .chip{width:17px;height:16px;padding:0;font-size:8.5px;line-height:14px;text-align:center;cursor:pointer;
     border:1px solid var(--line);border-radius:4px;background:transparent;color:var(--mut);
     -webkit-appearance:none;appearance:none}
-  .plist .chip.on{background:var(--hi);border-color:var(--hi);color:var(--bg);font-weight:600}
-  .plist .chip.cur{outline:1px solid var(--hi);outline-offset:1px}
-  .plist .chip:hover{border-color:var(--hi)}
+  .chip.on{background:var(--hi);border-color:var(--hi);color:var(--bg);font-weight:600}
+  .chip.cur{outline:1px solid var(--hi);outline-offset:1px}
+  .chip:hover{border-color:var(--hi)}
   .plist .dc.del{display:inline-flex;align-items:center;justify-content:center;flex:0 0 28px;width:28px;
                  cursor:pointer;color:var(--mut);background:none;border:0;font-size:12px;padding:2px 4px;text-align:center}
   .plist .dc.del:hover{color:#f87171}
@@ -904,6 +925,20 @@ _TEMPLATE = r"""<!DOCTYPE html>
           <button class="ghost pkheadbtn" id="pkcheckall" type="button">Check all</button>
           <button class="ghost pkheadbtn" id="pkdetails">Details</button>
         </span></h2>
+      <!-- the interval in scope and its class belong to the tick boxes, not to one tab,
+           so they live in the always-visible Peaks sidebar -->
+      <div class="scoperow" id="scoperow">
+        <label class="ctl" title="the interval the Mass spectrum averages over, and the one the tick boxes speak about">interval
+          <select id="scoperange" aria-label="Interval in scope"></select></label>
+        <span class="tabs" id="scopeclass" role="group" aria-label="Interval class">
+          <button type="button" data-c="sample" title="counts as a sample">sample</button>
+          <button type="button" data-c="background" title="counts as a blank">background</button>
+        </span>
+      </div>
+      <div class="scoperow chipsrow" id="scopechipsrow">
+        <span class="mini" id="scopechipslbl" title="which samples the selected compound is ticked in">in samples</span>
+        <span class="smpsel" id="scopechips"></span>
+      </div>
       <div class="scroll" id="peaksbody" style="max-height:calc(100vh - 190px);overflow-x:hidden"></div>
       <div class="hint">Click a peak to select &amp; zoom · ⌘/Ctrl-drag the mass spectrum to add · remove via ✕ in details</div>
     </div>
@@ -947,7 +982,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
       </span>
       <span class="legs" id="leg-trace" style="display:none">
         <span class="legend" id="leg-trace-line"><span class="swatch" style="background:#3b82f6"></span><span id="tracelbl">Raw</span> of <span id="traceof" class="mut">—</span></span>
-        <span class="legend" title="Per-cycle composite of the strong VOC traces, each normalised to its own baseline so no single ion dominates — about 1 during background and rising during a sample. The sample/background intervals are detected from this curve; it is a detector for when signal is present, not itself a concentration."><span class="swatch" style="background:#39424e"></span>composite VOC signal</span>
+        <button type="button" class="legend tog" id="legDisc" aria-pressed="true" title="Per-cycle composite of the strong VOC traces, each normalised to its own baseline so no single ion dominates — about 1 during background and rising during a sample. The sample/background intervals are detected from this curve; it is a detector for when signal is present, not itself a concentration, and it is drawn against its own maximum rather than this plot's axis. Click to hide it."><span class="swatch"></span>composite VOC · own scale</button>
         <span class="legend"><span class="swatch" style="background:rgba(245,158,11,.35)"></span>sample</span>
         <span class="legend"><span class="swatch" style="background:rgba(100,116,139,.35)"></span>background</span>
       </span>
@@ -1186,11 +1221,39 @@ function sampleShort(r,i){ const m=/(\d+)\s*$/.exec(r.label||"");
 // (one recorded as "all" by omission needs nothing); a partial one is left alone
 function adoptSampleKey(label,wasAll){ peaks.forEach((p,i)=>{ if(!p.use || !wasAll[i]
   || !Array.isArray(p.samples)) return;
-  const k=selectedSamples(p); if(k.indexOf(label)<0) p.samples=k.concat([label]); }); }
+  const k=selectedSamples(p); if(k.indexOf(label)<0)
+    p.samples=sampleLabels().filter(l=>l===label||k.indexOf(l)>=0); }); }
 function dropSampleKey(label){ peaks.forEach(p=>{ if(!Array.isArray(p.samples)) return;
   const kept=p.samples.filter(l=>l!==label);
   if(kept.length===0 && p.use) return;     // do not switch a compound off via an interval
   p.samples=kept; }); }
+// Changing an interval's class has to be reversible. Dropping its label loses where a
+// partly-selected compound had been ticked, and `adoptSampleKey` cannot put that back
+// because it only knows the aggregate - so remember the per-compound membership at the
+// moment the interval stops being a sample, and use it when it becomes one again.
+function rememberMembership(r){ return peaks.map(p=>selectedSamples(p).indexOf(r.label)>=0); }
+function restoreMembership(r){ const was=r._wasIn; if(!was) return false;
+  peaks.forEach((p,i)=>{ if(!p.use || !was[i]) return; const k=selectedSamples(p);
+    // rebuild in interval order: appending would shuffle the recorded list on every
+    // reclassification, which reads as a change in the saved config when nothing moved
+    if(k.indexOf(r.label)<0) p.samples=sampleLabels().filter(l=>l===r.label||k.indexOf(l)>=0); });
+  delete r._wasIn; return true; }
+// A class is only real in this file if the label says so: the config stores interval
+// names and the analysis blanks against `background_*` by name, so a class switch that
+// left the name alone would be silently dropped on save. Renaming keeps the recorded
+// per-sample selections pointing at the same interval.
+function relabelForClass(r,cls){
+  if(String(r.label||"").toLowerCase().startsWith(cls)) return;
+  let n=1, lbl;
+  do{ lbl=cls+"_"+String(n++).padStart(2,'0'); }while(ranges.some(q=>q!==r&&q.label===lbl));
+  renameSampleKey(r.label,lbl); r.label=lbl; }
+function setSampleClass(r,cls,wasAll){ const wasSample=r.class==="sample";
+  // read the membership before the class moves: `selectedSamples` answers in terms of
+  // the intervals that count as samples at this instant
+  const wasIn=wasSample?rememberMembership(r):null;
+  r.class=cls; relabelForClass(r,cls);
+  if(cls!=="sample"){ if(wasSample) r._wasIn=wasIn; dropSampleKey(r.label); }
+  else if(!wasSample && !restoreMembership(r)) adoptSampleKey(r.label,wasAll); }
 function renameSampleKey(from,to){ peaks.forEach(p=>{ if(!Array.isArray(p.samples)) return;
   const kept=p.samples.map(l=>l===from?to:l);
   if(kept.length===0 && p.use) return;
@@ -1210,6 +1273,9 @@ let quant = M.concentration_available ? "con" : "cor";
 let showDetails = false;   // peaks sidebar: labels only until 'details'
 let peakTagWidth = 0, peakDetailWidth = 0, peakRowPad = 2;
 let peakOrder = ((DATA.config_base||{}).viz||{}).peak_order;
+// the composite VOC curve is context for the intervals, not a compound; it can be
+// switched off for a clean trace, and the choice is kept with the rest of the view
+let showDisc = ((DATA.config_base||{}).viz||{}).show_disc !== false;
 if(peakOrder!=="abundance" && peakOrder!=="label" && peakOrder!=="mz") peakOrder="mz";
 let hoverRange = null;     // interval hovered in the trace (to show its label)
 let hoverPeakId = null;    // peak whose window is hovered in the spectrum (highlight, mirror of hoverRange)
@@ -1238,6 +1304,9 @@ function resolvedDark(){ const m=themePref();
   if(m==="dark") return true; if(m==="light") return false;
   return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches); }
 let TH={};
+function syncDiscLegend(){ const b=document.getElementById("legDisc"); if(!b) return;
+  b.setAttribute("aria-pressed",showDisc?"true":"false");
+  const sw=b.querySelector(".swatch"); if(sw) sw.style.background=TH.disc; }
 function computeTH(){ TH = resolvedDark() ? {
     grid:"#202834",gridln:"#161d27",axis:"#6b7684",disc:"#39424e",
     insetBg:"rgba(9,13,19,.92)",insetStroke:"#2b3644",insetLine:"#4a5a6d",insetText:"#7c8794",
@@ -1257,7 +1326,7 @@ function applyTheme(draw){ const m=themePref();
     b.title="Theme: "+m+(m==="system"?" ("+(resolvedDark()?"dark":"light")+")":""); }
   const menu=document.getElementById("thememenu");
   if(menu) menu.querySelectorAll("button").forEach(el=>el.classList.toggle("on",el.dataset.theme===m));
-  computeTH(); if(draw && typeof drawMain==="function") drawMain(); }
+  computeTH(); syncDiscLegend(); if(draw && typeof drawMain==="function") drawMain(); }
 function setTheme(m){ try{ localStorage.setItem("ptrms-theme",m); }catch(e){} applyTheme(true); }
 applyTheme(false);   // set attribute + palette before the first paint
 if(window.matchMedia){ const mq=window.matchMedia("(prefers-color-scheme: dark)");
@@ -1438,11 +1507,15 @@ function relayout(){ if(!plotC.isConnected) return;
   const splitH=plotResize?plotResize.offsetHeight:12;
   const leftover=layoutBottom-canvasTop-footH-splitH-contextHeadH-2;
   const minPlot=Math.min(MIN_PLOT_HEIGHT,Math.max(60,leftover-MIN_CONTEXT_HEIGHT));
-  const maxPlot=Math.max(minPlot,Math.min(560,leftover-MIN_CONTEXT_HEIGHT));
+  // only the minimum context strip is held back. A fixed pixel ceiling here looked safe
+  // but it is what stopped the card below from ever shrinking past ~half the column on
+  // a tall window: the plot hit 560px and refused to grow, so the drag dead-ended.
+  const maxPlot=Math.max(minPlot,leftover-MIN_CONTEXT_HEIGHT);
   let bodyH, ph;
   if(plotHeight===null){
     bodyH=Math.max(MIN_CONTEXT_HEIGHT,Math.min(300,Math.round(leftover*0.34)));
-    ph=Math.max(minPlot,Math.min(560,leftover-bodyH));
+    // first paint fills the column instead of leaving the bottom empty
+    ph=Math.max(minPlot,leftover-bodyH);
   } else {
     ph=Math.max(minPlot,Math.min(maxPlot,Math.round(plotHeight)));
     bodyH=Math.max(MIN_CONTEXT_HEIGHT,leftover-ph);
@@ -1454,6 +1527,12 @@ function relayout(){ if(!plotC.isConnected) return;
   if(context) context.style.height=(contextHeadH+bodyH+2)+"px";
   document.querySelectorAll("#intcard .scroll").forEach(s=>s.style.maxHeight=bodyH+"px");
   const idp=document.getElementById("idpanel"); if(idp){ idp.style.maxHeight=bodyH+"px"; idp.style.overflowY="auto"; }
+  // the sidebar's own chrome grew with the scope rows, so the list gets whatever the
+  // viewport still has, rather than a height guessed in CSS
+  const pk=document.getElementById("peaksbody");
+  if(pk){ const top=pk.getBoundingClientRect().top;
+    const hint=pk.parentElement?pk.parentElement.querySelector(".hint"):null;
+    pk.style.maxHeight=Math.max(120,Math.floor(layoutBottom-top-(hint?hint.offsetHeight:34)-8))+"px"; }
   drawMain(); }
 function savePlotHeight(){ try{ localStorage.setItem(PLOT_HEIGHT_KEY,String(Math.round(plotHeight))); }catch(e){} }
 function endSplitDrag(e){ if(!splitDrag) return; if(plotResize&&plotResize.releasePointerCapture){
@@ -1621,9 +1700,13 @@ function drawTrace(){
   const step=Math.max(1,Math.floor((c1-c0)/((w-56)*2||1)));
   x.save(); x.beginPath(); x.rect(padL,top,w-padL-10,plotH); x.clip();
   const disc=PC.discriminator;
-  if(disc){ x.strokeStyle=TH.disc; x.lineWidth=1; x.beginPath(); let st=false;
+  if(disc && showDisc){ x.strokeStyle=TH.disc; x.lineWidth=1; x.beginPath(); let st=false;
     for(let i=c0-1;i<c1;i+=step){ let m=0; const e=Math.min(i+step,c1); for(let j=i;j<e;j++) if(disc[j]>m)m=disc[j];
-      const px=X(i+1),py=(top+plotH)-(m/DISC_MAX)*plotH; st?x.lineTo(px,py):x.moveTo(px,py); st=true; } x.stroke(); }
+      const px=X(i+1),py=(top+plotH)-(m/DISC_MAX)*plotH; st?x.lineTo(px,py):x.moveTo(px,py); st=true; } x.stroke();
+    // it is drawn against its own maximum, so it names itself instead of looking like a
+    // mis-scaled version of the compound trace
+    x.fillStyle=TH.axis; x.font="9px sans-serif"; x.textAlign="right";
+    x.fillText("composite VOC \u00b7 own scale",w-10,top+11); x.textAlign="left"; }
   ranges.forEach(r=>{ const sel=r._id===selRange, hov=!sel && r._id===hoverRange;
     x.fillStyle=sel?(r.class==="sample"?"rgba(245,158,11,.28)":"rgba(148,163,184,.30)")
               :hov?(r.class==="sample"?"rgba(245,158,11,.22)":"rgba(148,163,184,.24)")
@@ -1979,6 +2062,7 @@ function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box)
   if(tof) tof.textContent = sp? sp.label+" (m/z "+sp.mz.toFixed(3)+")":"—";
   // the per-compound trace legend entry only makes sense once a compound is chosen
   const ll=document.getElementById("leg-trace-line"); if(ll) ll.style.display=sp?"":"none";
+  renderScope();
   renderId(); }
 
 // ---- identification: scored candidates + isotope evidence for the selected peak ----
@@ -2085,7 +2169,7 @@ function renderRanges(){ const tb=document.querySelector("#rngtbl tbody"); if(!t
         // keep the sample-specific tick state pointing at the same interval, and
         // restate the 'average over' options so their names are never stale
         if(act==="label") renameSampleKey(was,el.value);
-        else if(act==="class"){ if(el.value==="background") dropSampleKey(r.label); else adoptSampleKey(r.label,wasAll); }
+        else if(act==="class") setSampleClass(r,el.value,wasAll);
         renderRanges(); redraw(); }; });
     tb.appendChild(tr); _rngRow[r._id]=tr; }); refreshSpecRange();
   // when the selection changes, scroll that row into view in the Intervals card
@@ -2117,7 +2201,8 @@ function buildConfig(){ return {
     if(p.winManual){ if(Math.abs(p.winL-p.winR)<1e-6) o.window=+(p.winL*2).toFixed(5);
       else o.window={left:+p.winL.toFixed(5),right:+p.winR.toFixed(5)}; } return o; }),
   ranges: ranges.map(r=>({label:r.label,start:r.start,end:r.end,unit:"cycle"})),
-  viz:{ ...((DATA.config_base||{}).viz||{}), x_axis_unit:xAxisUnit, peak_order:peakOrder },
+  viz:{ ...((DATA.config_base||{}).viz||{}), x_axis_unit:xAxisUnit, peak_order:peakOrder,
+    show_disc:showDisc },
   analyze:{ ...((DATA.config_base||{}).analyze||{}), R:cfg.R, R_phys:cfg.Rphys,
     K:cfg.K, molar_volume:cfg.Vm, primary_mz:cfg.primarymz,
     kinetic:cfg.kinetic, k_anchor:cfg.kanchor, humidity_correct:cfg.humid,
@@ -2204,12 +2289,57 @@ function refreshSpecRange(){ const sel=document.getElementById("specrange"); if(
     o.textContent="per-interval needs live mode"; sel.appendChild(o); }
   if([...sel.options].some(o=>o.value===prev)) sel.value=prev;
   else sel.value="all";   // start on the whole-run average, then switch to an interval to check drift
-}
+  renderScope(); }
 // spinner shown over the plot while an interval is averaged server-side
 let _specTok=0, _spinTimer=null;
 function showSpin(on,msg){ const el=document.getElementById("specspin"); if(!el) return;
   if(on){ const m=document.getElementById("specspinmsg"); if(m&&msg) m.textContent=msg; el.hidden=false; }
   else el.hidden=true; }
+// ---- the scope row in the Peaks sidebar ------------------------------------
+// Which interval the tick boxes speak about, and whether it counts as a sample or a
+// blank, belongs to the compound list rather than to one plot tab: the same choice is
+// made in the Intervals table, but that table only exists on one tab.
+function scopeTarget(){ const sel=document.getElementById("scoperange");
+  if(!sel) return null; const m=/^i(\d+)$/.exec(sel.value||"");
+  return m ? (ranges.find(r=>"i"+r._id===sel.value)||null) : null; }
+function renderScope(){ const dd=document.getElementById("scoperange"); if(!dd) return;
+  const main=document.getElementById("specrange"), want=(main&&main.value)||"all";
+  dd.innerHTML="";
+  const add=(v,t)=>{ const o=document.createElement("option"); o.value=v; o.textContent=t; dd.appendChild(o); };
+  add("all","whole run");
+  ranges.forEach(r=>add("i"+r._id,r.label));
+  if(!SERVED){ dd.value="all"; dd.disabled=true; }
+  else { dd.disabled=false; dd.value=[...dd.options].some(o=>o.value===want)?want:"all"; }
+  const target=scopeTarget(), cls=document.getElementById("scopeclass");
+  cls.style.visibility=target?"":"hidden";
+  cls.querySelectorAll("button").forEach(b=>b.classList.toggle("on",!!target&&b.dataset.c===target.class));
+  const sc=scopeRange(), badge=document.getElementById("pkscope");
+  if(badge) badge.textContent=sc?(" \u00b7 "+sc.label)
+    :(scopeTarget()?" \u00b7 background":" \u00b7 all samples");
+  const ns=ranges.filter(r=>r.class==="sample").length;
+  dd.title=target?(target.label+" — cycles "+target.start+"–"+target.end+", counts as a "
+    +target.class):(ns+" sample"+(ns===1?"":"s")+" and "+(ranges.length-ns)+" background"
+    +(ranges.length-ns===1?"":"s")+" in this run — the tick boxes add up all of them");
+  // the selected compound's own sample boxes, so the state is visible without Details
+  const p=selPeak(), row=document.getElementById("scopechipsrow"), box=document.getElementById("scopechips");
+  const esc=s=>String(s==null?"":s).replace(/"/g,"&quot;");
+  const si=sampleIntervals();
+  if(!p || !si.length || !row){ if(row) row.hidden=true; }
+  else{ row.hidden=false;
+    const lbl=document.getElementById("scopechipslbl");
+    const nm=(p.label||'').trim()||("m/z "+p.mz.toFixed(3));
+    if(lbl){ lbl.textContent=nm.length>22?nm.slice(0,21)+"…":nm; lbl.title=nm; }
+    box.style.gridTemplateColumns="repeat("+Math.min(si.length,12)+",17px)";
+    const cur=scopeRange();
+    box.innerHTML=si.map((r,i)=>`<button type="button" class="chip${selState(p,r)==="all"?" on":""}`+
+      `${(cur&&r._id===cur._id)?" cur":""}" data-smp="${r._id}" `+
+      `title="${esc(r.label)} (cycles ${r.start}–${r.end}): `+
+      `${selState(p,r)==="all"?"in this sample":"not in this sample"}">`+
+      `${esc(sampleShort(r,i))}</button>`).join("");
+    box.querySelectorAll("[data-smp]").forEach(ch=>{ ch.onclick=()=>{
+      const r=ranges.find(rr=>rr._id===+ch.dataset.smp); if(!r) return;
+      pushUndo(); toggleSel(p,r); renderPeaks(); redraw(); }; }); }
+}
 function setSpecRange(val){
   const tok=++_specTok; if(_spinTimer){ clearTimeout(_spinTimer); _spinTimer=null; } showSpin(false);
   // a programmatic call must move the control too, or the sidebar would read its scope
@@ -2241,9 +2371,26 @@ function syncSpecRange(){ const sel=document.getElementById("specrange"); if(!se
   const lo=r?r.start:1, hi=r?r.end:NCYC;
   if(SPECWIN.lo!==lo || SPECWIN.hi!==hi) setSpecRange(v); }
 document.getElementById("specrange").onchange=e=>setSpecRange(e.target.value);
+// the sidebar row and the Mass spectrum dropdown are two views of one choice, so
+// either one moves the other
+const scopeSel=document.getElementById("scoperange");
+if(scopeSel) scopeSel.onchange=e=>{
+  setSpecRange(e.target.value);
+  const r=scopeTarget();                       // light up the interval in the plot too
+  if(r){ selRange=r._id; renderRanges(); }
+  else renderScope();
+};
+document.querySelectorAll("#scopeclass button").forEach(b=>{ b.onclick=()=>{
+  const r=scopeTarget(); if(!r || r.class===b.dataset.c) return;
+  // reclassifying an interval changes what the per-sample boxes count, exactly as it
+  // does in the Intervals table: a new sample adopts compounds ticked everywhere,
+  // a lost sample stops counting
+  const wasAll=peaks.map(p=>selState(p,null)==="all");
+  pushUndo(); setSampleClass(r,b.dataset.c,wasAll); sortRanges();
+  selRange=r._id; renderRanges(); renderPeaks(); redraw(); }; });
 
 // ---- tab switching ----
-function setTab(t){ tab=t; anim=null; hoverRange=null; hoverPeakId=null;
+function setTab(t){ tab=t; anim=null; hoverRange=null; hoverPeakId=null; renderScope();
   document.querySelectorAll("#maintabs button").forEach(b=>b.classList.toggle("on",b.dataset.tab===t));
   const spec=t==="spec";
   document.getElementById("leg-spec").style.display=spec?"":"none";
@@ -2395,6 +2542,10 @@ document.getElementById("zoomreset").onclick=()=>{
   else animateTo(axisAtCycle(1),axisAtCycle(NCYC),180);
 };
 // peaks: details toggle — widen the sidebar instead of side-scrolling
+// the composite-VOC legend entry doubles as its on/off switch
+const discBtn=document.getElementById("legDisc");
+if(discBtn) discBtn.onclick=()=>{ showDisc=!showDisc; syncDiscLegend(); scheduleSave(); drawMain(); };
+syncDiscLegend();
 document.getElementById("pkorder").value=peakOrder;
 document.getElementById("pkorder").onchange=e=>{
   peakOrder=e.target.value==="abundance"?"abundance":(e.target.value==="label"?"label":"mz");
@@ -2495,6 +2646,8 @@ function tourSteps(){ const s=[];
   // the workflow runs left-to-right: first get the intervals right, then the peaks
   s.push({sel:"#maintabs",place:"bottom",tab:"trace",title:"Step 1 — the intervals",
     body:"Start here, on Signal over time. Each shaded band is a sample or background interval. Getting these right comes first, because every compound is quantified per interval."});
+  s.push({sel:"#scoperow",place:"right",tab:"trace",title:"Which interval, and what it counts as",
+    body:"This row picks the interval the tick boxes and the mass spectrum speak about, and switches it between sample and background — from either tab. The class is carried by the interval’s name, so switching it renames the interval; switching it back puts the name and the per-sample ticks as they were."});
   s.push({sel:"#intcard",place:"top",tab:"trace",title:"Adjust the intervals",
     body:"Check the sample/background split. Drag an interval’s edges to resize, ⌘/Ctrl-drag to add one, select and press Del to remove. Editing here recomputes the peak positions for that interval."});
   s.push({sel:".sidebar .card",place:"right",tab:"trace",title:"Plot a compound over time",

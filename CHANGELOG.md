@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The interval in scope and its sample/background class now sit in the Peaks sidebar,
+  one click away on either tab instead of only in the Intervals card. Switching class
+  renames the interval, because the analysis reads the class from the interval name;
+  switching it back restores the name and the recorded per-sample selections.
+- The composite VOC curve behind the Signal over time trace is labelled in the plot,
+  and its legend entry is a switch kept in the config as `viz.show_disc`.
+- The Intervals card shrinks as far as the splitter is dragged: the plot is no longer
+  capped at 560 px, which left the card never smaller than half a tall window.
 - The Intervals card updates while an interval edge is dragged and keeps its rows in
   chronological order, so the table no longer lags behind the plot.
 - The Mass spectrum "Average over" list follows interval renames, recolouring and
@@ -45,6 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   x-axis selector moved to the right-hand slot that **average over** occupies on the
   Mass spectrum tab, and a long interval list can no longer squeeze the tab buttons
   sideways as a side effect.
+- Reclassifying an interval from sample to background now reaches the saved config. It
+  used to change only the in-memory colour: the class is read back from the interval
+  name at load, so an unrenamed interval came back as a sample. A compound's `samples`
+  list also survives the trip — before, an interval classed away and back silently
+  dropped compounds that were in only some samples.
 
 ## [0.4.0] - 2026-08-24
 

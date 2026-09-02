@@ -404,10 +404,10 @@ shows what the plot shows.
 The **Peaks** sidebar can also be ordered by descending abundance or alphabetically by
 label. Abundance is the mean per-cycle integrated Raw signal (the peak integral), with
 m/z used to break ties. The compact list shows only the active sort field; the details
-view shows both m/z and abundance. The m/z and abundance values follow the Mass spectrum tab's selected
-average-over interval; isolated peaks use that interval's apex and clustered peaks
-retain their fixed model centres. The choice is saved as `viz.peak_order` and does not
-change the peak order in the analysis config or CSV.
+view shows both m/z and abundance. The m/z and abundance values follow the Mass
+spectrum tab's selected average-over interval; isolated peaks use that interval's apex
+and clustered peaks retain their fixed model centres. The choice is saved as
+`viz.peak_order` and does not change the peak order in the analysis config or CSV.
 
 The Raw / Corrected / Conc / µg selector applies to both tabs: it rescales the mass
 spectrum (with its y-axis label) and the sidebar abundance values. In Conc and µg the
@@ -439,6 +439,21 @@ now so that per-sample output can be built on it later. Interval labels key this
 selection, so a rename that would duplicate a label is rejected, and a `samples` list
 whose labels no longer exist falls back to every sample rather than silently dropping
 the compound.
+
+Above that list the sidebar names the **interval** the boxes speak about and switches it
+between **sample** and **background**, whichever tab is open; it is the same control as
+the class column in the **Intervals** card, mirrored with it. An interval's class is
+carried by its label — `background_*` is what the analysis blanks against — so
+changing the class renames the interval to the first free label of the target class
+and rewrites the `samples` lists that referenced it. Classifying back restores the name
+and the per-compound membership, so a misclassified sample that was corrected is saved
+exactly as it was.
+
+The faint curve behind the **Signal over time** plot is the composite VOC signal used
+by `ptr segments`: the strong m/z 40–200 traces, each divided by its own median,
+averaged per cycle (about 1 over a background, higher over a sample). It is drawn
+against its own maximum, not the plotted axis, and says so in the corner; the legend
+entry toggles it, remembered as `viz.show_disc`.
 
 By default `viz` runs a localhost server, opens the browser, and **writes every change
 straight into the `--config` file**; when the expert clicks **Done** it runs the
