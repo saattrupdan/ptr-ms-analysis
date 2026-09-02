@@ -2278,7 +2278,14 @@ function submitRun(isExport){
       ackNow(); }
   }).catch(()=>{}); },600);
   fetch(isExport?"/export":"/done",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify(buildConfig())}).catch(()=>{});
+    body:JSON.stringify(buildConfig())})
+    .then(r=>{ if(!r.ok) throw new Error("rejected"); })
+    .catch(()=>{
+      // A refused request must not leave the overlay spinning with nothing to wait for.
+      if(isExport) finish('<div class="xmark">!</div><h2>Export did not start</h2>'+
+        '<p class="mut">The app is busy with the current file. Wait for that to finish, '+
+        'then export again.</p>');
+    });
 }
 function download(name,text){ const bl=new Blob([text],{type:"application/json"});
   const u=URL.createObjectURL(bl), a=document.createElement("a"); a.href=u; a.download=name;

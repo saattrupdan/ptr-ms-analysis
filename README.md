@@ -70,9 +70,10 @@ has been reviewed before reopens exactly as it was saved. A file that has never 
 reviewed gets the deterministic pipeline — detected peaks, detected intervals, honest
 checklist — written to that path and then loaded, so the panel starts as a starting
 point rather than an empty table. **Export** runs the full-precision analysis to
-`<name>.csv` beside the file and leaves everything open; nothing in app mode shuts the
-app down. Opening another file closes the current one, since a large run holds its
-data in memory.
+`<name>.csv` beside the file and leaves everything open; if a table that is not a ptr
+summary already sits at that name — a Viewer export, say — it writes `<name>-ptr.csv`
+instead of overwriting it. Opening another file closes the current one, since a large
+run holds its data in memory.
 
 `viz` opens a browser review app for an existing peak list + ranges so an expert can
 visually check and tweak peaks / segments / calibration. K, molar volume, kinetic and

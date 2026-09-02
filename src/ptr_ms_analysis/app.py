@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import json
 import os
-import socketserver
 import subprocess
 import sys
+import tempfile
 import threading
 import urllib.error
 import urllib.request
@@ -57,11 +57,53 @@ def _read_json(path: Path):
 
 
 def _write_json(path: Path, value) -> None:
-    """Write through a temporary name so an interrupted save cannot truncate a good
-    config — the file is the user's work product."""
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(value, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
+    """Write through a private temporary name in the same folder, then move it into
+    place. Two review tabs autosave to the same config, so the temp name must be
+    unique per write: a shared one lets one tab publish another tab's bytes."""
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, indent=2)
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def _replace_from(tmp, target: Path) -> None:
+    """Publish a file written elsewhere (a temp name) onto its real path."""
+    try:
+        os.replace(tmp, target)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+# A ptr summary starts with this header; anything else that turns up under the name
+# we would like to write is somebody else's table and stays untouched.
+_CSV_MARKERS = ("Variable", "Average(Corrected)")
+
+
+def _csv_target(h5_path: str) -> Path:
+    """Where an export of ``h5_path`` goes: ``<stem>.csv`` beside it, unless a file
+    that is not a ptr summary already lives there — a Viewer or Excel export often
+    does, and the review may be comparing against it."""
+    target = Path(h5_path).with_suffix(".csv")
+    if not target.exists():
+        return target
+    try:
+        with target.open("r", encoding="utf-8-sig", errors="replace") as handle:
+            head = handle.readline()
+    except OSError:
+        return target.parent / (target.stem + "-ptr.csv")
+    if all(marker in head for marker in _CSV_MARKERS):
+        return target
+    return target.parent / (target.stem + "-ptr.csv")
 
 
 def config_path_for(h5_path: str) -> Path:
@@ -148,7 +190,9 @@ def bootstrap_config(h5_path: str, f=None) -> dict:
 
 def load_recent() -> list:
     value = _read_json(RECENT_PATH)
-    return value if isinstance(value, list) else []
+    if not isinstance(value, list):
+        return []
+    return [p for p in value if isinstance(p, str)]
 
 
 def remember_recent(path) -> list:
@@ -177,6 +221,7 @@ class Session:
         self.stage = ""
         self.error = None
         self.export_result = None
+        self.export_error = None
         self.agent_status = None
         self._file = None
         self._lock = threading.Lock()
@@ -220,7 +265,11 @@ class Session:
                 raise
             self.path, self.config_path, self.config = path, config_path, config
             self.status, self.stage = "ready", "Ready"
-            remember_recent(path)
+            try:
+                remember_recent(path)
+            except OSError:
+                # Bookkeeping. It must never cost the user a file that opened fine.
+                pass
             return self.payload
         except Exception as exc:
             self.close()
@@ -253,7 +302,11 @@ class Session:
                 answer = json.loads(response.read().decode("utf-8", "replace"))
             if isinstance(answer, dict):
                 answer = answer.get("config", answer)
-            if not _valid_config(answer):
+            if not isinstance(answer, dict) or not (
+                answer.get("peaks") or answer.get("ranges")
+            ):
+                # Key presence is not enough here: an answer of {"peaks": []} would
+                # replace real detected work with an empty panel.
                 raise ValueError("the agent reply contained no peaks or ranges")
         except Exception as exc:  # any endpoint failure must not cost the user a file
             self.agent_status = (
@@ -288,7 +341,18 @@ class Session:
         self.config_path = None
         self.config = None
         self.payload = None
+        # A closed file has no last export: a tab left open must not be told a run
+        # finished when it belongs to a file that is no longer loaded.
+        self.export_result = None
+        self.export_error = None
+        self.agent_status = None
         self.status, self.stage = "empty", ""
+
+    @property
+    def busy(self) -> bool:
+        """True while an open or an export is in flight."""
+        with self._lock:
+            return self._opening or self.status == "exporting"
 
     # ---- exporting -----------------------------------------------------------
     def export(self):
@@ -301,15 +365,25 @@ class Session:
             raise RuntimeError("no file is open")
         self.status, self.stage, self.error = "exporting", "Running the analysis", None
         self.export_result = None  # so a second export cannot report the last one
-        out = str(Path(self.path).with_suffix(".csv"))
+        self.export_error = None
+        target = _csv_target(self.path)
+        fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=target.name + ".",
+                                   suffix=".tmp")
+        os.close(fd)
         try:
-            result = analyze_config_to_csv(self.path, self.config, out)
+            result = analyze_config_to_csv(self.path, self.config, tmp)
+            _replace_from(tmp, target)
         except Exception as exc:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
             # The file is still open and still worth reviewing, so a failed export
             # reports the error without dropping the session into an error state.
             self.status, self.error, self.stage = "ready", str(exc), "Export failed"
+            self.export_error = str(exc)
             raise
-        result["out"] = out
+        result["out"] = str(target)
         self.export_result = result
         self.status, self.stage = "ready", "Ready"
         return result
@@ -320,8 +394,8 @@ class Session:
         the app and the one-shot CLI share one piece of UI code."""
         if self.status == "exporting":
             return {"status": "running"}
-        if self.stage == "Export failed":
-            return {"status": "error", "error": self.error or "the analysis failed"}
+        if self.export_error:
+            return {"status": "error", "error": self.export_error}
         if self.export_result:
             return {"status": "done", "out": self.export_result.get("out")}
         return {"status": "idle"}
@@ -381,14 +455,23 @@ _START_HTML = """<!doctype html>
   <div id="state"></div>
 </main><script>
 const $=s=>document.querySelector(s);
+function row(path,meta,cls){                 // paths go in as text, never as markup
+  const li=document.createElement('li'); li.dataset.path=path;
+  const p=document.createElement('span'); p.className='p'; p.textContent=path;
+  const m=document.createElement('span'); m.className='m'+(cls?' '+cls:''); m.textContent=meta;
+  li.append(p,m); return li;
+}
 async function recent(){
   const items=await (await fetch('/api/recent')).json();
-  $('#recent').innerHTML=items.map(e=>`<li data-path="${e.path}">`+
-    `<span class="p">${e.path}</span>`+
-    (e.exists?`<span class="m">${(e.size/1073741826).toFixed(2)} GB</span>`:'<span class="m">missing</span>')+
-    (e.config_exists?'<span class="cfg">config saved</span>':'<span class="m">new</span>')+
-    `</li>`).join('')||'<li style="cursor:default"><span class="m">Nothing opened yet.</span></li>';
-  document.querySelectorAll('#recent li[data-path]').forEach(el=>
+  const ul=$('#recent'); ul.innerHTML='';
+  if(!items.length){ const li=document.createElement('li');
+    const m=document.createElement('span'); m.className='m'; m.textContent='Nothing opened yet.';
+    li.append(m); ul.append(li); return; }
+  for(const e of items){
+    ul.append(row(e.path, (e.exists?((e.size/1073741826).toFixed(2)+' GB'):'missing')+
+      (e.config_exists?' · config saved':' · new'), e.config_exists?'cfg':null));
+  }
+  ul.querySelectorAll('li[data-path]').forEach(el=>
     el.onclick=()=>{$('#path').value=el.dataset.path;$('#path').focus();});
 }
 async function openFile(path){
@@ -399,13 +482,19 @@ async function openFile(path){
 }
 function show(t,isErr){$('#state').textContent=t||'';$('#state').className=isErr?'err':'';}
 function current(s){
-  const done=s.export?`<span class="m">last export ${s.export.out||''}</span>`:'';
-  $('#openwrap').innerHTML=`<div class="open"><span class="p">${s.file||''}</span>${done}`+
-    `<button id="resume">Open the review</button>`+
-    `<button class="ghost" id="closefile">Close file</button></div>`;
-  $('#resume').onclick=()=>location='/review';
-  $('#closefile').onclick=async()=>{ await fetch('/close',{method:'POST'});
-    $('#openwrap').innerHTML=''; recent(); };
+  const wrap=$('#openwrap'); wrap.innerHTML='';
+  const box=document.createElement('div'); box.className='open';
+  const p=document.createElement('span'); p.className='p'; p.textContent=s.file||'';
+  box.append(p);
+  if(s.export&&s.export.out){ const m=document.createElement('span'); m.className='m';
+    m.textContent='last export '+s.export.out; box.append(m); }
+  const resume=document.createElement('button'); resume.id='resume'; resume.textContent='Open the review';
+  const close=document.createElement('button'); close.className='ghost'; close.textContent='Close file';
+  box.append(resume,close); wrap.append(box);
+  resume.onclick=()=>location='/review';
+  close.onclick=async()=>{ const r=await fetch('/close',{method:'POST'});
+    if(!r.ok) return show(((await r.json())||{}).error||'Not yet',true);
+    wrap.innerHTML=''; recent(); };
   show(s.agent_status||'');
 }
 async function tick(){
@@ -523,25 +612,6 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 self._send(200, session.status_payload())
             elif route.path == "/api/recent":
                 self._send(200, _recent_entries())
-            elif route.path == "/browse":
-                q = parse_qs(route.query)
-                home = Path.home().resolve()
-                target = Path(q.get("dir", [str(home)])[0]).expanduser().resolve()
-                if target != home and home not in target.parents:
-                    self._send(403, {"error": "only paths under the home folder"})
-                    return
-                try:
-                    rows = sorted(
-                        (
-                            {"name": x.name, "path": str(x), "directory": x.is_dir()}
-                            for x in target.iterdir()
-                            if x.is_dir() or x.suffix.lower() in (".h5", ".hdf5")
-                        ),
-                        key=lambda r: (not r["directory"], r["name"].lower()),
-                    )
-                    self._send(200, {"dir": str(target), "entries": rows})
-                except OSError as exc:
-                    self._send(400, {"error": str(exc)})
             elif route.path == "/spectrum":
                 if not session.path:
                     self._send(404, {"error": "no file is open"})
@@ -571,8 +641,8 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 if not Path(target).expanduser().is_file():
                     self._send(404, {"error": f"no such file: {target}"})
                     return
-                if session.status == "loading":
-                    self._send(409, {"error": "another file is still opening"})
+                if session.busy:
+                    self._send(409, {"error": "the app is busy with the current file"})
                     return
                 _background(
                     session.open, target, agent_url=agent_url, agent_timeout=agent_timeout
@@ -585,16 +655,38 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 if not _valid_config(body):
                     self._send(400, {"error": "config must contain peaks or ranges"})
                     return
+                try:
+                    _write_json(session.config_path, body)
+                except OSError as exc:
+                    # Say so rather than let the request thread die: the page needs a
+                    # reason, and the config on disk is still the last good one.
+                    self._send(500, {"error": f"could not write the config: {exc}"})
+                    return
                 session.config = body
-                _write_json(session.config_path, body)
                 self._send(200, {"ok": True})
             elif self.path == "/export":
                 if not session.path:
                     self._send(409, {"error": "no file is open"})
                     return
+                if session.busy:
+                    self._send(409, {"error": "an export is already running"})
+                    return
+                # The page posts the config it is showing. Autosave is debounced, so
+                # exporting whatever happens to be on disk can describe an earlier
+                # state than the one the reviewer just looked at.
+                if _valid_config(body):
+                    try:
+                        _write_json(session.config_path, body)
+                    except OSError as exc:
+                        self._send(500, {"error": f"could not write the config: {exc}"})
+                        return
+                    session.config = body
                 _background(session.export)
                 self._send(202, {"ok": True})
             elif self.path == "/close":
+                if session.busy:
+                    self._send(409, {"error": "wait for the current work to finish"})
+                    return
                 session.close()
                 self._send(200, {"ok": True})
             elif self.path == "/reveal":
@@ -609,17 +701,22 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 self._send(404, {"error": "not found"})
 
     httpd = None
-    for candidate in range(port, port + 20):
+    # port=0 asks the OS for a free port, which is what a test wants: probing upward
+    # from a guessed number can land on a server a previous test has not released.
+    candidates = [0] if port == 0 else range(port, port + 20)
+    for candidate in candidates:
         try:
-            httpd = socketserver.ThreadingTCPServer(("127.0.0.1", candidate), Handler)
-            port = candidate
+            # ThreadingHTTPServer, not a bare TCPServer: it sets allow_reuse_address,
+            # so a restart lands back on the same port instead of drifting.
+            httpd = server.ThreadingHTTPServer(("127.0.0.1", candidate), Handler)
             break
         except OSError:
             continue
     if httpd is None:
         raise OSError("no free port found for the app server")
     httpd.daemon_threads = True
-    return httpd, session, f"http://127.0.0.1:{port}/"
+    actual = httpd.server_address[1]
+    return httpd, session, f"http://127.0.0.1:{actual}/"
 
 
 def serve_app(

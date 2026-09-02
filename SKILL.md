@@ -538,7 +538,11 @@ ptr app --agent URL           # have an agent curate a newly detected config
   UI, so an offline agent never costs the user a file.
 - **Export replaces Done**: it runs the full-precision analysis to `<stem>.csv` beside
   the file and leaves the app open, so the reviewer can keep working and export again.
-  Nothing in app mode exits the process; Ctrl-C does.
+  If something that is not a ptr summary already sits at that name (a Viewer export, say)
+  the app writes `<stem>-ptr.csv` instead of overwriting it. `ptr app` never returns — it
+  serves until Ctrl-C — so background it the way you would background `ptr viz` and hand
+  the user the URL. It also cannot review a file on read-only media, since the config must
+  be written beside the `.h5`.
 - One file is open at a time (opening another closes the first, since a 2 GB run holds
   its traces in memory), recents live in `~/.ptr-ms/recent.json`, and the server binds to
   127.0.0.1 — nothing is uploaded anywhere.

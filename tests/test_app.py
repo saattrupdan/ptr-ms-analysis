@@ -2,7 +2,11 @@
 bootstrap, the agent hand-off and the routes the start screen drives."""
 
 import json
-import socket
+import os
+import re
+import shutil
+import subprocess
+import tempfile
 import threading
 import urllib.error
 import urllib.request
@@ -14,12 +18,6 @@ import numpy as np
 import pytest
 
 from ptr_ms_analysis import app, viz
-
-
-@pytest.fixture(autouse=True)
-def _keep_recents_out_of_the_home_folder(tmp_path, monkeypatch):
-    """Opening a file appends to ``~/.ptr-ms/recent.json``; tests must not."""
-    monkeypatch.setattr(app, "RECENT_PATH", tmp_path / "recent.json")
 
 
 def make_h5(path, *, cycles=4, mz_count=8, signal=True):
@@ -260,12 +258,6 @@ def test_a_second_export_cannot_report_the_previous_one(tmp_path):
 # --------------------------------------------------------------------------
 # the routes
 # --------------------------------------------------------------------------
-def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
 class _Server:
     def __init__(self, base):
         self.base = base
@@ -288,13 +280,18 @@ class _Server:
 
 @pytest.fixture
 def server(tmp_path):
-    port = _free_port()
-    httpd, session, url = app.make_server(port=port)
+    httpd, session, url = app.make_server(port=0)  # the OS picks a free port
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:
         yield _Server(url), session
     finally:
+        # An open runs on its own thread; letting it outlive the test would have it
+        # write to a path this test no longer owns.
+        for _ in range(200):
+            if not session.busy:
+                break
+            threading.Event().wait(0.02)
         httpd.shutdown()
         thread.join(timeout=5)
         httpd.server_close()
@@ -467,6 +464,220 @@ def test_opening_another_file_closes_the_first_one(tmp_path):
         session.open(str(b))
     assert first.closed
     assert session.path == str(b)
+
+
+# --------------------------------------------------------------------------
+# what the review page posts must be what the CSV describes
+# --------------------------------------------------------------------------
+def test_export_uses_the_config_the_page_posted(server, tmp_path):
+    api, _ = server
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", payload_stub),
+    ):
+        api.post("/open", {"path": str(h5)})
+        _wait_ready(api)
+
+    seen = {}
+
+    def fake_analysis(path, config, out):
+        seen["peaks"] = [p["mz"] for p in config["peaks"]]
+        Path(out).write_text("compound\n", encoding="utf-8")
+        return {"n_rows": 0}
+
+    edited = {"peaks": [{"mz": 99.0, "label": "edited by the reviewer"}], "ranges": []}
+    with mock.patch.object(app, "analyze_config_to_csv", side_effect=fake_analysis):
+        code, _ = api.post("/export", edited)
+        assert code == 202
+        for _ in range(200):
+            _, st = api.get("/status")
+            if json.loads(st)["status"] in ("done", "error"):
+                break
+            threading.Event().wait(0.02)
+    assert seen["peaks"] == [99.0]  # not whatever the last autosave left on disk
+    on_disk = json.loads((tmp_path / "run.json").read_text(encoding="utf-8"))
+    assert on_disk["peaks"][0]["mz"] == 99.0
+
+
+def test_export_never_overwrites_someone_elses_table(tmp_path):
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    foreign = tmp_path / "run.csv"
+    foreign.write_text("Reviewers own table, NOT a ptr output\n1,2,3\n", encoding="utf-8")
+    session = app.Session()
+    session.path = str(h5)
+    session.config = {"peaks": [], "ranges": []}
+    session.status = "ready"
+
+    def fake_analysis(path, config, out):
+        Path(out).write_text("File;Variable;Range\n", encoding="utf-8")
+        return {}
+
+    with mock.patch.object(app, "analyze_config_to_csv", side_effect=fake_analysis):
+        result = session.export()
+    assert Path(result["out"]) == tmp_path / "run-ptr.csv"
+    assert foreign.read_text(encoding="utf-8").startswith("Reviewers own table")
+
+
+def test_export_replaces_its_own_previous_summary(tmp_path):
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    ours = tmp_path / "run.csv"
+    ours.write_text("File;Variable;Range;Average(Corrected)\nold,row\n", encoding="utf-8")
+    session = app.Session()
+    session.path = str(h5)
+    session.config = {"peaks": [], "ranges": []}
+    session.status = "ready"
+
+    def fake_analysis(path, config, out):
+        Path(out).write_text(
+            "File;Variable;Range;Average(Corrected)\nnew,row\n", encoding="utf-8"
+        )
+        return {}
+
+    with mock.patch.object(app, "analyze_config_to_csv", side_effect=fake_analysis):
+        result = session.export()
+    assert Path(result["out"]) == ours
+    assert "new,row" in ours.read_text(encoding="utf-8")
+    assert not (tmp_path / "run-ptr.csv").exists()
+
+
+def test_export_leaves_no_temp_files_behind(tmp_path):
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    session = app.Session()
+    session.path = str(h5)
+    session.config = {"peaks": [], "ranges": []}
+    session.status = "ready"
+    with mock.patch.object(app, "analyze_config_to_csv", side_effect=RuntimeError("boom")):
+        with pytest.raises(RuntimeError):
+            session.export()
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_export_is_refused_while_one_is_running(server, tmp_path):
+    api, session = server
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", payload_stub),
+    ):
+        api.post("/open", {"path": str(h5)})
+        _wait_ready(api)
+    session.status = "exporting"
+    code, _ = api.post("/export", {"peaks": [{"mz": 1.0}]})
+    assert code == 409
+    session.status = "ready"
+
+
+# --------------------------------------------------------------------------
+# durability of the saved config
+# --------------------------------------------------------------------------
+def test_two_tabs_saving_at_once_do_not_publish_each_other(tmp_path):
+    target = tmp_path / "cfg.json"
+    errors = []
+
+    def save(worker):
+        for _ in range(80):
+            try:
+                app._write_json(target, {"peaks": [{"mz": 1.0}], "who": worker})
+            except OSError as exc:
+                errors.append(exc)
+
+    threads = [threading.Thread(target=save, args=(w,)) for w in ("a", "b")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert not list(tmp_path.glob("*.tmp"))
+    assert "who" in json.loads(target.read_text(encoding="utf-8"))
+
+
+def test_a_broken_recents_file_cannot_lose_an_opened_file(tmp_path, monkeypatch):
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    session = app.Session()
+
+    def explode(path):
+        raise OSError("read-only home")
+
+    monkeypatch.setattr(app, "remember_recent", explode)
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", payload_stub),
+    ):
+        session.open(str(h5))
+    assert session.status == "ready"
+    assert session.path == str(h5)
+
+
+def test_close_forgets_the_last_export(tmp_path):
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    session = app.Session()
+    session.path = str(h5)
+    session.config = {"peaks": [], "ranges": []}
+    session.status = "ready"
+    session.export_result = {"out": str(tmp_path / "run.csv")}
+    session.close()
+    assert session.status_payload() == {"status": "idle"}
+
+
+def test_recents_ignore_entries_that_are_not_paths(tmp_path):
+    (tmp_path / "recent.json").write_text('[123, null, "/x/run.h5"]', encoding="utf-8")
+    with mock.patch.object(app, "RECENT_PATH", tmp_path / "recent.json"):
+        assert app.load_recent() == ["/x/run.h5"]
+
+
+def test_an_agent_answer_of_empty_lists_is_refused(tmp_path):
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    session = app.Session()
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[{"mz": 42.0}]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", payload_stub),
+        mock.patch.object(
+            app.urllib.request, "urlopen", return_value=_agent_answer({"peaks": []})
+        ),
+    ):
+        session.open(str(h5), agent_url="http://agent.invalid/curate")
+    assert session.config["peaks"] == [{"mz": 42.0}]
+    assert "no peaks or ranges" in session.agent_status
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_embedded_scripts_are_valid_javascript():
+    """The page is one very long Python string: a missing ``+`` between two literals
+    parses as Python and only fails in the browser, where it takes the whole UI down.
+    Parse it here instead."""
+    data = {"file": "x.h5", "peaks": [], "ranges": [], "meta": {}}
+    pages = [
+        viz.render_html(data),
+        viz.render_html(data, mode="app"),
+        app._START_HTML,
+    ]
+    for page in pages:
+        scripts = re.findall(r"<script>(.*?)</script>", page, re.S)
+        assert scripts, "a page with no script did not render"
+        for script in scripts:
+            fd, name = tempfile.mkstemp(suffix=".mjs")
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(script)
+            try:
+                proc = subprocess.run(
+                    ["node", "--check", name], capture_output=True, timeout=60
+                )
+                assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")[:400]
+            finally:
+                os.unlink(name)
 
 
 def test_render_html_mode_flag_is_not_confused_with_the_review_page():
