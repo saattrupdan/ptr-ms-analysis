@@ -1,7 +1,9 @@
 name: package
 
-# PyInstaller cannot cross-compile, so each bundle is built on its own OS. The repo is
-# public, so these runners are free; a tag additionally publishes a GitHub Release.
+# PyInstaller cannot cross-compile, and neither can an installer tool: an .msi has to
+# be built by Windows Installer tooling and a .dmg by hdiutil. So each operating system
+# builds its own artifact. The repo is public, so these runners are free; a tag
+# additionally publishes a GitHub Release.
 
 on:
   workflow_dispatch:
@@ -29,12 +31,15 @@ jobs:
         include:
           - os: windows-latest
             label: windows-x86_64
+            # WiX needs the .NET SDK, which the Windows runner image already has.
+            installer: msi
             exe: dist/ptr/ptr.exe
           - os: macos-latest
             label: macos-arm64
-            exe: dist/ptr/ptr
+            installer: dmg
+            exe: dist/PTR-MS Review.app/Contents/MacOS/ptr
             # An Intel Mac build would be a third entry: { os: macos-13,
-            # label: macos-x86_64, exe: dist/ptr/ptr }.
+            # label: macos-x86_64, exe: dist/PTR-MS Review.app/Contents/MacOS/ptr }.
 
     steps:
       - uses: actions/checkout@v4
@@ -48,22 +53,52 @@ jobs:
           python -m pip install --upgrade pip
           pip install . pyinstaller
 
-      - name: Build the folder bundle
+      - name: Build the bundle
         run: pyinstaller --noconfirm packaging/ptr-app.spec
 
       - name: Check the bundle actually serves a review
-        run: python scripts/smoke_frozen.py ${{ matrix.exe }}
+        run: python scripts/smoke_frozen.py "${{ matrix.exe }}"
 
-      - name: Zip it
-        # shutil, not `zip`: git-bash on the Windows runners has no zip on PATH.
-        run: >-
-          python -c "import shutil;
-          shutil.make_archive('ptr-app-${{ matrix.label }}', 'zip', 'dist', 'ptr')"
+      - name: Name it
+        shell: bash
+        run: mv "dist/ptr.${{ matrix.installer }}" "dist/ptr-review-${{ matrix.label }}.${{ matrix.installer }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ptr-app-${{ matrix.label }}
-          path: ptr-app-${{ matrix.label }}.zip
+          name: ptr-review-${{ matrix.label }}
+          path: dist/ptr-review-${{ matrix.label }}.${{ matrix.installer }}
+          if-no-files-found: error
+      - name: Build the Windows installer
+        if: matrix.installer == 'msi'
+        run: |
+          dotnet tool install --global wix
+          python packaging/make_msi.py dist/ptr build/msi/ptr-app.wxs
+          wix build build/msi/ptr-app.wxs -arch x64 -intermediate build/msi -o dist/ptr.msi
+
+      - name: Build the disk image
+        if: matrix.installer == 'dmg'
+        run: |
+          stage=$(mktemp -d)
+          cp -R "dist/PTR-MS Review.app" "$stage/"
+          ln -s /Applications "$stage/Applications"
+          cat > "$stage/Read me first.txt" <<'TXT'
+          PTR-MS Review
+
+          Drag the icon onto Applications, then start it from Launchpad or the Terminal
+          (`ptr app`). It opens its review page in your browser and serves it from this
+          computer only. To stop it, use "Stop the app" on that page.
+
+          The first start is blocked by macOS because the app is unsigned: open it once
+          with right-click (or Control-click) → Open. Nothing is downloaded or uploaded;
+          the page talks to 127.0.0.1.
+          TXT
+          hdiutil create -quiet -volname "PTR-MS Review" -srcfolder "$stage" -ov \
+            -format UDZO dist/ptr.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ptr-review-${{ matrix.label }}
+          path: dist/ptr.${{ matrix.installer }}
           if-no-files-found: error
 
   release:
@@ -74,17 +109,17 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: ptr-app-*
+          pattern: ptr-review-*
           path: bundles
 
-      - name: Attach the bundles to the tag
+      - name: Attach the installers to the tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           shopt -s nullglob
-          files=(bundles/*/*.zip)
+          files=(bundles/*/*)
           if [ ${#files[@]} -eq 0 ]; then
-            echo "no bundles were produced" >&2
+            echo "no installers were produced" >&2
             exit 1
           fi
           gh release create "$GITHUB_REF_NAME" --generate-notes "${files[@]}"

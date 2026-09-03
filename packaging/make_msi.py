@@ -1,0 +1,197 @@
+"""Write WiX source for an .msi that installs a PyInstaller folder (see packaging/).
+
+WiX v4/v5 can harvest a directory itself, but how it splits files into components
+depends on the tool version. An MSI's components are a stable interface — their GUIDs
+must not change between builds or an upgrade leaves files behind — so the split is
+written out here instead: one component per directory, one stable GUID per directory,
+so the same tree always produces the same XML.
+
+    python packaging/make_msi.py dist/ptr build/msi/ptr-app.wxs
+    wix build build/msi/ptr-app.wxs -arch x64 -o dist/ptr.msi
+"""
+
+import os
+import re
+import sys
+import uuid
+import xml.etree.ElementTree as ET
+from importlib.metadata import version as distribution_version
+
+APP_NAME = "PTR-MS Review"
+MANUFACTURER = "Dan Saattrup Smart"
+URL = "https://github.com/saattrupdan/ptr-ms-analysis"
+# Generated once, never regenerated: this is what identifies the product across versions,
+# so it must survive a version bump and a re-clone of the repository.
+UPGRADE_CODE = "8f0c2f4c-6e1b-5a0d-9e2f-4b7c1a3d6e85"
+NAMESPACE = "http://wixtoolset.org/schemas/v4/wxs"
+GUID_SPACE = uuid.uuid5(uuid.NAMESPACE_URL, "ptr-ms-analysis/component/")
+# Where each component keeps the key path an MSI insists on. A component may not key on
+# one of this bundle's .dll files, so it keys on a registry value instead.
+REGISTRY_KEY = r"Software\Dan Saattrup Smart\PTR-MS Review\components"
+
+
+def msi_version() -> str:
+    """A three-part version, because that is all an MSI product version can hold."""
+    raw = ""
+    try:
+        raw = distribution_version("ptr_ms_analysis")
+    except Exception:
+        pass
+    if not raw:
+        # Not installed into this interpreter: read it off the checkout instead. A
+        # version that quietly fell back to 0.0.0 would make every upgrade a downgrade.
+        here = os.path.dirname(os.path.abspath(__file__))
+        try:
+            with open(os.path.join(here, "..", "pyproject.toml"), encoding="utf-8") as handle:
+                for line in handle:
+                    found = re.match(r'\s*version\s*=\s*["\']([^"\']+)', line)
+                    if found:
+                        raw = found.group(1)
+                        break
+        except OSError:
+            pass
+    raw = (raw or "0.0.0").split("+")[0]
+    parts = []
+    for chunk in raw.replace("-", ".").split("."):
+        digits = ""
+        for char in chunk:
+            if not char.isdigit():
+                break
+            digits += char
+        if not digits:
+            break
+        parts.append(digits)
+    return ".".join((parts + ["0", "0"])[:3])
+
+
+def _id(kind: str, relative: str) -> str:
+    """A deterministic WiX identifier for a path, so rebuilds match component for
+    component. MSI identifiers must be short and unambiguous, hence the fixed width."""
+    digest = uuid.uuid5(GUID_SPACE, f"{kind}/{relative.lower().replace(chr(92), '/')}")
+    return f"{kind[0].upper()}{digest.hex[:20]}"
+
+
+def _component(parent, relative: str, source: str, files) -> str:
+    """One component per directory. Returns its Id for the enclosing feature."""
+    component = ET.SubElement(
+        parent,
+        "Component",
+        {"Id": _id("component", relative), "Guid": str(uuid.uuid5(GUID_SPACE, relative))},
+    )
+    ET.SubElement(
+        component,
+        "RegistryValue",
+        {
+            "Root": "HKMU",
+            "Key": REGISTRY_KEY,
+            "Name": _id("key", relative),
+            "Type": "integer",
+            "Value": "1",
+            "KeyPath": "yes",
+        },
+    )
+    for name in files:
+        ET.SubElement(
+            component,
+            "File",
+            {
+                "Source": os.path.join(source, relative.replace("/", os.sep), name).replace(
+                    os.sep, "\\"
+                )
+            },
+        )
+    return component.get("Id")
+
+
+def _tree(parent, source: str, relative: str, feature) -> None:
+    """Emit `parent`'s component and recurse, mirroring the folder structure."""
+    dirnames, filenames = [], []
+    for entry in sorted(os.scandir(os.path.join(source, relative.replace("/", os.sep))),
+                        key=lambda e: e.name):
+        (dirnames if entry.is_dir() else filenames).append(entry.name)
+    component_id = _component(parent, relative, source, filenames)
+    ET.SubElement(feature, "ComponentRef", {"Id": component_id})
+    for name in dirnames:
+        child = ET.SubElement(parent, "Directory", {"Id": _id("dir", f"{relative}/{name}"),
+                                                   "Name": name})
+        _tree(child, source, f"{relative}/{name}" if relative else name, feature)
+
+
+def build_wxs(source: str, product_version: str) -> ET.ElementTree:
+    wix = ET.Element("Wix", {"xmlns": NAMESPACE})
+    package = ET.SubElement(
+        wix,
+        "Package",
+        {
+            "Name": APP_NAME,
+            "Manufacturer": MANUFACTURER,
+            "Version": product_version,
+            "Language": "1033",
+            "InstallerVersion": "500",
+            "Compressed": "yes",
+            "InstallScope": "perMachine",
+            "UpgradeCode": UPGRADE_CODE,
+        },
+    )
+    ET.SubElement(
+        package,
+        "MajorUpgrade",
+        {"DowngradeErrorMessage": f"A newer version of {APP_NAME} is already installed."},
+    )
+    ET.SubElement(package, "MediaTemplate", {"EmbedCab": "yes", "CompressionLevel": "high"})
+    ET.SubElement(package, "Property", {"Id": "ARPCOMMENTS",
+                                        "Value": "Review PTR-MS measurements, export the CSV"})
+    ET.SubElement(package, "Property", {"Id": "ARPHELPTELEPHONE", "Value": URL})
+    ET.SubElement(package, "Property", {"Id": "ARPURLINFOABOUT", "Value": URL})
+
+    program_files = ET.SubElement(package, "StandardDirectory", {"Id": "ProgramFiles64Folder"})
+    app_dir = ET.SubElement(program_files, "Directory", {"Id": "APPLICATIONFOLDER",
+                                                          "Name": APP_NAME})
+    feature = ET.SubElement(package, "Feature", {"Id": "ApplicationFeature",
+                                                 "Title": APP_NAME, "Level": "1"})
+    _tree(app_dir, os.path.abspath(source), "", feature)
+
+    # The Start Menu entry, because the console window it opens is where the URL appears.
+    menu = ET.SubElement(package, "StandardDirectory", {"Id": "ProgramMenuFolder"})
+    menu_dir = ET.SubElement(menu, "Directory", {"Id": _id("dir", "__menu__"), "Name": APP_NAME})
+    shortcut = ET.SubElement(menu_dir, "Component", {"Id": _id("component", "__shortcut__"),
+                                                     "Guid": str(uuid.uuid5(GUID_SPACE,
+                                                                           "__shortcut__"))})
+    ET.SubElement(
+        shortcut,
+        "Shortcut",
+        {
+            "Id": "StartMenuShortcut",
+            "Name": APP_NAME,
+            "Description": "Open the PTR-MS review app",
+            "Target": "[APPLICATIONFOLDER]ptr.exe",
+            "WorkingDirectory": "APPLICATIONFOLDER",
+        },
+    )
+    ET.SubElement(shortcut, "RemoveFolder", {"Id": "RemoveMenuFolder", "On": "uninstall"})
+    ET.SubElement(
+        shortcut,
+        "RegistryValue",
+        {"Root": "HKCU", "Key": REGISTRY_KEY, "Name": "startmenu", "Type": "integer",
+         "Value": "1", "KeyPath": "yes"},
+    )
+    ET.SubElement(feature, "ComponentRef", {"Id": shortcut.get("Id")})
+    return ET.ElementTree(wix)
+
+
+def main(argv):
+    if len(argv) != 3:
+        raise SystemExit(__doc__)
+    source, target = argv[1], argv[2]
+    if not os.path.isdir(source):
+        raise SystemExit(f"no such folder to install: {source}")
+    tree = build_wxs(source, msi_version())
+    os.makedirs(os.path.dirname(os.path.abspath(target)), exist_ok=True)
+    tree.write(target, encoding="utf-8", xml_declaration=True)
+    files = len(list(tree.iter("File")))
+    components = len(list(tree.iter("Component")))
+    print(f"wrote {target}: {files} files in {components} components")
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

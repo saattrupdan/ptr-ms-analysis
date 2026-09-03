@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -235,6 +236,9 @@ class Session:
         self._file = None
         self._lock = threading.Lock()
         self._opening = False
+        # A double-clicked bundle has no terminal to press Ctrl-C in, so stopping the
+        # server is something the page has to be able to ask for.
+        self.stop = threading.Event()
 
     # ---- opening -------------------------------------------------------------
     def open(self, path, agent_url=None, agent_timeout=300.0):
@@ -462,6 +466,7 @@ _START_HTML = """<!doctype html>
   <h2>Recent</h2><ul id="recent"></ul>
   <div id="openwrap"></div>
   <div id="state"></div>
+  <p class="stop"><button id="quit" class="ghost" type="button">Stop the app</button></p>
 </main><script>
 const $=s=>document.querySelector(s);
 function row(path,meta,cls){                 // paths go in as text, never as markup
@@ -517,6 +522,11 @@ async function tick(){
   show('');
 }
 $('#open').onsubmit=e=>{e.preventDefault();openFile($('#path').value.trim());};
+$('#quit').onclick=async()=>{
+  const r=await fetch('/shutdown',{method:'POST'});
+  show(r.ok?'The app has stopped. You can close this tab now.':
+           'Could not stop the app',!r.ok);
+};
 recent(); tick();
 </script></body></html>"""
 
@@ -706,6 +716,9 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 self._send(200, {"ok": _reveal(last), "path": last})
             elif self.path == "/ack":
                 self._send(200, {"ok": True})
+            elif self.path == "/shutdown":
+                session.stop.set()
+                self._send(200, {"ok": True})
             else:
                 self._send(404, {"error": "not found"})
 
@@ -728,6 +741,36 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
     return httpd, session, f"http://127.0.0.1:{actual}/"
 
 
+def _log(text):
+    """Report progress on stderr, and to a log file too when there is no console.
+
+    A double-clicked ``.app`` bundle is started by LaunchServices and has nowhere to
+    print, so its URL and its tracebacks would otherwise be lost.
+    """
+    print(text, file=sys.stderr, flush=True)
+    if not getattr(sys, "frozen", False):
+        return
+    try:
+        path = _recent_path().parent / "log.txt"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(text + "\n")
+    except OSError:
+        pass  # a missing log file must not stop the app
+
+
+def _install_quit_handlers(on_quit):
+    """Make Ctrl-C, ``pkill`` and a bundle's quit all stop the server the same way."""
+    for name in ("SIGINT", "SIGTERM"):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, lambda *_: on_quit())
+        except (OSError, ValueError):
+            pass  # not the main thread, or this platform has no such signal
+
+
 def serve_app(
     port=8765,
     open_browser=True,
@@ -741,13 +784,10 @@ def serve_app(
         port=port, agent_url=agent_url, agent_timeout=agent_timeout
     )
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    _install_quit_handlers(session.stop.set)
 
-    print(f"ptr: app running at {url}", file=sys.stderr, flush=True)
-    print(
-        "ptr: a large run takes 30-90 s to open; the app stays up between files.",
-        file=sys.stderr,
-        flush=True,
-    )
+    _log(f"ptr: app running at {url}")
+    _log("ptr: a large run takes 30-90 s to open; the app stays up between files.")
     if initial:
         _background(
             session.open, initial, agent_url=agent_url, agent_timeout=agent_timeout
@@ -757,11 +797,7 @@ def serve_app(
             webbrowser.open(url)
         except (OSError, webbrowser.Error):
             pass
-    try:
-        threading.Event().wait()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        session.close()
-        httpd.shutdown()
-        httpd.server_close()
+    session.stop.wait()
+    session.close()
+    httpd.shutdown()
+    httpd.server_close()

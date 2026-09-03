@@ -77,29 +77,54 @@ run holds its data in memory.
 
 ### Packaging the app
 
-`ptr app` freezes into a folder a reviewer can run with no Python installed:
+`ptr app` freezes into something a reviewer can run with no Python installed:
 
 ```bash
 pip install . pyinstaller
-pyinstaller --noconfirm packaging/ptr-app.spec    # -> dist/ptr/  (ptr.exe on Windows)
-python scripts/smoke_frozen.py dist/ptr/ptr       # proves the bundle serves a review
+pyinstaller --noconfirm packaging/ptr-app.spec
+python scripts/smoke_frozen.py dist/ptr/ptr        # proves the bundle serves a review
 ```
 
-The result is one directory — about 40 MB — holding the interpreter, NumPy, HDF5 and
-the bundled reference data. `scripts/smoke_frozen.py` starts that bundle against a tiny
-synthetic file and checks it really serves the review page, because `ptr --help` would
-pass on a bundle that cannot do anything else.
+On Windows that leaves `dist/ptr/ptr.exe`; on macOS it leaves `dist/PTR-MS Review.app`.
+Either way the bundle is the same ~40 MB of interpreter, NumPy, HDF5 and bundled
+reference data. `scripts/smoke_frozen.py` starts it against a tiny synthetic file and
+checks it really serves the review page, because `ptr --help` would pass on a bundle
+that cannot do anything else.
 
-Each operating system needs its own build: PyInstaller cannot cross-compile. The
-`package` workflow does it on native macOS and Windows runners and uploads a zipped
-folder per platform; pushing a `v*` tag also publishes them as a GitHub Release. To
-build for Windows without any of that, run the same two commands on a Windows machine.
+Then wrap it the way each system expects:
 
-Unsigned builds warn on first launch — macOS Gatekeeper (right-click → Open, or
-`xattr -d com.apple.quarantine <app>`), Windows SmartScreen ("More info" → "Run
-anyway"). Both disappear once the bundle is signed with a Developer ID or code-signing
-certificate; the spec is ready for that without other changes. The app keeps a console
-window: it prints the URL to open and any errors, and closing the window stops it.
+```bash
+wix build build/msi/ptr-app.wxs -arch x64 -o dist/ptr.msi              # Windows
+hdiutil create -volname "PTR-MS Review" -srcfolder stage -format UDZO dist/ptr.dmg
+```
+
+`packaging/make_msi.py` writes the WiX source from the built folder — one component per
+directory with a GUID derived from the path, so an upgrade replaces the files it should
+and removes the ones it should. The folder layout, not a hand-maintained file list, is
+what the installer installs.
+
+Each operating system needs its own build: PyInstaller cannot cross-compile, and neither
+can an installer tool. The `package` workflow does all of it on native macOS and Windows
+runners and uploads the two installers; pushing a `v*` tag also publishes them as a
+GitHub Release. To build for Windows without any of that, run the commands above on a
+Windows machine.
+
+Neither installer is signed, so the first run warns. On macOS, drag the app to
+Applications and start it once with right-click (or Control-click) → Open; the
+alternative is dropping the download flag directly:
+
+```bash
+xattr -dr com.apple.quarantine "PTR-MS Review.app"
+```
+
+Windows SmartScreen says "More info" → "Run anyway". Both go away once the bundle is
+signed and notarised with a Developer ID or code-signing certificate, which the spec and
+the WiX source are ready for without other changes.
+
+A double-clicked app opens its review page in the browser and prints nothing, since
+there is no terminal; its URL and any errors go to `~/.ptr-ms/log.txt`. "Stop the app"
+at the bottom of the start screen shuts the server down — from a terminal, Ctrl-C does
+the same.
 
 `viz` opens a browser review app for an existing peak list + ranges so an expert can
 visually check and tweak peaks / segments / calibration. K, molar volume, kinetic and
