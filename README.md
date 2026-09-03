@@ -75,6 +75,32 @@ summary already sits at that name — a Viewer export, say — it writes `<name>
 instead of overwriting it. Opening another file closes the current one, since a large
 run holds its data in memory.
 
+### Packaging the app
+
+`ptr app` freezes into a folder a reviewer can run with no Python installed:
+
+```bash
+pip install . pyinstaller
+pyinstaller --noconfirm packaging/ptr-app.spec    # -> dist/ptr/  (ptr.exe on Windows)
+python scripts/smoke_frozen.py dist/ptr/ptr       # proves the bundle serves a review
+```
+
+The result is one directory — about 40 MB — holding the interpreter, NumPy, HDF5 and
+the bundled reference data. `scripts/smoke_frozen.py` starts that bundle against a tiny
+synthetic file and checks it really serves the review page, because `ptr --help` would
+pass on a bundle that cannot do anything else.
+
+Each operating system needs its own build: PyInstaller cannot cross-compile. The
+`package` workflow does it on native macOS and Windows runners and uploads a zipped
+folder per platform; pushing a `v*` tag also publishes them as a GitHub Release. To
+build for Windows without any of that, run the same two commands on a Windows machine.
+
+Unsigned builds warn on first launch — macOS Gatekeeper (right-click → Open, or
+`xattr -d com.apple.quarantine <app>`), Windows SmartScreen ("More info" → "Run
+anyway"). Both disappear once the bundle is signed with a Developer ID or code-signing
+certificate; the spec is ready for that without other changes. The app keeps a console
+window: it prints the URL to open and any errors, and closing the window stops it.
+
 `viz` opens a browser review app for an existing peak list + ranges so an expert can
 visually check and tweak peaks / segments / calibration. K, molar volume, kinetic and
 humidity controls, R windowing, and peak/interval edits recompute from embedded preview

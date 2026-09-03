@@ -38,7 +38,16 @@ from .analyze import (
     resolve_x_axis_unit,
 )
 
-RECENT_PATH = Path.home() / ".ptr-ms" / "recent.json"
+
+def _recent_path() -> Path:
+    """Where recent files are remembered. ``PTR_RECENT_PATH`` overrides it so a
+    packaged build can be exercised (or a home folder kept clean) without patching
+    Python in a frozen bundle."""
+    override = os.environ.get("PTR_RECENT_PATH")
+    return Path(override).expanduser() if override else Path.home() / ".ptr-ms" / "recent.json"
+
+
+RECENT_PATH = _recent_path()
 RECENT_LIMIT = 20
 
 

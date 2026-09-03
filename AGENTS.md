@@ -25,6 +25,7 @@ CLI reference.
 | `src/ptr_ms_analysis/viz.py` | Self-contained browser review UI and localhost server. |
 | `src/ptr_ms_analysis/gen_rate_constants.py` | Rebuilds the bundled rate-constant JSON. |
 | `src/ptr_ms_analysis/reference/` | Scientific references and package data shipped with the CLI. |
+| `packaging/` | PyInstaller spec and frozen-entry point; the `package` workflow builds a folder bundle per OS. |
 
 ## Running it
 
@@ -57,21 +58,31 @@ in addition to the package's normal Python dependencies:
 uv run pytest
 uv run ruff check --select F,I src tests scripts
 uv run python scripts/smoke_viz.py
-uvx --from . ptr --help
-uvx --from . ptr inspect --help
-uvx --from . ptr peaks --help
-uvx --from . ptr segments --help
-uvx --from . ptr analyze --help
-uvx --from . ptr viz --help
-uvx --from . ptr calibrate --help
-uvx --from . ptr compare --help
-uvx --from . ptr rates water
+uv run ptr --help
+uv run ptr inspect --help
+uv run ptr peaks --help
+uv run ptr segments --help
+uv run ptr analyze --help
+uv run ptr viz --help
+uv run ptr app --help
+uv run ptr calibrate --help
+uv run ptr compare --help
+uv run ptr rates h2o    # the bundled library has no water entry; h2o returns matches
 uv build
 ```
+
+Use `uv run`, not `uvx --from .`: uv caches a wheel built from a directory per version,
+so `uvx --from . ptr <cmd>` can report that a subcommand added this week does not exist.
 
 For scientific or HDF5-processing changes, also run the affected command on a suitable
 local fixture and inspect its JSON diagnostics or CSV output. Do not commit measurement
 files, generated review HTML, configs, or result CSVs.
+
+Packaging is checked separately because it is slow and pulls its own toolchain:
+`uv run --with pyinstaller pyinstaller --noconfirm packaging/ptr-app.spec` then
+`uv run python scripts/smoke_frozen.py dist/ptr/ptr`, which starts the frozen bundle and
+asserts it serves the review page. Run it when `packaging/`, dependencies, or the app
+server change; the Windows half of it can only be verified on a Windows runner.
 
 ## Conventions
 

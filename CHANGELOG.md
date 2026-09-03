@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Packaging: `packaging/ptr-app.spec`, `scripts/smoke_frozen.py`, and a `package`
+  workflow.** PyInstaller builds a folder a reviewer can run with no Python installed
+  (one-dir by choice — one-file unpacks into `%TEMP%` on every start and is what
+  antivirus tools object to). PyInstaller cannot cross-compile, so the workflow builds on
+  native macOS and Windows runners and uploads one zip per platform, with a `v*` tag
+  publishing them as a GitHub Release. The smoke script starts the finished bundle against
+  a tiny synthetic file and fails unless it serves the review page, since `ptr --help`
+  would pass on a bundle that can do nothing else.
 - **App mode: `ptr app`.** A persistent local review app for people who want the tool
   rather than the chat. It opens on a start screen of recent files, takes a file from
   there, and stays up between files. Each file's config lives beside it under the same
