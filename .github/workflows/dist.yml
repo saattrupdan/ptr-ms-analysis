@@ -59,15 +59,6 @@ jobs:
       - name: Check the bundle actually serves a review
         run: python scripts/smoke_frozen.py "${{ matrix.exe }}"
 
-      - name: Name it
-        shell: bash
-        run: mv "dist/ptr.${{ matrix.installer }}" "dist/ptr-review-${{ matrix.label }}.${{ matrix.installer }}"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ptr-review-${{ matrix.label }}
-          path: dist/ptr-review-${{ matrix.label }}.${{ matrix.installer }}
-          if-no-files-found: error
       - name: Build the Windows installer
         if: matrix.installer == 'msi'
         run: |
@@ -95,10 +86,15 @@ jobs:
           hdiutil create -quiet -volname "PTR-MS Review" -srcfolder "$stage" -ov \
             -format UDZO dist/ptr.dmg
 
+      # Named after the installer exists: naming it before building it is a mistake
+      # worth remembering, because the smoke test above passes either way.
+      - name: Name it
+        run: mv "dist/ptr.${{ matrix.installer }}" "dist/ptr-review-${{ matrix.label }}.${{ matrix.installer }}"
+
       - uses: actions/upload-artifact@v4
         with:
           name: ptr-review-${{ matrix.label }}
-          path: dist/ptr.${{ matrix.installer }}
+          path: dist/ptr-review-${{ matrix.label }}.${{ matrix.installer }}
           if-no-files-found: error
 
   release:
