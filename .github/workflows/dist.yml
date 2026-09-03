@@ -62,9 +62,15 @@ jobs:
       - name: Build the Windows installer
         if: matrix.installer == 'msi'
         run: |
-          dotnet tool install --global wix
+          # WiX v3 is the last MIT-licensed toolchain. WiX v6 and later refuse to build
+          # anything until the Open Source Maintenance Fee EULA is accepted, which asks
+          # a fee of anyone shipping a product for money; there is no reason to put that
+          # condition on this project's builds.
+          curl.exe -sSL -o wix3.zip https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip
+          Expand-Archive -Path wix3.zip -DestinationPath wix3 -Force
           python packaging/make_msi.py dist/ptr build/msi/ptr-app.wxs
-          wix build build/msi/ptr-app.wxs -arch x64 -intermediate build/msi -o dist/ptr.msi
+          wix3/candle.exe -arch x64 -out build/msi/ptr-app.wixobj build/msi/ptr-app.wxs
+          wix3/light.exe -o dist/ptr.msi build/msi/ptr-app.wixobj
 
       - name: Build the disk image
         if: matrix.installer == 'dmg'

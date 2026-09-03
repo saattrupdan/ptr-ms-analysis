@@ -23,7 +23,9 @@ URL = "https://github.com/saattrupdan/ptr-ms-analysis"
 # Generated once, never regenerated: this is what identifies the product across versions,
 # so it must survive a version bump and a re-clone of the repository.
 UPGRADE_CODE = "8f0c2f4c-6e1b-5a0d-9e2f-4b7c1a3d6e85"
-NAMESPACE = "http://wixtoolset.org/schemas/v4/wxs"
+# MIT-licensed, and the last version without the Open Source Maintenance Fee EULA
+# that WiX v6+ insists on accepting. The authoring below is v3-shaped for that reason.
+NAMESPACE = "http://schemas.microsoft.com/wix/2006/wi"
 GUID_SPACE = uuid.uuid5(uuid.NAMESPACE_URL, "ptr-ms-analysis/component/")
 # Where each component keeps the key path an MSI insists on. A component may not key on
 # one of this bundle's .dll files, so it keys on a registry value instead.
@@ -91,6 +93,8 @@ def _component(parent, relative: str, source: str, files) -> str:
         },
     )
     for name in files:
+        # Absolute on purpose: candle resolves a relative Source against the .wxs
+        # file's own folder, which is the build directory, not the checkout.
         ET.SubElement(
             component,
             "File",
@@ -118,45 +122,56 @@ def _tree(parent, source: str, relative: str, feature) -> None:
 
 
 def build_wxs(source: str, product_version: str) -> ET.ElementTree:
+    """WiX v3 authoring: a Product, one Feature, and the built folder mirrored."""
     wix = ET.Element("Wix", {"xmlns": NAMESPACE})
-    package = ET.SubElement(
+    product = ET.SubElement(
         wix,
-        "Package",
+        "Product",
         {
+            # Id="*" means a fresh product code per build, which is what MajorUpgrade
+            # wants: the version goes up, the UpgradeCode does not.
+            "Id": "*",
             "Name": APP_NAME,
             "Manufacturer": MANUFACTURER,
             "Version": product_version,
             "Language": "1033",
-            "InstallerVersion": "500",
-            "Compressed": "yes",
-            "InstallScope": "perMachine",
             "UpgradeCode": UPGRADE_CODE,
         },
     )
     ET.SubElement(
-        package,
+        product,
+        "Package",
+        {
+            "InstallerVersion": "500",
+            "Compressed": "yes",
+            "InstallScope": "perMachine",
+            "Description": APP_NAME,
+        },
+    )
+    ET.SubElement(
+        product,
         "MajorUpgrade",
         {"DowngradeErrorMessage": f"A newer version of {APP_NAME} is already installed."},
     )
-    ET.SubElement(package, "MediaTemplate", {"EmbedCab": "yes", "CompressionLevel": "high"})
-    ET.SubElement(package, "Property", {"Id": "ARPCOMMENTS",
+    ET.SubElement(product, "MediaTemplate", {"EmbedCab": "yes"})
+    ET.SubElement(product, "Property", {"Id": "ARPCOMMENTS",
                                         "Value": "Review PTR-MS measurements, export the CSV"})
-    ET.SubElement(package, "Property", {"Id": "ARPHELPTELEPHONE", "Value": URL})
-    ET.SubElement(package, "Property", {"Id": "ARPURLINFOABOUT", "Value": URL})
+    ET.SubElement(product, "Property", {"Id": "ARPURLINFOABOUT", "Value": URL})
 
-    program_files = ET.SubElement(package, "StandardDirectory", {"Id": "ProgramFiles64Folder"})
+    targetdir = ET.SubElement(product, "Directory", {"Id": "TARGETDIR", "Name": "SourceDir"})
+    program_files = ET.SubElement(targetdir, "Directory", {"Id": "ProgramFiles64Folder"})
     app_dir = ET.SubElement(program_files, "Directory", {"Id": "APPLICATIONFOLDER",
                                                           "Name": APP_NAME})
-    feature = ET.SubElement(package, "Feature", {"Id": "ApplicationFeature",
+    feature = ET.SubElement(product, "Feature", {"Id": "ApplicationFeature",
                                                  "Title": APP_NAME, "Level": "1"})
     _tree(app_dir, os.path.abspath(source), "", feature)
 
     # The Start Menu entry, because the console window it opens is where the URL appears.
-    menu = ET.SubElement(package, "StandardDirectory", {"Id": "ProgramMenuFolder"})
+    menu = ET.SubElement(targetdir, "Directory", {"Id": "ProgramMenuFolder"})
     menu_dir = ET.SubElement(menu, "Directory", {"Id": _id("dir", "__menu__"), "Name": APP_NAME})
     shortcut = ET.SubElement(menu_dir, "Component", {"Id": _id("component", "__shortcut__"),
                                                      "Guid": str(uuid.uuid5(GUID_SPACE,
-                                                                           "__shortcut__"))})
+                                                                            "__shortcut__"))})
     ET.SubElement(
         shortcut,
         "Shortcut",
