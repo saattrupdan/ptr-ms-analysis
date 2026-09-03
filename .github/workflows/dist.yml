@@ -55,8 +55,10 @@ jobs:
         run: python scripts/smoke_frozen.py ${{ matrix.exe }}
 
       - name: Zip it
-        shell: bash
-        run: (cd dist && zip -q -r ../ptr-app-${{ matrix.label }}.zip ptr)
+        # shutil, not `zip`: git-bash on the Windows runners has no zip on PATH.
+        run: >-
+          python -c "import shutil;
+          shutil.make_archive('ptr-app-${{ matrix.label }}', 'zip', 'dist', 'ptr')"
 
       - uses: actions/upload-artifact@v4
         with:
