@@ -794,9 +794,12 @@ def serve_app(
         )
     if open_browser:
         try:
-            webbrowser.open(url)
-        except (OSError, webbrowser.Error):
-            pass
+            if not webbrowser.open(url):
+                raise OSError("no browser answered")
+        except (OSError, webbrowser.Error) as exc:
+            # In a double-clicked bundle this line is the only way the user learns the
+            # server is up, so it has to carry the address.
+            _log(f"ptr: could not open a browser ({exc}); open {url} in one yourself")
     session.stop.wait()
     session.close()
     httpd.shutdown()

@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import urllib.error
@@ -693,3 +694,38 @@ def test_no_template_marker_survives_rendering():
     for mode in ("review", "app"):
         html = viz.render_html(data, config_path="/tmp/x.json", mode=mode)
         assert "/*__" not in html, f"unreplaced template marker in {mode} mode"
+
+
+HOOK = Path(__file__).resolve().parents[1] / "packaging" / "runtime_hook.py"
+
+
+def _run_hook(argv, frozen):
+    """Exec the hook the way PyInstaller does, and report what argv became."""
+    saved = sys.argv
+    try:
+        sys.argv = list(argv)
+        if frozen:
+            sys.frozen = True
+        exec(compile(HOOK.read_text(), str(HOOK), "exec"), {"__name__": "runtime_hook"})
+        return list(sys.argv)
+    finally:
+        sys.argv = saved
+        if frozen:
+            del sys.frozen
+
+
+def test_a_bare_double_click_becomes_app_mode():
+    # Finder starts Contents/MacOS/ptr with no arguments at all; the plain CLI would
+    # answer that with usage text and exit 2, which in a windowed bundle is invisible.
+    assert _run_hook(["ptr"], frozen=True) == ["ptr", "app"]
+
+
+def test_the_hook_leaves_named_commands_and_a_plain_cli_alone():
+    assert _run_hook(["ptr", "app", "--no-browser"], frozen=True) == ["ptr", "app", "--no-browser"]
+    assert _run_hook(["ptr"], frozen=False) == ["ptr"]
+
+
+def test_the_spec_still_installs_the_hook():
+    """A spec that stopped listing the hook would break double-click silently."""
+    spec = HOOK.with_name("ptr-app.spec").read_text()
+    assert "runtime_hook.py" in spec

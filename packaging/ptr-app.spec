@@ -49,7 +49,8 @@ a = Analysis(
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
-    runtime_hooks=[],
+    # A double-clicked bundle arrives with no arguments; see the hook.
+    runtime_hooks=[os.path.join(SPECPATH, "runtime_hook.py")],
     # Nothing here plots or draws; these only bloat the bundle and slow startup.
     excludes=["tkinter", "matplotlib", "pandas", "scipy", "PIL", "pytest"],
     noarchive=False,

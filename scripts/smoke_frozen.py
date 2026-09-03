@@ -98,6 +98,25 @@ def free_port() -> int:
         return sock.getsockname()[1]
 
 
+def await_url(proc, timeout):
+    """Block until the app reports its address on stderr. Returns (url, lines)."""
+    deadline = time.monotonic() + timeout
+    lines = []
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            out, err = proc.communicate(timeout=5)
+            return None, lines + [out, err]
+        line = proc.stderr.readline()
+        if not line:
+            time.sleep(0.05)
+            continue
+        lines.append(line.rstrip())
+        match = re.search(r"http://127\.0\.0\.1:(\d+)/", line)
+        if match:
+            return f"http://127.0.0.1:{match.group(1)}/", lines
+    return None, lines
+
+
 def main(argv) -> int:
     if len(argv) != 2:
         print(__doc__, file=sys.stderr)
@@ -123,32 +142,13 @@ def main(argv) -> int:
         errors="replace",
         env=env,
     )
-    deadline = time.monotonic() + LAUNCH_TIMEOUT
-    url = None
-    lines = []
     try:
-        while time.monotonic() < deadline and url is None:
-            if proc.poll() is not None:
-                out, err = proc.communicate(timeout=5)
-                print(
-                    f"frozen app smoke: FAIL — the bundle exited with "
-                    f"{proc.returncode} before serving\n{out}\n{err}",
-                    file=sys.stderr,
-                )
-                return 1
-            line = proc.stderr.readline()
-            if not line:
-                time.sleep(0.05)
-                continue
-            lines.append(line.rstrip())
-            match = re.search(r"http://127\.0\.0\.1:(\d+)/", line)
-            if match:
-                url = f"http://127.0.0.1:{match.group(1)}/"
-
+        url, lines = await_url(proc, LAUNCH_TIMEOUT)
         if url is None:
             print("frozen app smoke: FAIL — no URL on stderr within the timeout", file=sys.stderr)
             print("\n".join(lines), file=sys.stderr)
             return 1
+        base = url.rstrip("/")
         if int(url.rsplit(":", 1)[1].rstrip("/")) != port:
             print(f"frozen app smoke: note — the app moved to port {url}", file=sys.stderr)
 
@@ -182,7 +182,46 @@ def main(argv) -> int:
             print("frozen app smoke: FAIL — could not close the file", file=sys.stderr)
             return 1
 
-        print(f"frozen app smoke: OK  ({os.path.getsize(exe) // 1024} KiB launcher, served {url})")
+        # Second phase: the same executable with no arguments at all, which is how
+        # Finder and the Start Menu shortcut launch it. The command line would answer
+        # that with usage text and exit 2, and a windowed bundle does it invisibly.
+        # `BROWSER` keeps the page from popping open on whoever is running this.
+        bare = subprocess.Popen(
+            [str(exe)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=dict(env, BROWSER=f"{sys.executable} -c pass"),
+        )
+        try:
+            bare_url, bare_lines = await_url(bare, LAUNCH_TIMEOUT)
+            if bare_url is None:
+                print(
+                    "frozen app smoke: FAIL — launched with no arguments, the bundle "
+                    "never started an app (a double-click would do nothing)",
+                    file=sys.stderr,
+                )
+                print("\n".join(bare_lines), file=sys.stderr)
+                return 1
+            status, start = get(bare_url.rstrip("/") + "/")
+            if status != 200 or b"Stop the app" not in start:
+                print(
+                    f"frozen app smoke: FAIL — the bare launch served {status} "
+                    "without the start screen",
+                    file=sys.stderr,
+                )
+                return 1
+            post(bare_url.rstrip("/") + "/shutdown")
+        finally:
+            bare.kill()
+            bare.wait(timeout=10)
+
+        print(
+            f"frozen app smoke: OK  ({os.path.getsize(exe) // 1024} KiB launcher, "
+            f"served {url}, and a bare launch opened the start screen)"
+        )
         return 0
     finally:
         proc.kill()

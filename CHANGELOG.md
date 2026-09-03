@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Double-clicking the bundled app opens it.** Finder starts the bundle with no
+  arguments, and the plain `ptr` command line answers that with usage text and exit code
+  2 — invisibly, in a windowed bundle. A runtime hook turns a bare launch inside a bundle
+  into `ptr app`, and when no browser opens the address is written to
+  `~/.ptr-ms/log.txt` rather than vanishing.
 - **Packaging: `packaging/ptr-app.spec`, `packaging/make_msi.py`, `scripts/smoke_frozen.py`,
   and a `package` workflow.** PyInstaller builds a bundle a reviewer can run with no
   Python installed (one-dir by choice — one-file unpacks into `%TEMP%` on every start and
