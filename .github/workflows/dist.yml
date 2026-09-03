@@ -72,6 +72,13 @@ jobs:
           wix3/candle.exe -arch x64 -out build/msi/ptr-app.wixobj build/msi/ptr-app.wxs
           wix3/light.exe -o dist/ptr.msi build/msi/ptr-app.wixobj
 
+      - name: Check the installed app, not just the built one
+        if: matrix.installer == 'msi'
+        run: |
+          $p = Start-Process msiexec.exe -ArgumentList '/i',"$PWD\dist\ptr.msi",'/qn','/norestart' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "silent install failed with exit code $($p.ExitCode)" }
+          python scripts/smoke_frozen.py "C:\Program Files\PTR-MS Review\ptr.exe"
+
       - name: Build the disk image
         if: matrix.installer == 'dmg'
         run: |
@@ -91,6 +98,13 @@ jobs:
           TXT
           hdiutil create -quiet -volname "PTR-MS Review" -srcfolder "$stage" -ov \
             -format UDZO dist/ptr.dmg
+
+      - name: Check the mounted image, not just the built app
+        if: matrix.installer == 'dmg'
+        run: |
+          hdiutil attach -nobrowse -readonly -mountpoint /tmp/ptr-mount dist/ptr.dmg
+          python scripts/smoke_frozen.py "/tmp/ptr-mount/PTR-MS Review.app/Contents/MacOS/ptr"
+          hdiutil detach /tmp/ptr-mount
 
       # Named after the installer exists: naming it before building it is a mistake
       # worth remembering, because the smoke test above passes either way.
