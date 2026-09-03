@@ -94,14 +94,18 @@ def _component(parent, relative: str, source: str, files) -> str:
     )
     for name in files:
         # Absolute on purpose: candle resolves a relative Source against the .wxs
-        # file's own folder, which is the build directory, not the checkout.
+        # file's own folder, which is the build directory, not the checkout. The
+        # separators are left as this OS writes them — rewriting them here turns a
+        # POSIX path into one with no root.
         ET.SubElement(
             component,
             "File",
             {
-                "Source": os.path.join(source, relative.replace("/", os.sep), name).replace(
-                    os.sep, "\\"
-                )
+                # A File with no Id is given one derived from its filename alone, so
+                # the LICENSE.md in each bundled package collides (LGHT0091). Ids must
+                # be unique across the whole install, so derive them from the path.
+                "Id": _id("file", f"{relative}/{name}"),
+                "Source": os.path.join(source, relative.replace("/", os.sep), name),
             },
         )
     return component.get("Id")
