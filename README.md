@@ -94,14 +94,17 @@ that cannot do anything else.
 Then wrap it the way each system expects:
 
 ```bash
-wix build build/msi/ptr-app.wxs -arch x64 -o dist/ptr.msi              # Windows
+candle.exe -arch x64 -out ptr-app.wixobj build/msi/ptr-app.wxs    # Windows
+light.exe  -out dist/ptr.msi ptr-app.wixobj
 hdiutil create -volname "PTR-MS Review" -srcfolder stage -format UDZO dist/ptr.dmg
 ```
 
 `packaging/make_msi.py` writes the WiX source from the built folder — one component per
-directory with a GUID derived from the path, so an upgrade replaces the files it should
-and removes the ones it should. The folder layout, not a hand-maintained file list, is
-what the installer installs.
+directory, one file id and GUID derived from each path, so an upgrade replaces the files
+it should and removes the ones it should. The folder layout, not a hand-maintained file
+list, is what the installer installs. It targets WiX v3 deliberately: v6 and later refuse
+to build until the Open Source Maintenance Fee EULA is accepted, which asks a fee of
+anyone shipping a product for money.
 
 Each operating system needs its own build: PyInstaller cannot cross-compile, and neither
 can an installer tool. The `package` workflow does all of it on native macOS and Windows
@@ -109,9 +112,9 @@ runners and uploads the two installers; pushing a `v*` tag also publishes them a
 GitHub Release. To build for Windows without any of that, run the commands above on a
 Windows machine.
 
-Neither installer is signed, so the first run warns. On macOS, drag the app to
-Applications and start it once with right-click (or Control-click) → Open; the
-alternative is dropping the download flag directly:
+Neither installer is signed, so the first run warns. On macOS, open the disk image, drag
+the app to Applications, and start it once with right-click (or Control-click) → Open;
+the alternative is dropping the download flag directly:
 
 ```bash
 xattr -dr com.apple.quarantine "PTR-MS Review.app"

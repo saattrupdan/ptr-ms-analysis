@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Python installed (one-dir by choice — one-file unpacks into `%TEMP%` on every start and
   is what antivirus tools object to), wrapped as a `.app` inside a `.dmg` on macOS and an
   `.msi` on Windows. The MSI's component list is generated from the built folder with
-  path-derived GUIDs, so an upgrade replaces and removes exactly the right files.
+  path-derived ids and GUIDs, so an upgrade replaces and removes exactly the right files,
+  and it targets the MIT-licensed WiX v3 rather than v6+, which will not run until the
+  Open Source Maintenance Fee EULA is accepted.
   PyInstaller cannot cross-compile, so the workflow builds on native macOS and Windows
   runners and uploads one installer per platform, with a `v*` tag publishing them as a
   GitHub Release. The smoke script starts the finished bundle against a tiny synthetic
