@@ -412,6 +412,23 @@ def test_export_keeps_the_server_and_the_file_open(server, tmp_path):
     assert b"PTR-MS review" in page  # and the app is still serving
 
 
+def test_a_client_that_acts_on_ready_is_never_told_busy(server, tmp_path):
+    """The page offers its buttons as soon as the state says ready, so ready has to
+    mean the work is really finished — not finished except for the busy flag."""
+    api, session = server
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", payload_stub),
+    ):
+        api.post("/open", {"path": str(h5)})
+        _wait_ready(api)
+    assert session.busy is False
+    assert api.post("/close")[0] == 200
+
+
 def test_closing_a_file_leaves_the_server_up(server, tmp_path):
     api, session = server
     h5 = tmp_path / "run.h5"
@@ -729,3 +746,50 @@ def test_the_spec_still_installs_the_hook():
     """A spec that stopped listing the hook would break double-click silently."""
     spec = HOOK.with_name("ptr-app.spec").read_text()
     assert "runtime_hook.py" in spec
+
+
+def test_the_open_file_is_flagged_in_recents(server, tmp_path, monkeypatch):
+    """The start screen lists the open file in its own panel, so the recents list has
+    to say which entry that is; otherwise it shows twice, once without the button."""
+    api, session = server
+    # This test is the only writer of its own recents file; the session-wide one would
+    # otherwise see these paths too.
+    monkeypatch.setattr(app, "RECENT_PATH", tmp_path / "recent.json")
+    first = tmp_path / "run.h5"
+    other = tmp_path / "other.h5"
+    make_h5(first)
+    make_h5(other)
+    app.remember_recent(other)
+    app.remember_recent(first)
+
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", payload_stub),
+    ):
+        api.post("/open", {"path": str(first)})
+        _wait_ready(api)
+
+    _, recent = api.get("/api/recent")
+    entries = json.loads(recent)
+    # Keyed by full path: the session-wide recents file also holds run.h5 from other
+    # tests, and a name lookup would land on one of those.
+    by_path = {e["path"]: e for e in entries}
+    assert by_path[str(first.resolve())]["is_open"] is True
+    assert by_path[str(other.resolve())]["is_open"] is False
+
+    session.close()
+    _, recent = api.get("/api/recent")
+    assert all(not e.get("is_open") for e in json.loads(recent))
+
+
+def test_browse_says_so_when_the_system_has_no_file_dialog(server, monkeypatch):
+    """The page falls back to the path field on a 501, so the fallback has to be a
+    status the page can tell apart from a cancelled dialog."""
+    api, _ = server
+    monkeypatch.setattr(app.sys, "platform", "linux")
+    monkeypatch.setattr(app.os, "name", "posix")
+    monkeypatch.setattr(app.shutil, "which", lambda _cmd: None)
+    code, body = api.post("/browse", {})
+    assert code == 501
+    assert "type the path" in body["error"]

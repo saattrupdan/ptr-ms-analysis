@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -277,6 +278,11 @@ class Session:
                 self.close()
                 raise
             self.path, self.config_path, self.config = path, config_path, config
+            # Clear the flag before announcing readiness: the page polls the state and
+            # offers its buttons the moment it sees "ready", so "ready" has to mean it
+            # will accept a close or an export rather than answering "busy".
+            with self._lock:
+                self._opening = False
             self.status, self.stage = "ready", "Ready"
             try:
                 remember_recent(path)
@@ -426,106 +432,253 @@ class Session:
 
 
 _START_HTML = """<!doctype html>
-<html><head><meta charset="utf-8"><title>PTR-MS review</title>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PTR-MS review</title>
 <style>
-  :root{--bg:#0e141b;--panel:#161f29;--panel2:#1c2733;--fg:#e6edf3;--mut:#8b98a5;
-        --line:#26313d;--acc:#4c8dff;--hi:#f59e0b}
-  @media(prefers-color-scheme:light){:root{--bg:#f5f7fa;--panel:#fff;--panel2:#eef2f7;
-        --fg:#1a2027;--mut:#5c6775;--line:#d7dee8;--acc:#2563eb;--hi:#b45309}}
-  body{margin:0;background:var(--bg);color:var(--fg);
-       font:13px/1.5 -apple-system,system-ui,"Segoe UI",sans-serif}
-  main{max-width:820px;margin:8vh auto;padding:0 22px}
-  h1{font-size:19px;margin:0 0 4px}
-  p{color:var(--mut);margin:0 0 22px}
-  form{display:flex;gap:8px}
-  input{flex:1;padding:9px 11px;background:var(--panel);color:var(--fg);
-        border:1px solid var(--line);border-radius:8px;font:inherit}
-  button{padding:9px 14px;background:var(--acc);color:#fff;border:0;border-radius:8px;
-         font:inherit;cursor:pointer}
-  h2{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);
-     margin:26px 0 8px;font-weight:600}
-  ul{list-style:none;margin:0;padding:0}
-  li{display:flex;gap:10px;align-items:baseline;padding:8px 11px;border:1px solid var(--line);
-     border-radius:8px;margin-bottom:6px;cursor:pointer;background:var(--panel)}
-  li:hover{border-color:var(--acc)}
-  .p{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
-  .m{color:var(--mut);font-size:11px;white-space:nowrap}
-  .cfg{color:var(--hi);font-size:11px}
-  #state{margin-top:20px;min-height:20px;color:var(--mut)}
-  #state.err{color:#f87171}
-  .open{display:flex;gap:10px;align-items:center;padding:10px 12px;margin-bottom:6px;
-        border:1px solid var(--acc);border-radius:8px;background:var(--panel)}
-  .open .p{flex:1;font-weight:500;overflow:hidden;text-overflow:ellipsis}
-  button.ghost{background:transparent;color:var(--mut);border:1px solid var(--line)}
+:root{
+  --bg:#f5f6f8;--card:#fff;--sunk:#f7f8fa;--fg:#131a22;--mut:#5f6b78;
+  --line:#e2e6ec;--line2:#eef1f5;--acc:#2f6feb;--accc:#fff;--ok:#0f7b4f;
+  --err:#b3261e;--errbg:#fdf0ef;--ring:rgba(47,111,235,.30);
+}
+@media(prefers-color-scheme:dark){:root{
+  --bg:#0d1117;--card:#151b23;--sunk:#111721;--fg:#e6edf3;--mut:#8b98a6;
+  --line:#28313c;--line2:#1e252e;--acc:#4d8dff;--accc:#0b1220;--ok:#41b883;
+  --err:#ff6b60;--errbg:#2a1613;--ring:rgba(77,141,255,.40);
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);-webkit-font-smoothing:antialiased;
+  font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+main{max-width:660px;margin:0 auto;padding:60px 24px 44px}
+.head{display:flex;gap:12px;align-items:center;margin-bottom:10px}
+.mark{flex:none;width:40px;height:40px;border-radius:10px;background:var(--acc);
+  color:var(--accc);display:grid;place-items:center;font-size:14px;font-weight:600;
+  letter-spacing:-.03em}
+h1{margin:0;font-size:20px;font-weight:600;letter-spacing:-.015em}
+.lede{margin:0 0 26px;color:var(--mut)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+  box-shadow:0 1px 1px rgba(16,24,40,.04),0 8px 24px -16px rgba(16,24,40,.30)}
+.now{display:flex;gap:14px;align-items:center;padding:14px 16px;margin-bottom:20px;
+  border-color:var(--acc)}
+.now .txt{min-width:0;flex:1}
+.now b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.now .sub{display:block;color:var(--mut);font-size:12px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.pick{padding:24px 22px;text-align:center}
+.pick h2{margin:0 2px 4px;font-size:15px;font-weight:600}
+.pick p{margin:0 0 16px;color:var(--mut);font-size:13px}
+.btn{appearance:none;border:0;border-radius:9px;background:var(--acc);color:var(--accc);
+  font:inherit;font-weight:550;padding:9px 15px;cursor:pointer}
+.btn:hover{filter:brightness(1.07)}
+.btn:disabled{opacity:.55;cursor:default;filter:none}
+.btn.sec{background:transparent;color:var(--fg);border:1px solid var(--line);font-weight:500}
+.btn.sec:hover{background:var(--sunk)}
+.row{display:flex;gap:8px;max-width:470px;margin:0 auto}
+input[type=text]{flex:1;min-width:0;padding:9px 11px;background:var(--sunk);
+  color:var(--fg);border:1px solid var(--line);border-radius:9px;font:13px/1.4 inherit}
+input[type=text]:focus-visible,.btn:focus-visible,.link:focus-visible,
+li:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.or{display:flex;align-items:center;gap:10px;margin:16px auto;max-width:470px;
+  color:var(--mut);font-size:11px;letter-spacing:.07em;text-transform:uppercase}
+.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
+section{margin-top:30px}
+h3{margin:0 0 10px;font-size:11px;font-weight:600;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--mut)}
+ul{list-style:none;margin:0;padding:0}
+li{display:flex;gap:12px;align-items:center;padding:11px 14px;cursor:pointer;
+  border-bottom:1px solid var(--line2)}
+li:last-child{border-bottom:0}
+li:hover{background:var(--sunk)}
+.glyph{flex:none;width:32px;height:32px;border-radius:8px;background:var(--sunk);
+  border:1px solid var(--line);display:grid;place-items:center;font-size:10px;
+  font-weight:600;color:var(--mut)}
+.glyph.gone{color:var(--err)}
+.nm{min-width:0;flex:1}
+.nm b{display:block;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nm span{display:block;color:var(--mut);font-size:12px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.meta{flex:none;text-align:right;font-size:12px;color:var(--mut)}
+.meta em{display:block;font-style:normal}
+.meta .on{color:var(--ok)}
+.meta .miss{color:var(--err)}
+.go{flex:none;color:var(--mut);opacity:0;font-size:15px}
+li:hover .go,li:focus-visible .go{opacity:1}
+#empty{padding:16px;color:var(--mut);font-size:13px;text-align:center}
+.note{margin-top:18px;padding:11px 14px;border-radius:10px;background:var(--sunk);
+  color:var(--mut);font-size:13px}
+.note[hidden]{display:none}
+.note.err{background:var(--errbg);color:var(--err)}
+.bar{height:2px;margin-top:9px;border-radius:2px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;width:35%;background:var(--acc);
+  animation:slide 1.5s ease-in-out infinite}
+@keyframes slide{from{transform:translateX(-100%)}to{transform:translateX(380%)}}
+@media(prefers-reduced-motion:reduce){.bar i{animation:none;width:100%;opacity:.5}}
+footer{display:flex;gap:12px;align-items:center;justify-content:space-between;
+  margin-top:32px;color:var(--mut);font-size:12px}
+.link{background:none;border:0;padding:0;color:var(--mut);font:inherit;
+  text-decoration:underline;cursor:pointer}
+.link:hover{color:var(--fg)}
 </style></head><body><main>
-  <h1>PTR-MS review</h1>
-  <p>Open an IONICON <code>.h5</code> file. A file that has been reviewed before
-     reopens with its saved config; a new one is processed automatically first.</p>
-  <form id="open"><input id="path" placeholder="/path/to/run.h5" required autocomplete="off">
-    <button type="submit">Open</button></form>
-  <h2>Recent</h2><ul id="recent"></ul>
-  <div id="openwrap"></div>
-  <div id="state"></div>
-  <p class="stop"><button id="quit" class="ghost" type="button">Stop the app</button></p>
+  <div class="head"><div class="mark">&micro;g</div><h1>PTR-MS review</h1></div>
+  <p class="lede">Open an IONICON run to review its peaks and intervals. A file you have
+    reviewed before reopens with its saved config; a new one is processed first.</p>
+
+  <div id="now"></div>
+
+  <div class="card pick">
+    <h2>Open an IONICON run</h2>
+    <p>Choose a file on this computer, or type the path to one.</p>
+    <div class="row">
+      <input id="path" type="text" placeholder="/path/to/run.h5" spellcheck="false"
+             autocomplete="off">
+      <button class="btn" id="go" type="button">Open</button>
+    </div>
+    <div class="or">or</div>
+    <button class="btn sec" id="browse" type="button">Browse this computer&hellip;</button>
+  </div>
+
+  <section>
+    <h3>Recent</h3>
+    <div class="card"><ul id="recent"></ul><div id="empty" hidden></div></div>
+  </section>
+
+  <div class="note" id="state" role="status" aria-live="polite" hidden></div>
+
+  <footer>
+    <span>Served from 127.0.0.1 &mdash; nothing leaves this computer.</span>
+    <button class="link" id="quit" type="button">Stop the app</button>
+  </footer>
 </main><script>
 const $=s=>document.querySelector(s);
-function row(path,meta,cls){                 // paths go in as text, never as markup
-  const li=document.createElement('li'); li.dataset.path=path;
-  const p=document.createElement('span'); p.className='p'; p.textContent=path;
-  const m=document.createElement('span'); m.className='m'+(cls?' '+cls:''); m.textContent=meta;
-  li.append(p,m); return li;
-}
+let shown=null;                                  // the file the recents list was built for
+
+function human(b){const u=['B','KB','MB','GB','TB'];let v=b||0,i=0;
+  while(v>=1024&&i<u.length-1){v/=1024;i++;}
+  return (i&&v<10?v.toFixed(1):Math.round(v))+' '+u[i];}
+function when(t){if(!t)return'';const d=new Date(t*1000),mid=new Date();
+  mid.setHours(0,0,0,0);const days=Math.round((mid-d)/864e5);
+  if(days<=0)return'today';
+  if(days===1)return'yesterday';
+  if(days<14)return days+' days ago';
+  return d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});}
+const SEP=String.fromCharCode(92);          // Windows separators, without a literal
+function parts(p){const s=String(p).split(SEP).join('/'),i=s.lastIndexOf('/');
+  if(i<0)return{name:s,dir:''};
+  return{name:s.slice(i+1),dir:i===0?'/':s.slice(0,i)}}
+function el(tag,cls,text){const n=document.createElement(tag);
+  if(cls)n.className=cls; if(text!=null)n.textContent=text; return n;}
+
 async function recent(){
-  const items=await (await fetch('/api/recent')).json();
+  let items=[];
+  try{items=await (await fetch('/api/recent')).json();}catch(e){}
   const ul=$('#recent'); ul.innerHTML='';
-  if(!items.length){ const li=document.createElement('li');
-    const m=document.createElement('span'); m.className='m'; m.textContent='Nothing opened yet.';
-    li.append(m); ul.append(li); return; }
-  for(const e of items){
-    ul.append(row(e.path, (e.exists?((e.size/1073741826).toFixed(2)+' GB'):'missing')+
-      (e.config_exists?' · config saved':' · new'), e.config_exists?'cfg':null));
+  const list=items.filter(e=>!e.is_open);
+  const msg=$('#empty');
+  msg.hidden=list.length>0;
+  if(!list.length)msg.textContent=items.length
+    ?'The only file you have opened is the one above.'
+    :'Nothing opened yet. Files you review will be listed here.';
+  for(const e of list){
+    const li=el('li'); li.dataset.path=e.path; li.tabIndex=0;
+    li.title=e.path;
+    li.append(el('div','glyph'+(e.exists?'':' gone'),e.exists?'H5':'!'));
+    const nm=el('div','nm'),q=parts(e.path);
+    nm.append(el('b',null,q.name),el('span',null,q.dir));
+    const m=el('div','meta');
+    m.append(el('div',null,e.exists?human(e.size)+' · '+when(e.mtime):null),
+             el('em',e.exists?(e.config_exists?'on':''):'miss',
+                e.exists?(e.config_exists?'reviewed before':'new · will be processed')
+                        :'gone from disk'));
+    li.append(nm,m,el('div','go','→'));
+    li.onclick=()=>openFile(e.path);
+    li.onkeydown=ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();openFile(e.path);}};
+    ul.append(li);
   }
-  ul.querySelectorAll('li[data-path]').forEach(el=>
-    el.onclick=()=>{$('#path').value=el.dataset.path;$('#path').focus();});
 }
+
 async function openFile(path){
-  const r=await fetch('/open',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({path})});
-  if(!r.ok) return show(((await r.json())||{}).error||'Could not open that file',true);
-  $('#openwrap').innerHTML=''; tick();
-}
-function show(t,isErr){$('#state').textContent=t||'';$('#state').className=isErr?'err':'';}
-function current(s){
-  const wrap=$('#openwrap'); wrap.innerHTML='';
-  const box=document.createElement('div'); box.className='open';
-  const p=document.createElement('span'); p.className='p'; p.textContent=s.file||'';
-  box.append(p);
-  if(s.export&&s.export.out){ const m=document.createElement('span'); m.className='m';
-    m.textContent='last export '+s.export.out; box.append(m); }
-  const resume=document.createElement('button'); resume.id='resume'; resume.textContent='Open the review';
-  const close=document.createElement('button'); close.className='ghost'; close.textContent='Close file';
-  box.append(resume,close); wrap.append(box);
-  resume.onclick=()=>location='/review';
-  close.onclick=async()=>{ const r=await fetch('/close',{method:'POST'});
-    if(!r.ok) return show(((await r.json())||{}).error||'Not yet',true);
-    wrap.innerHTML=''; recent(); };
-  show(s.agent_status||'');
-}
-async function tick(){
-  let s; try{ s=await (await fetch('/api/state')).json(); }catch(e){ return; }
-  if(s.status==='loading'||s.status==='exporting'){
-    show((s.stage||'Working')+(s.agent_status?' — '+s.agent_status:''));
-    return setTimeout(tick,900);
+  let r;
+  try{r=await fetch('/open',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({path})});}
+  catch(e){return note('The app is no longer running.',true,false,true);}
+  if(!r.ok){
+    const b=await r.json().catch(()=>({}));
+    return note(b.error||'Could not open that file.',true,false,true);
   }
-  if(s.status==='error') return show(s.error||'Could not open that file',true);
-  if(s.status==='ready') return current(s);
-  show('');
+  $('#path').value=''; note('Opening '+path+' …',false,true); tick();
 }
-$('#open').onsubmit=e=>{e.preventDefault();openFile($('#path').value.trim());};
+
+let sticky=0;                                // until when the poller must leave this alone
+function note(text,isErr,progress,hold){
+  if(hold)sticky=Date.now()+12000; else if(!text)sticky=0;
+  const box=$('#state'); box.innerHTML='';
+  box.className='note'+(isErr?' err':'');
+  box.hidden=!text;
+  if(!text)return;
+  box.append(document.createTextNode(text));
+  if(progress){const bar=el('div','bar'); bar.append(el('i')); box.append(bar);}
+}
+
+function current(s){
+  const box=$('#now'); box.innerHTML='';
+  if(!s.file)return;
+  const card=el('div','card now'),txt=el('div','txt'),q=parts(s.file);
+  txt.append(el('b',null,q.name),el('span','sub',q.dir||q.name));
+  txt.title=s.file;
+  card.append(txt);
+  if(s.export&&s.export.out){
+    const out=parts(s.export.out),m=el('div','meta');
+    m.append(el('div',null,'exported'),el('em',null,out.name));
+    m.title=s.export.out;
+    card.append(m);
+  }
+  const open=el('button','btn','Open the review'),close=el('button','btn sec','Close');
+  open.onclick=()=>location='/review';
+  close.onclick=async()=>{
+    const r=await fetch('/close',{method:'POST'}).catch(()=>null);
+    if(!r||!r.ok)return note('Could not close the file.',true,false,true);
+    note(''); box.innerHTML=''; shown=null; recent();
+  };
+  card.append(open,close); box.append(card);
+}
+
+async function tick(){
+  let s=null;
+  try{s=await (await fetch('/api/state')).json();}catch(e){return;}
+  const busy=s.status==='loading'||s.status==='exporting';
+  if(busy){
+    note((s.stage||'Working')+((s.agent_status||'')?' — '+s.agent_status:''),false,true);
+  }else if(s.status==='error'){
+    note(s.error||'Could not open that file.',true,false,true);
+  }else{
+    if(Date.now()>sticky)note('');
+    if(s.status==='ready') current(s); else $('#now').innerHTML='';
+  }
+  if(shown!==s.file){shown=s.file||null; recent();}
+  setTimeout(tick,busy?900:2500);
+}
+
+$('#go').onclick=()=>{const p=$('#path').value.trim(); if(p)openFile(p);};
+$('#path').onkeydown=ev=>{if(ev.key==='Enter'){ev.preventDefault();$('#go').click();}};
+$('#browse').onclick=async()=>{
+  const btn=$('#browse'); btn.disabled=true;
+  note('Choose a file in the dialog that just opened on this computer.');
+  let r=null;
+  try{r=await fetch('/browse',{method:'POST'});}catch(e){}
+  btn.disabled=false;
+  const body=r?await r.json().catch(()=>({})):{};
+  if(!r||!r.ok){
+    note((body&&body.error)||'No file dialog here — type the path instead.',true,false,true);
+    return $('#path').focus();
+  }
+  if(body.cancelled)return note('');
+  $('#path').value=body.path; openFile(body.path);
+};
 $('#quit').onclick=async()=>{
-  const r=await fetch('/shutdown',{method:'POST'});
-  show(r.ok?'The app has stopped. You can close this tab now.':
-           'Could not stop the app',!r.ok);
+  const ok=await fetch('/shutdown',{method:'POST'}).then(r=>r.ok).catch(()=>false);
+  note(ok?'The app has stopped. You can close this tab.':'Could not stop the app.',!ok,false,
+       !ok?true:false);
 };
 recent(); tick();
 </script></body></html>"""
@@ -547,33 +700,79 @@ def _reveal(path) -> bool:
         return False
 
 
-def _recent_entries():
+def _recent_entries(open_path=None):
+    """The recents list, with the open file flagged so the page can leave it out of
+    the list: it is already shown in the panel above, and twice is one too many."""
+    open_resolved = None
+    if open_path:
+        try:
+            open_resolved = Path(open_path).resolve()
+        except OSError:
+            open_resolved = None
     entries = []
     for raw in load_recent():
         p = Path(raw)
         cfg = config_path_for(raw)
         try:
             st = p.stat()
-            entries.append(
-                {
-                    "path": str(p),
-                    "exists": True,
-                    "size": st.st_size,
-                    "mtime": st.st_mtime,
-                    "config_exists": cfg.exists(),
-                }
-            )
+            entry = {
+                "path": str(p),
+                "exists": True,
+                "size": st.st_size,
+                "mtime": st.st_mtime,
+                "config_exists": cfg.exists(),
+            }
         except OSError:
-            entries.append(
-                {
-                    "path": str(p),
-                    "exists": False,
-                    "size": 0,
-                    "mtime": 0,
-                    "config_exists": cfg.exists(),
-                }
-            )
+            entry = {
+                "path": str(p),
+                "exists": False,
+                "size": 0,
+                "mtime": 0,
+                "config_exists": cfg.exists(),
+            }
+        if open_resolved is not None:
+            try:
+                entry["is_open"] = p.resolve() == open_resolved
+            except OSError:
+                entry["is_open"] = str(p) == str(open_path)
+        entries.append(entry)
     return entries
+
+
+def _pick_file():
+    """Ask the desktop for a path and return it, or ``None`` if cancelled.
+
+    A browser hands over a file's name but never its location, so the only way to give
+    the start screen a real file dialog is to ask the machine the server runs on.
+    """
+    if sys.platform == "darwin":
+        cmd = [
+            "osascript",
+            "-e",
+            'POSIX path of (choose file with prompt "Choose an IONICON run")',
+        ]
+    elif os.name == "nt":
+        cmd = [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            "Add-Type -AssemblyName System.Windows.Forms;"
+            " $d = New-Object System.Windows.Forms.OpenFileDialog;"
+            " $d.Filter = 'IONICON runs (*.h5)|*.h5|All files (*.*)|*.*';"
+            " if ($d.ShowDialog() -eq 'OK') { [Console]::Out.Write($d.FileName) }",
+        ]
+    else:
+        for tool, extra in (
+            ("zenity", ["--file-selection"]),
+            ("kdialog", ["--getexistingfile", "*"]),
+        ):
+            if shutil.which(tool):
+                cmd = [tool] + extra
+                break
+        else:
+            raise RuntimeError("no file dialog here; type the path instead")
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    return done.stdout.strip() or None
 
 
 def _background(fn, *args, **kwargs):
@@ -630,7 +829,7 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
             elif route.path == "/status":
                 self._send(200, session.status_payload())
             elif route.path == "/api/recent":
-                self._send(200, _recent_entries())
+                self._send(200, _recent_entries(session.path))
             elif route.path == "/spectrum":
                 if not session.path:
                     self._send(404, {"error": "no file is open"})
@@ -716,6 +915,15 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 self._send(200, {"ok": _reveal(last), "path": last})
             elif self.path == "/ack":
                 self._send(200, {"ok": True})
+            elif self.path == "/browse":
+                # The dialog belongs to the machine, not the tab, so it can appear
+                # behind the browser; that is normal and better than typing a path.
+                try:
+                    picked = _pick_file()
+                except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                    self._send(501, {"error": str(exc) or "no file dialog here"})
+                    return
+                self._send(200, {"path": picked} if picked else {"cancelled": True})
             elif self.path == "/shutdown":
                 session.stop.set()
                 self._send(200, {"ok": True})

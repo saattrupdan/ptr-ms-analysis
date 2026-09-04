@@ -75,6 +75,13 @@ summary already sits at that name — a Viewer export, say — it writes `<name>
 instead of overwriting it. Opening another file closes the current one, since a large
 run holds its data in memory.
 
+The start screen lists recent runs with their size, when you last had them open and
+whether a config exists yet; the one you have open is shown once, in its own panel, with
+**Open the review**. **Browse this computer…** opens a real file dialog — the app runs on
+your machine, so it can ask it, which a web page normally cannot. The dialog belongs to
+the computer rather than the tab, so it can appear behind the browser window. Files are
+never uploaded anywhere: the page talks only to `127.0.0.1`.
+
 ### Packaging the app
 
 `ptr app` freezes into something a reviewer can run with no Python installed:

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **The start screen was rebuilt, and gained a real file dialog.** Recent runs are
+  listed with their size, when you last opened them and whether a config exists yet;
+  **Browse this computer…** opens the desktop's own file picker, because the server runs
+  where the files are, which is the one thing a web page normally cannot do. The page is
+  a single-column layout with proper type, focus rings, a dark scheme and a progress bar
+  while a run loads.
 - **Double-clicking the bundled app opens it.** Finder starts the bundle with no
   arguments, and the plain `ptr` command line answers that with usage text and exit code
   2 — invisibly, in a windowed bundle. A runtime hook turns a bare launch inside a bundle
@@ -83,6 +89,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A file opened from the recents list no longer appears twice on the start screen**:
+  once in its own panel with **Open the review**, once as a plain row. The recents list
+  now says which entry is the open one, and leaves it out.
+- **The app no longer reports itself busy the moment after it reports itself ready.**
+  Readiness was announced before the in-flight flag was cleared, so a client that acted
+  on "ready" could have a close or an export refused.
+- **An error you caused stays on screen.** The status poll cleared the message within a
+  couple of seconds, so a failed open left no trace of what went wrong.
 - ↑/↓ move the peak selection down and up the order the sidebar is showing. They had
   always walked the stored m/z order, so with the list sorted by abundance or label
   they jumped to compounds that were nowhere near the highlighted row.
