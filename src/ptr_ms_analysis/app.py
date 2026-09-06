@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 
 import h5py
 
-from . import viz
+from . import desktop, viz
 from .analyze import (
     analyze_config_to_csv,
     auto_peaks,
@@ -784,6 +784,23 @@ def _pick_file():
     return done.stdout.strip() or None
 
 
+def _browse():
+    """Ask for a path using whichever dialog this machine offers, or ``None`` if
+    cancelled.
+
+    A desktop window owns a real dialog, and that is the one the reviewer is looking
+    at. A browser tab owns none, so the machine is asked instead — its dialog can land
+    behind the window, which is normal and still better than typing a path.
+    """
+    window = desktop.current_window()
+    if window is not None:
+        try:
+            return desktop.pick_file(window)
+        except desktop.DesktopUnavailable:
+            pass  # no dialog in the window after all; ask the machine itself
+    return _pick_file()
+
+
 def _background(fn, *args, **kwargs):
     """Run a long job off the request thread. The session is where the page reads the
     result or the failure, so the thread itself only echoes to stderr."""
@@ -925,16 +942,22 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
             elif self.path == "/ack":
                 self._send(200, {"ok": True})
             elif self.path == "/browse":
-                # The dialog belongs to the machine, not the tab, so it can appear
-                # behind the browser; that is normal and better than typing a path.
                 try:
-                    picked = _pick_file()
-                except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                    picked = _browse()
+                except (
+                    OSError,
+                    RuntimeError,
+                    subprocess.SubprocessError,
+                    desktop.DesktopUnavailable,
+                ) as exc:
                     self._send(501, {"error": str(exc) or "no file dialog here"})
                     return
                 self._send(200, {"path": picked} if picked else {"cancelled": True})
             elif self.path == "/shutdown":
-                session.stop.set()
+                # One direction each, so the two can never chase one another: the page
+                # stops the session and closes the window, while closing the window
+                # only ever stops the session. Nothing here waits for the other.
+                stop_the_app(session)
                 self._send(200, {"ok": True})
             else:
                 self._send(404, {"error": "not found"})
@@ -988,20 +1011,46 @@ def _install_quit_handlers(on_quit):
             pass  # not the main thread, or this platform has no such signal
 
 
+def stop_the_app(session):
+    """Stop the server, and take the desktop window with it if there is one.
+
+    This is the one quit path, used by Ctrl-C, ``pkill``, a bundle's quit and the page's
+    Stop button. In window mode the native loop owns the main thread, so a quit that
+    only set the flag would leave a window standing over a dead server. With no window
+    there is nothing to close, and :func:`desktop.close_window` says so by returning
+    False; closing it is never a second way into the session, because the window's own
+    close handler only ever sets the same flag.
+    """
+    session.stop.set()
+    try:
+        desktop.close_window()
+    except desktop.DesktopUnavailable as exc:
+        # The server is stopping either way; a window left standing is worth a line on
+        # stderr, not a failed request or a swallowed quit.
+        _log(f"ptr: {exc}; close that window yourself to get rid of it")
+
+
 def serve_app(
     port=8765,
     open_browser=True,
     agent_url=None,
     agent_timeout=300.0,
     initial=None,
+    window=False,
 ):
     """Serve the app until interrupted. Nothing here closes on its own: an export, a
-    closed tab or a closed file all leave the server up."""
+    closed tab or a closed file all leave the server up.
+
+    ``window=True`` asks for a desktop window instead of a browser tab: the native loop
+    takes the main thread, which is why the server runs on a daemon thread behind it.
+    A window that cannot start is never fatal — one line on stderr, then the browser
+    route, because losing the session over losing the window is the worse trade.
+    """
     httpd, session, url = make_server(
         port=port, agent_url=agent_url, agent_timeout=agent_timeout
     )
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    _install_quit_handlers(session.stop.set)
+    _install_quit_handlers(lambda: stop_the_app(session))
 
     _log(f"ptr: app running at {url}")
     _log("ptr: a large run takes 30-90 s to open; the app stays up between files.")
@@ -1009,7 +1058,18 @@ def serve_app(
         _background(
             session.open, initial, agent_url=agent_url, agent_timeout=agent_timeout
         )
-    if open_browser:
+    in_window = False
+    if window:
+        try:
+            # Closing the window is the one thing it may do to the session, and it is
+            # the reverse of the /shutdown route, which stops the session first. When
+            # run_window returns the window is gone, and it has stopped the session on
+            # the way out whether or not the toolkit managed to fire the event.
+            desktop.run_window(url, on_close=session.stop.set)
+            in_window = True
+        except desktop.DesktopUnavailable as exc:
+            _log(f"ptr: no desktop window ({exc}); opening a browser instead")
+    if not in_window and open_browser:
         try:
             if not webbrowser.open(url):
                 raise OSError("no browser answered")

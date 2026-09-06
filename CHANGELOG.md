@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **The app can open in its own desktop window.** `ptr app --window` runs the review in
+  a single window with no address bar, `pywebview` being an extra
+  (`pip install 'ptr-ms-analysis[desktop]'`) rather than a dependency, and a packaged
+  bundle uses the window by default because a double-clicked app has no terminal to read
+  an address out of. Closing the window stops the server, **Stop the app** closes the
+  window, and **Browse this computer…** uses the window's own dialog when there is one; a
+  machine without the extra, or without a display, says so once and serves a browser tab
+  exactly as before.
 - **The start screen was rebuilt, and gained a real file dialog.** Recent runs are
   listed with their size, when you last opened them and whether a config exists yet;
   **Browse this computer…** opens the desktop's own file picker, because the server runs

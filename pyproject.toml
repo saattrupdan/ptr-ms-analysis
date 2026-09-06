@@ -12,6 +12,10 @@ license = "MIT"
 license-files = ["LICENSE"]
 dependencies = ["h5py>=3.0", "numpy>=1.20"]
 
+[project.optional-dependencies]
+# Only ever imported inside a function, so the core package stays numpy + h5py + stdlib.
+desktop = ["pywebview>=6"]
+
 [project.scripts]
 ptr = "ptr_ms_analysis.analyze:main"
 
