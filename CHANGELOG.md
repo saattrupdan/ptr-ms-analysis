@@ -16,7 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   an address out of. Closing the window stops the server, **Stop the app** closes the
   window, and **Browse this computer…** uses the window's own dialog when there is one; a
   machine without the extra, or without a display, says so once and serves a browser tab
-  exactly as before.
+  exactly as before. The `package` workflow installs `.[desktop]` and the PyInstaller
+  spec bundles `webview` when it is present, so the `.dmg` and `.msi` ship the window;
+  the frozen smoke runs `--window` on a runner with no display to prove the fallback
+  rather than assume the window.
 - **The start screen was rebuilt, and gained a real file dialog.** Recent runs are
   listed with their size, when you last opened them and whether a config exists yet;
   **Browse this computer…** opens the desktop's own file picker, because the server runs

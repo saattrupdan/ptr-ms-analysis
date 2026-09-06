@@ -539,6 +539,7 @@ under its old name.
 ptr app                       # start screen: recent files, or type an absolute path
 ptr app FILE.h5 --no-browser  # open one file immediately (background it: ~30-90 s for 2 GB)
 ptr app --agent URL           # have an agent curate a newly detected config
+ptr app --window              # desktop window instead of a browser tab
 ```
 
 - **The config lives beside the h5 file, same stem**: `ptr.h5` → `ptr.json`. An existing

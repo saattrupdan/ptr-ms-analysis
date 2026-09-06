@@ -15,6 +15,7 @@
 #   pip install . pyinstaller
 #   pyinstaller --noconfirm packaging/ptr-app.spec
 
+import importlib.util
 import os
 import sys
 from importlib.metadata import version as distribution_version
@@ -26,6 +27,15 @@ APP_NAME = "PTR-MS Review"
 BUNDLE_ID = "dk.samsmart.ptrms"
 
 datas, binaries, hiddenimports = collect_all("ptr_ms_analysis")
+
+# The desktop extra is optional by design: bundle it when it is installed so a
+# double-click opens a real window, and leave it out when it is not, where the very
+# same bundle falls back to a browser tab instead of failing.
+if importlib.util.find_spec("webview") is not None:
+    _w_datas, _w_binaries, _w_hidden = collect_all("webview")
+    datas += _w_datas
+    binaries += _w_binaries
+    hiddenimports += _w_hidden
 
 # Imported lazily inside cmd_app, so freeze it explicitly rather than hoping the
 # import graph reaches it.

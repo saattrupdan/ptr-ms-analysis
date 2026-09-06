@@ -51,7 +51,9 @@ jobs:
       - name: Install the package and PyInstaller
         run: |
           python -m pip install --upgrade pip
-          pip install . pyinstaller
+          # The desktop extra is what makes the bundle open a window rather than a
+          # browser tab; the spec picks it up automatically when it is installed.
+          pip install ".[desktop]" pyinstaller
 
       - name: Build the bundle
         run: pyinstaller --noconfirm packaging/ptr-app.spec

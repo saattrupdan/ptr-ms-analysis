@@ -218,9 +218,66 @@ def main(argv) -> int:
             bare.kill()
             bare.wait(timeout=10)
 
+        # Third phase: --window. A runner has no window server, which is exactly the
+        # case that must degrade rather than die: the app logs why and serves anyway.
+        # On a desktop machine the same command opens a real window and serves too.
+        win = subprocess.Popen(
+            [str(exe), "app", str(h5), "--window", "--port", str(free_port())],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=dict(env, BROWSER=f"{sys.executable} -c pass"),
+        )
+        windowed = "fell back to a browser tab"
+        try:
+            win_url, win_lines = await_url(win, LAUNCH_TIMEOUT)
+            if win_url is None:
+                print(
+                    "frozen app smoke: FAIL — --window neither opened a window nor "
+                    "started serving; a desktop without a window server would exit",
+                    file=sys.stderr,
+                )
+                print("\n".join(win_lines), file=sys.stderr)
+                return 1
+            win_base = win_url.rstrip("/")
+            # /review only exists once a file is open, so ask the state first
+            deadline = time.monotonic() + OPEN_TIMEOUT
+            state = {}
+            while time.monotonic() < deadline:
+                state = json.loads(get(win_base + "/api/state")[1])
+                if state.get("status") in ("ready", "error"):
+                    break
+                time.sleep(0.5)
+            if state.get("status") != "ready":
+                print(
+                    f"frozen app smoke: FAIL — the windowed app never opened the "
+                    f"file: {state}",
+                    file=sys.stderr,
+                )
+                return 1
+            status, page = get(win_base + "/review")
+            if status != 200:
+                print(
+                    f"frozen app smoke: FAIL — the windowed app served {status}",
+                    file=sys.stderr,
+                )
+                return 1
+            windowed = (
+                "fell back to a browser tab"
+                if any("window" in line.lower() for line in win_lines)
+                else "opened a window"
+            )
+            post(win_base + "/shutdown")
+        finally:
+            win.kill()
+            win.wait(timeout=10)
+
         print(
             f"frozen app smoke: OK  ({os.path.getsize(exe) // 1024} KiB launcher, "
-            f"served {url}, and a bare launch opened the start screen)"
+            f"served {url}, a bare launch opened the start screen, and --window "
+            f"{windowed})"
         )
         return 0
     finally:

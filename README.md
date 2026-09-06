@@ -59,10 +59,19 @@ once per file: one server that stays up, files opened from its own start screen,
 
 ```bash
 ptr app                        # start screen: recent files, or type a path
-ptr app FILE.h5 --no-browser   # open one file immediately
+ptr app FILE.h5 --no-browser   # open one file immediately, in a browser tab
+ptr app --window               # force the desktop window
 ptr app --port 8791            # fixed port (it probes upward if the port is taken)
 ptr app --agent URL            # let an agent curate a newly detected config
 ```
+
+Installed as an app bundle, `ptr app` opens a **desktop window** — its own window,
+menus and file dialog rather than a tab in whatever browser you happen to use. From a
+source checkout it opens a browser tab unless you ask for `--window`, because there the
+terminal is right beside you. The window comes from an optional extra
+(`pip install 'ptr-ms-analysis[desktop]'`, which pulls in pywebview); a checkout without
+it logs one line and opens the tab, so nothing is ever lost — the same page, the same
+localhost server, the same Export.
 
 Each file's config sits beside it under the same name: `ptr.h5` → `ptr.json`. A
 `ptr-analysis-config.json` left by the CLI flow is found automatically, so a file that
