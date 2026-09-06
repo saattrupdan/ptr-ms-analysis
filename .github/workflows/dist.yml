@@ -98,12 +98,15 @@ jobs:
         if: matrix.installer == 'pkg'
         run: |
           installer -pkginfo -pkg dist/ptr.pkg
-          # installer returns once installd has written the receipt, but the
-          # payload is staged in an InstallerSandbox and the bundle is moved into
-          # place afterwards -- "atomically shoved", in install.log. Poll for it
-          # rather than trusting the exit status, which says nothing about the
-          # destination. -target / is what double-clicking resolves to, so that is
-          # what is tested here.
+          # Two things have to be true before this proves anything. The built
+          # bundle must be out of the way: the smoke above ran it, so LaunchServices
+          # knows that bundle id at that path, and installd will then 'relocate' the
+          # install onto it -- install.log says so, and /Applications stays empty.
+          # And the result must be read from the filesystem, because installer
+          # reports success without regard to where the payload went.
+          LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+          "$LSREGISTER" -u "$PWD/dist/PTR-MS Review.app" 2>/dev/null || true
+          mv "dist/PTR-MS Review.app" "$RUNNER_TEMP/built-app"
           sudo installer -pkg dist/ptr.pkg -target / -verboseR
           installed=""
           for _ in $(seq 1 60); do
