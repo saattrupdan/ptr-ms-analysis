@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   window, and **Browse this computer…** uses the window's own dialog when there is one; a
   machine without the extra, or without a display, says so once and serves a browser tab
   exactly as before. The `package` workflow installs `.[desktop]` and the PyInstaller
-  spec bundles `webview` when it is present, so the `.dmg` and `.msi` ship the window;
+  spec bundles `webview` when it is present, so the `.pkg` and `.msi` ship the window;
   the frozen smoke runs `--window` on a runner with no display to prove the fallback
   rather than assume the window.
 - **The start screen was rebuilt, and gained a real file dialog.** Recent runs are
@@ -34,9 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Packaging: `packaging/ptr-app.spec`, `packaging/make_msi.py`, `scripts/smoke_frozen.py`,
   and a `package` workflow.** PyInstaller builds a bundle a reviewer can run with no
   Python installed (one-dir by choice — one-file unpacks into `%TEMP%` on every start and
-  is what antivirus tools object to), wrapped as a `.app` inside a `.dmg` on macOS and an
-  `.msi` on Windows. The MSI's component list is generated from the built folder with
-  path-derived ids and GUIDs, so an upgrade replaces and removes exactly the right files,
+  is what antivirus tools object to), wrapped as a `.app` that a `.pkg` installs on
+  macOS and an `.msi` on Windows. The MSI's component list is generated from the built
+  folder with path-derived ids and GUIDs, so an upgrade replaces and removes exactly the
+  right files,
   and it targets the MIT-licensed WiX v3 rather than v6+, which will not run until the
   Open Source Maintenance Fee EULA is accepted.
   PyInstaller cannot cross-compile, so the workflow builds on native macOS and Windows
@@ -74,6 +75,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **The macOS artifact is a `.pkg`, and `packaging/README.md` now explains both
+  installers.** A disk image asked the reviewer to drag a bundle into Applications; a
+  product archive installs it, records what it wrote, and installs from a command line,
+  which is how CI now proves the artifact rather than the build folder.
+  `packaging/make_pkg.py` writes the `productbuild` distribution — title, version, a
+  macOS 11.0 floor and the architecture, with no paths and no timestamps, so the same
+  checkout gives the same XML twice — and the `package` workflow pairs it with
+  `pkgbuild --component … --install-location /Applications`, then installs the result
+  with `sudo installer -pkg` and smokes
+  `/Applications/PTR-MS Review.app/Contents/MacOS/ptr`, exactly as the Windows job smokes
+  both `dist/ptr` and `C:\Program Files\PTR-MS Review`. The guide has both command pairs,
+  the reason WiX v3.14 is pinned (v6 and later are gated behind the Open Source
+  Maintenance Fee), how to inspect a `.pkg` (`lsbom`, `pkgutil`) and remove one (there is
+  no uninstaller), what a double-clicked bundle gets, and what is still missing: no
+  Developer ID signing or notarization, and no Authenticode, so an unsigned `.pkg` still
+  trips Gatekeeper on first run and SmartScreen warns on Windows.
 - **Adjacent plateaus are now joined on evidence, not on a cycle count.** A gap between
   two same-class plateaus merges only when it covers under ~60 s of acquisition (never
   fewer than 30 cycles) *and* never left the phase its neighbours are in: its highest

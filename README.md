@@ -107,20 +107,36 @@ reference data. `scripts/smoke_frozen.py` starts it against a tiny synthetic fil
 checks it really serves the review page, because `ptr --help` would pass on a bundle
 that cannot do anything else.
 
-Then wrap it the way each system expects:
+Then wrap it the way each system expects — a `.pkg` built by `pkgbuild` and
+`productbuild` on macOS, an `.msi` built by WiX on Windows:
 
 ```bash
-candle.exe -arch x64 -out ptr-app.wixobj build/msi/ptr-app.wxs    # Windows
-light.exe  -out dist/ptr.msi ptr-app.wixobj
-hdiutil create -volname "PTR-MS Review" -srcfolder stage -format UDZO dist/ptr.dmg
+version=$(python packaging/make_pkg.py --print-version)                  # macOS
+python packaging/make_pkg.py --out build/pkg --arch "$(uname -m)"
+pkgbuild --component "dist/PTR-MS Review.app" --install-location /Applications \
+  --identifier dk.samsmart.ptrms --version "$version" build/pkg/ptr-component.pkg
+productbuild --distribution build/pkg/distribution.xml --package-path build/pkg dist/ptr.pkg
+
+python packaging/make_msi.py dist/ptr build/msi/ptr-app.wxs        # Windows
+candle.exe -arch x64 -out build/msi/ptr-app.wixobj build/msi/ptr-app.wxs
+light.exe  -o dist/ptr.msi build/msi/ptr-app.wixobj
 ```
 
-`packaging/make_msi.py` writes the WiX source from the built folder — one component per
-directory, one file id and GUID derived from each path, so an upgrade replaces the files
-it should and removes the ones it should. The folder layout, not a hand-maintained file
-list, is what the installer installs. It targets WiX v3 deliberately: v6 and later refuse
-to build until the Open Source Maintenance Fee EULA is accepted, which asks a fee of
-anyone shipping a product for money.
+`packaging/README.md` is the guide to all of it — both command pairs in full, why
+PyInstaller cannot cross-compile, why WiX v3.14 is the pinned toolchain, what each
+installer contains and where it lands (`/Applications/PTR-MS Review.app`,
+`C:\Program Files\PTR-MS Review`), how to check an artifact, and what a signed build
+would still need.
+
+Both installers are generated from what the build produced rather than from a
+hand-maintained file list. `packaging/make_msi.py` writes the WiX source with one
+component per directory and one file id and GUID derived from each path, so an upgrade
+replaces the files it should and removes the ones it should; it targets WiX v3
+deliberately, because v6 and later refuse to build until the Open Source Maintenance Fee
+EULA is accepted, which asks a fee of anyone shipping a product for money.
+`packaging/make_pkg.py` writes the distribution XML for `productbuild` — the title, the
+version, the minimum system and the architecture, with no paths and no timestamps in it,
+so the same checkout gives the same file twice.
 
 Each operating system needs its own build: PyInstaller cannot cross-compile, and neither
 can an installer tool. The `package` workflow does all of it on native macOS and Windows
@@ -128,17 +144,27 @@ runners and uploads the two installers; pushing a `v*` tag also publishes them a
 GitHub Release. To build for Windows without any of that, run the commands above on a
 Windows machine.
 
-Neither installer is signed, so the first run warns. On macOS, open the disk image, drag
-the app to Applications, and start it once with right-click (or Control-click) → Open;
-the alternative is dropping the download flag directly:
+Neither installer is signed, so the first run warns. To install the macOS package, either
+double-click it or install it from a terminal:
 
 ```bash
-xattr -dr com.apple.quarantine "PTR-MS Review.app"
+sudo installer -pkg ptr-review-macos-arm64.pkg -target /   # → /Applications/PTR-MS Review.app
 ```
 
-Windows SmartScreen says "More info" → "Run anyway". Both go away once the bundle is
-signed and notarised with a Developer ID or code-signing certificate, which the spec and
-the WiX source are ready for without other changes.
+An unsigned `.pkg` still trips Gatekeeper when you double-click it, and `installer` is not
+routed through Gatekeeper at all, so the terminal command works whatever the download
+flag says; clearing the flag off the downloaded package first (`xattr -dr
+com.apple.quarantine ptr-review-macos-arm64.pkg`) makes double-clicking work too. To
+remove it, delete the bundle and forget the receipt:
+
+```bash
+sudo rm -rf "/Applications/PTR-MS Review.app"
+sudo pkgutil --forget dk.samsmart.ptrms
+```
+
+Windows SmartScreen says "More info" → "Run anyway". Both warnings go away once the
+bundle is signed and notarised with a Developer ID or code-signing certificate, which the
+spec and both installer sources are ready for without other changes.
 
 A double-clicked app opens its review page in the browser and prints nothing, since
 there is no terminal; its URL and any errors go to `~/.ptr-ms/log.txt`. "Stop the app"
