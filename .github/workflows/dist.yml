@@ -99,6 +99,14 @@ jobs:
         run: |
           installer -pkginfo -pkg dist/ptr.pkg
           sudo installer -pkg dist/ptr.pkg -target /
+          # Where did it actually go? A pkg that reports success and lands
+          # elsewhere is the failure mode this step exists to catch.
+          echo "--- receipt ---"
+          pkgutil --pkgs | grep -i ptrms || echo "no receipt for dk.samsmart.ptrms"
+          pkgutil --files dk.samsmart.ptrms 2>/dev/null | head -3 || true
+          echo "--- /Applications ---"
+          ls -d /Applications/PTR-MS* 2>/dev/null || echo "nothing matching PTR-MS in /Applications"
+          find /Applications -maxdepth 3 -name "ptr" 2>/dev/null | head -3 || true
           python scripts/smoke_frozen.py "/Applications/PTR-MS Review.app/Contents/MacOS/ptr"
 
       # Named after the installer exists: naming it before building it is a mistake

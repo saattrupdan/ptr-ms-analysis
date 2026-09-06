@@ -68,7 +68,9 @@ def build_distribution(version: str, package: str, arch: str) -> ET.ElementTree:
             # fact — there are no preinstall or postinstall scripts here.
             "customize": "never",
             "require-scripts": "false",
-            "rootVolumeOnly": "true",
+            # No rootVolumeOnly: /Applications lives on the data volume behind a
+            # firmlink on every Mac since macOS 11, and asking for the root volume
+            # only has the installer write somewhere else while reporting success.
             "hostArchitectures": arch,
         },
     )
