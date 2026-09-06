@@ -35,6 +35,7 @@ from .analyze import (
     analyze_config_to_csv,
     auto_peaks,
     auto_ranges,
+    auto_ranges_note,
     interval_spectrum,
     resolve_analysis_settings,
     resolve_x_axis_unit,
@@ -184,7 +185,7 @@ def bootstrap_config(h5_path: str, f=None) -> dict:
             "No significant signal was detected in this file: treat it as a blank or "
             "a no-beam capture rather than an analyte panel.",
         )
-    return {
+    config = {
         "peaks": peaks,
         "ranges": ranges,
         "analyze": {k: v for k, v in settings.items() if k != "sources"},
@@ -197,6 +198,13 @@ def bootstrap_config(h5_path: str, f=None) -> dict:
             "instrument": instrument,
         },
     }
+    # Said on the Intervals card: whoever opens the file here never sees a command
+    # line, so a gap the pipeline joined has to explain itself or it is an unannounced
+    # edit to the reviewer's intervals. Nothing merged, nothing to say.
+    note = auto_ranges_note(ranges)
+    if note:
+        config["merge_note"] = note
+    return config
 
 
 def load_recent() -> list:
@@ -347,6 +355,7 @@ class Session:
             config_base=config,
             checklist=config.get("checklist"),
             x_axis_unit=resolve_x_axis_unit(config),
+            merge_note=config.get("merge_note") or "",
         )
 
     def close(self):

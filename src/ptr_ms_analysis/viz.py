@@ -92,12 +92,16 @@ def build_viz_data(
     analysis_settings=None,
     config_base=None,
     x_axis_unit="cycle",
+    merge_note="",
 ):
     """Assemble everything the HTML app needs into one JSON-able dict.
 
     peaks_cfg  : [{mz, label?, formula?, k?}]  (assigned peaks to quantify/tweak)
     ranges_cfg : [{label, start, end, unit, class?}]  (time segments)
     checklist  : [str | {text, detail?}]  (agent-authored review points to confirm)
+    merge_note : one line on what the automatic interval detection joined up, said
+                 on the Intervals card because a merge the reviewer cannot see is a
+                 merge they cannot check. Empty for a curated config.
     """
     analysis_settings = analysis_settings or {
         "R": R,
@@ -358,6 +362,7 @@ def build_viz_data(
             "concentration_available": primary is not None and K is not None,
         },
         "config_base": config_base or {},
+        "merge_note": str(merge_note or ""),
         "transmission": {
             "masses": [round(float(x), 4) for x in tm],
             "factors": [round(float(x), 5) for x in tf],
@@ -1013,6 +1018,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <!-- context card: intervals (signal-over-time tab); positions set by dragging in the plot -->
   <div class="card" id="intcard">
     <h2>Intervals <span class="sub">— name / classify; drag edges in the plot to set the range</span></h2>
+    <p id="intnote" class="mut" style="font-size:11.5px;margin:2px 0 0" hidden></p>
     <div class="scroll">
       <table id="rngtbl"><thead><tr><th class="l">label</th><th class="l">class</th><th id="rngunit">cycles</th></tr></thead><tbody></tbody></table>
       <p id="rngwarn" class="warn" style="font-size:11.5px;margin:6px 0 0" hidden></p>
@@ -1103,7 +1109,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <p><b>Per-compound k (kinetic):</b> scales each compound by its own proton-transfer rate constant (Conc ∝ 1/k) relative to an anchor — physically more accurate than one shared sensitivity. When enabled, this runs in a hybrid mode: a compound is scaled by its own k only when that k is a <i>measured</i> value; compounds whose k is only estimated (or unknown) stay on the shared K, since applying an uncertain k would add error rather than remove it. Estimated k's are marked with <b>~</b> in the Identification card. <b>Humidity:</b> low-proton-affinity compounds (HCN, formaldehyde, formic acid…) have humidity-dependent sensitivity; flagged <i>humid-sensitive</i>, and optionally normalised by the per-cycle water-cluster ratio X = I(m37)/I(primary) raised to a power p — off by default.</p>
 
   <h3>7 · Time intervals</h3>
-  <p>The signal is split into stable plateaus by log-space gradient detection on a composite VOC signal (high = sample, low = background/setup). You rename, reclassify, resize (drag edges), add (⌘/Ctrl-drag) and remove (select + Del) intervals. For each interval the CSV reports Max / Min / Average / Std-dev of Raw, Corrected, Conc and Conc[µg] per compound.</p>
+  <p>The signal is split into stable plateaus by log-space gradient detection on a composite VOC signal (high = sample, low = background/setup). Adjacent plateaus of one class are joined only where the unclassified gap between them never left that class's level — a gap that fell toward the background, or strayed out of the phase, stays a boundary however short it is, and an interval of the other class in between always is one. You rename, reclassify, resize (drag edges), add (⌘/Ctrl-drag) and remove (select + Del) intervals. For each interval the CSV reports Max / Min / Average / Std-dev of Raw, Corrected, Conc and Conc[µg] per compound.</p>
 
   <h3>8 · What the CSV contains</h3>
   <p>One block per interval (with its cycle range and sample/background class), and within each block one row per compound giving its m/z, formula and the four quantities (Raw, Corrected, Conc[ppb], Conc[µg/m³]) summarised as Max/Min/Average/Std-dev. Raw is in detector counts per second (cps); Corrected is transmission-normalised cps; Conc is the quantified mixing ratio. The header records the calibration (a, b, K, V<sub>m</sub>, resolution) and which optional corrections were on, so the run is reproducible.</p>
@@ -2741,6 +2747,10 @@ document.getElementById("tourBtn").onclick=()=>startTour();
 document.getElementById("file").textContent=M.file.split("/").pop();
 document.getElementById("meta").textContent=
   `${NCYC.toLocaleString()} cycles · ${(NCYC*M.dur/60).toFixed(1)} min · ${peaks.length} peaks · ${ranges.length} intervals`;
+// plain text in the Intervals card's existing header area: a merge the reviewer never
+// hears about is a merge they cannot check, and the app mode has no command line to ask
+const intnote=document.getElementById("intnote");
+if(intnote && DATA.merge_note){ intnote.textContent=DATA.merge_note; intnote.hidden=false; }
 // reflect the default quant in the trace sub-tabs + legend
 document.querySelectorAll("#qtabs button").forEach(b=>b.classList.toggle("on",b.dataset.q===quant));
 document.getElementById("tracelbl").textContent=QSHORT[quant];
