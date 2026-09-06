@@ -116,6 +116,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **An autosave no longer invents compound names.** A peak with neither a label nor a
+  formula needs something to draw on the spectrum, so the review page displays a
+  mass-derived stand-in (`m17.032`) — and wrote it back into the config as though
+  someone had assigned it. A freshly detected file therefore gained 132 names that
+  looked curated but were not, and its CSV printed the mass twice. The stand-in is now
+  display-only, and the saved config keeps the name empty until someone chooses one.
 - **A file opened from the recents list no longer appears twice on the start screen**:
   once in its own panel with **Open the review**, once as a plain row. The recents list
   now says which entry is the open one, and leaves it out.

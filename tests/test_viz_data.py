@@ -88,6 +88,59 @@ class VizDataTest(unittest.TestCase):
 
         self.assertEqual(data["peaks"][0]["abundance"], 3.0)
 
+    def _payload(self, peaks_cfg):
+        """The review payload for ``peaks_cfg``, with the file layer mocked out."""
+        with h5py.File("in-memory", "w", driver="core", backing_store=False) as h5:
+            h5.create_dataset("SPECdata/Intensities", data=np.zeros((2, 5)))
+            h5.create_dataset("SPECdata/AverageSpec", data=np.ones(5))
+            with (
+                mock.patch.object(ptrms, "load_mass_cal", return_value=(10.0, 1.0)),
+                mock.patch.object(
+                    ptrms,
+                    "load_transmission",
+                    return_value=(np.array([1.0]), np.array([1.0])),
+                ),
+                mock.patch.object(ptrms, "spec_duration_s", return_value=1.0),
+                mock.patch.object(ptrms, "extract_primary", return_value=None),
+                mock.patch.object(ptrms, "water_cluster_ratio", return_value=None),
+                mock.patch.object(
+                    ptrms, "build_discriminator", return_value=np.ones(2)
+                ),
+                mock.patch.object(
+                    ptrms,
+                    "derive_molar_volume_info",
+                    return_value=(24.465, "test"),
+                ),
+                mock.patch.object(ptrms, "derive_K", return_value=None),
+                mock.patch.object(
+                    ptrms,
+                    "extract_traces",
+                    return_value=({2.0: (np.array([2.0, 4.0]), 2.0)}, (10.0, 1.0)),
+                ),
+                mock.patch.object(ptrms, "_cluster", return_value=[]),
+                mock.patch.object(ptrms, "resolve_k", return_value={}),
+                mock.patch.object(
+                    ptrms, "load_rate_constants", return_value={"compounds": []}
+                ),
+                mock.patch.object(viz.formula_id, "score_peak", return_value=[]),
+            ):
+                return viz.build_viz_data(h5, peaks_cfg=peaks_cfg, ranges_cfg=[])
+
+    def test_a_name_the_tool_invented_is_never_saved_as_an_assignment(self):
+        # An unnamed peak still needs something to draw on the spectrum, so a
+        # mass-derived stand-in stands in for display. It must not reach the config:
+        # a page autosave would otherwise turn 132 empty names into 132 names that
+        # look assigned, and the CSV would print the mass twice.
+        unnamed = self._payload([{"mz": 2.0}])["peaks"][0]
+        named = self._payload(
+            [{"mz": 2.0, "label": "ethanol", "formula": "C2H6O"}]
+        )["peaks"][0]
+
+        self.assertEqual(unnamed["label"], "m2.000")
+        self.assertEqual(unnamed["labelAuto"], "m2.000")
+        self.assertEqual(named["label"], "ethanol")
+        self.assertNotIn("labelAuto", named)
+
     def test_irregular_pctimes_make_relative_and_absolute_axes(self):
         with h5py.File("in-memory", "w", driver="core", backing_store=False) as h5:
             h5.create_dataset("SPECdata/Intensities", data=np.zeros((3, 2)))

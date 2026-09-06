@@ -270,6 +270,7 @@ def build_viz_data(
         trace_values = np.asarray(raw_traces[m], dtype=np.float64)
         finite_trace = trace_values[np.isfinite(trace_values)]
         abundance = float(np.mean(finite_trace)) if finite_trace.size else None
+        name = formula_id.identity_label(p.get("label"), p.get("formula"))
         peaks.append(
             {
                 "id": idx,
@@ -279,10 +280,10 @@ def build_viz_data(
                 # measure while retaining the trace's exact window/deconvolution
                 # semantics.
                 "abundance": (None if abundance is None else round(abundance, 5)),
-                "label": formula_id.identity_label(
-                    p.get("label"), p.get("formula")
-                )
-                or f"m{m:.3f}",
+                "label": name or f"m{m:.3f}",
+                # a name the tool made up for drawing, never an assignment: the save
+                # path drops it again so an untouched peak stays unnamed in the file
+                **({} if name else {"labelAuto": f"m{m:.3f}"}),
                 "formula": p.get("formula", ""),
                 # which sample intervals this compound is part of; null means every
                 # sample interval, which is what pre-sample-specific configs meant
@@ -2209,7 +2210,8 @@ function jumpToInterval(r){ const pad=Math.max(8,(r.end-r.start)*0.6);
 // ---- config / save ----
 function buildConfig(){ return {
   ...DATA.config_base,
-  peaks: peaks.filter(p=>p.use).map(p=>{ const o={mz:p.mz,label:p.label};
+  peaks: peaks.filter(p=>p.use).map(p=>{ const o={mz:p.mz,   // a stand-in name is display only
+      label:(p.labelAuto!==undefined && p.label===p.labelAuto) ? "" : p.label};
     if(p.formula)o.formula=p.formula; if(p.k){o.k=p.k; o.k_estimated=!!p.k_estimated;}
     const k=sampleLabels(), sel=selectedSamples(p);   // all samples is the implicit default, as in older configs
     if(sel.length<k.length) o.samples=sel.slice();
