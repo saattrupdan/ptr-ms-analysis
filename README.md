@@ -241,6 +241,18 @@ present, not a concentration, and it is drawn against its own maximum rather tha
 axis it sits on. Its legend entry says so and doubles as a switch, remembered as
 `viz.show_disc`.
 
+A plateau can also be split by a wobble rather than by a real change of phase, so two
+adjacent plateaus of the same class are joined when the unclassified gap between them
+never left that phase: it must cover under ~60 s of acquisition (never fewer than 30
+cycles), and its lowest and highest cycles must stay within a factor of 2 of the two
+neighbours' own levels. Those levels are read against the run's own background, so the
+same physical wobble merges at 1 s/cycle and at 5 s/cycle alike, while a gap that fell
+toward the background or strayed out of the phase stays a break however short it is. An
+opposite-class plateau in between is always a boundary. `--merge-high-gap N` overrides
+the ~60 s cap with a fixed cycle count (`0` never joins high plateaus), and every join
+says what it did: per gap in `ptr segments` JSON, and as one line on the Intervals card
+of the review app.
+
 An analysis config may include an `analyze` object with `R`, `R_phys`, `K`,
 `molar_volume`, `primary_mz`, `kinetic`, `k_anchor`, `humidity_correct`, `humidity_p`,
 `humidity_ref`, and `whole_run_windows`. Omitted CLI options do not replace these
@@ -265,7 +277,7 @@ stale and are applied only by the authoritative **Done**/`analyze` re-extraction
 Add `--pretty` to any command for indented JSON. `analyze` peak/segment sources:
 `--config file.json` (curated, preferred), or `--auto-peaks`/`--auto-segments`
 (zero-curation — auto-labels confident IDs, drops noise artifacts, consolidates
-backgrounds). `--K` / `--molar-volume`
+backgrounds, and joins samples split by a wobble). `--K` / `--molar-volume`
 override the file-derived calibration to match a specific Viewer project. `--kinetic`
 applies per-compound rate-constant (k) sensitivities from the bundled 218-compound
 PTR Library table for physically resolved absolute concentrations. Low-proton-affinity

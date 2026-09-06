@@ -273,7 +273,7 @@ project, so exact project reproduction is impossible without that metadata.
 ### 4. Detect, merge, and curate time ranges
 
 ```bash
-ptr segments FILE.h5 --merge-high-gap 30
+ptr segments FILE.h5
 ```
 
 The command returns stable plateaus as
@@ -281,12 +281,26 @@ The command returns stable plateaus as
 sample; `class:"low"` is background or setup. A long initial low period is usually
 warm-up and should be dropped.
 
-A physical sample can be split into two high plateaus by a short signal change.
-`--merge-high-gap N` merges consecutive high plateaus across at most `N` unclassified
-cycles, but never across a detected low plateau. A merged result reports
-`merged_segments > 1` and the exact `merged_gaps`. Start conservatively: on 1-second
-data, 30 cycles merged genuine split samples in the validated breath run, while 60
-cycles incorrectly merged distinct samples. Inspect every proposed merge.
+A physical sample can be split into two high plateaus by a short signal change, and a
+long background can be broken into slivers by transients, so adjacent same-class
+plateaus are joined when the gap between them was in the same phase as its neighbours.
+The test is on the signal, never on a magic cycle count: the gap must cover under ~60 s
+of acquisition (and never fewer than 30 cycles), its lowest cycle must stay above the
+lower neighbour's level divided by a factor of 2, and its highest cycle below the higher
+neighbour's level times that factor. A gap that collapsed toward the background, or
+strayed out of the phase, stays a break however short it is, and an opposite-class
+plateau between two segments is always a hard boundary. Because the levels are read
+against the run's own baseline, the verdict does not change with the cycle time.
+Every merge is reported: `merged_segments > 1` plus `merged_gaps`, where each gap gives
+its length, its level range, and why it merged — `level held` (it kept a level of its
+own, one sample wobbling) or `fell to baseline` (it came back down to the background
+but stayed inside the band, as a decaying sample or an ordinary background gap does).
+`--merge-high-gap N` overrides the ~60 s cap with a fixed cycle count; `0` never joins
+high plateaus. The evidence test applies in both cases. On the validated 20,725-cycle
+breath run the rule reproduced all 15 joins a reviewer chose by hand at
+`--merge-high-gap 30`, added 7 longer gaps that are genuinely one decaying sample, and
+refused 3 gaps that drop to 0.05–0.18× baseline and are merged as soon as a length
+limit reaches 55. Inspect every merge.
 
 Detection is only a proposal. Curate stable windows, avoid transitions, and save ranges
 explicitly. Always assign generic labels in chronological order: `sample_01`,
@@ -346,11 +360,11 @@ comparison/reproduction possible. Keep `analysis-config.json` beside the CSV.
 
 `--auto-peaks`/`--auto-segments` are the zero-curation path: `--auto-peaks` annotates,
 drops noise artifacts, and applies confident labels (leaving unknowns as bare `m/z`);
-`--auto-segments` consolidates fragmented backgrounds. The result is clean but a hand-
-curated `--config` still gives better chemistry and segment judgment, so prefer it for a
-considered final export. Add `--merge-high-gap N` to also join samples split by a brief
-dip. Never run `peaks`/`segments` to curate and *then* fall back to `--auto-*` — that
-throws the curation away.
+`--auto-segments` consolidates fragmented backgrounds and joins samples split by a gap
+that never left its phase (`--merge-high-gap` overrides that cap). The result is clean
+but a hand-curated `--config` still gives better chemistry and segment judgment, so
+prefer it for a considered final export. Never run `peaks`/`segments` to curate and
+*then* fall back to `--auto-*` — that throws the curation away.
 
 Before delivery, verify:
 
@@ -528,8 +542,10 @@ ptr app --agent URL           # have an agent curate a newly detected config
 - **Opening a never-reviewed file runs the deterministic pipeline** (the same detection
   as `--auto-peaks`/`--auto-segments`) and writes that config before loading it. The
   checklist it carries states that nothing has been curated yet, what was detected, and
-  which calls remain the reviewer's. A file with no beam is labelled as one rather than
-  presented as an empty panel.
+  which calls remain the reviewer's. Anything the interval detection joined is said in
+  one line on the Intervals card (config `merge_note`), because a reviewer who never saw
+  a command line otherwise has no way to learn a merge happened. A file with no beam is
+  labelled as one rather than presented as an empty panel.
 - **The optional agent endpoint** (`--agent URL`, or the `PTR_AGENT_URL` environment
   variable) is posted the generated config as
   `{"file": …, "config": …, "diagnostics": {n_peaks, n_ranges, ncyc, instrument}}` and
@@ -678,7 +694,7 @@ experiments (e.g. K ≈ 19 vs 16 on the two above — the operator's Viewer sett
 | `--primary-mz`                                        | 21.022            | Reagent-ion normaliser; change for NO⁺/O₂⁺ modes.                                                                      |
 | `--molar-volume`                                      | from drift T      | Set 24.465 for the 25 °C ambient µg/m³ convention.                                                                     |
 | `--include-cycle-rows`                                | off               | Enable for final Viewer-style exports so every range boundary is reproducible.                                         |
-| `--merge-high-gap`                                    | 0 (off)           | Merge consecutive high plateaus across a short unclassified transition; inspect every merge.                           |
+| `--merge-high-gap`                                    | automatic (~60 s) | Override the gap cap for joining high plateaus; `0` never joins them. The join itself is judged on the signal, not on the cycle count.        |
 | `segments --grad-thr / --min-duration / --high-ratio` | 0.02 / 30 / 3.0   | Loosen/tighten segment detection if plateaus are noisy or missed.                                                      |
 
 ## Commands

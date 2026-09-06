@@ -703,23 +703,36 @@ def cmd_segments(args):
     with h5py.File(args.h5, "r") as f:
         ncyc = int(f["SPECdata/Intensities"].shape[0])
         sig = assess_signal(f)
+        D = ptrms.build_discriminator(f)
         segs = ptrms.detect_segments(
             f,
+            discriminator=D,
             min_duration=args.min_duration,
             grad_thr=args.grad_thr,
             high_ratio=args.high_ratio,
         )
-        # always consolidate fragmented backgrounds; merge samples only if asked
+        # always consolidate fragmented backgrounds; merge samples only on evidence
         segs = ptrms.merge_adjacent_segments(
-            segs, high_gap=args.merge_high_gap or 0, low_gap=200
+            segs,
+            high_gap=args.merge_high_gap,
+            low_gap=200,
+            discriminator=D,
+            baseline=ptrms.discriminator_baseline(D),
+            cap=ptrms.merge_gap_cap(f),
         )
     note = (
         "class 'high' = elevated signal (likely a sample); 'low' = "
         "background or pre-run setup. Final outputs use chronological "
         "sample_01/background_01 labels; do not ask for sample names. "
-        "merged_segments > 1 marks high plateaus joined across a short "
-        "unclassified transition."
+        "merged_segments > 1 marks plateaus joined across a short unclassified "
+        "gap that never left its neighbours' level; merged_gaps gives each "
+        "gap's length, its level range and why it merged."
     )
+    gap_note = ptrms.merge_gaps_note(
+        gap for s in segs for gap in s.get("merged_gaps", [])
+    )
+    if gap_note:
+        note += " " + gap_note[0].upper() + gap_note[1:] + "."
     out = {"n_segments": len(segs), "note": note, "segments": segs}
     if not sig["signal_present"]:
         out["signal_present"] = False
@@ -804,27 +817,53 @@ def auto_peaks(f, *, min_height=1e-3, max_peaks=300, mz_min=15.0, mz_max=None,
     return out
 
 
-def auto_ranges(f, *, min_duration=30, grad_thr=0.02, high_gap=0, low_gap=200):
+def auto_ranges(f, *, min_duration=30, grad_thr=0.02, high_gap=None, low_gap=200):
     """Deterministic interval list: stable plateaus, consolidated, and named
     `sample_NN` / `background_NN` in chronological order. The name carries the class,
-    which is what the analysis blanks against, so these labels are load-bearing."""
-    segs = ptrms.detect_segments(f, min_duration=min_duration, grad_thr=grad_thr)
-    segs = ptrms.merge_adjacent_segments(segs, high_gap=high_gap, low_gap=low_gap)
+    which is what the analysis blanks against, so these labels are load-bearing.
+
+    `high_gap=None` (the default) lets the merge judge each gap from the signal
+    itself across ~60 s of acquisition; a number forces that cycle cap instead and 0
+    never merges high plateaus. Merged gaps carry their provenance on the range as
+    `merged_gaps`, which is what the review UI quotes back to the reviewer."""
+    D = ptrms.build_discriminator(f)
+    segs = ptrms.detect_segments(
+        f, discriminator=D, min_duration=min_duration, grad_thr=grad_thr
+    )
+    segs = ptrms.merge_adjacent_segments(
+        segs,
+        high_gap=high_gap,
+        low_gap=low_gap,
+        discriminator=D,
+        baseline=ptrms.discriminator_baseline(D),
+        cap=ptrms.merge_gap_cap(f),
+    )
     out = []
     counts = {"high": 0, "low": 0}
     for s in segs:
         kind = s["class"]
         counts[kind] += 1
         prefix = "sample" if kind == "high" else "background"
-        out.append(
-            {
-                "label": f"{prefix}_{counts[kind]:02d}",
-                "start": s["start_cycle"],
-                "end": s["end_cycle"],
-                "unit": "cycle",
-            }
-        )
+        entry = {
+            "label": f"{prefix}_{counts[kind]:02d}",
+            "start": s["start_cycle"],
+            "end": s["end_cycle"],
+            "unit": "cycle",
+        }
+        if s.get("merged_gaps"):
+            entry["merged_gaps"] = s["merged_gaps"]
+        out.append(entry)
     return out
+
+
+def auto_ranges_note(ranges):
+    """One line on what `auto_ranges` joined up, or "" when it joined nothing.
+
+    The provenance rides on the ranges, so this is how the app mode — where nobody
+    ever sees a command line — explains a merge instead of silently making one."""
+    return ptrms.merge_gaps_note(
+        gap for r in ranges or [] for gap in (r.get("merged_gaps") or [])
+    )
 
 
 def _auto_peaks(f, args, R=None, R_phys=None):
@@ -870,7 +909,7 @@ def _load_ranges(args, f):
         if cfg.get("ranges"):
             return cfg["ranges"]
     if getattr(args, "auto_segments", False):
-        return auto_ranges(f, high_gap=getattr(args, "merge_high_gap", 0) or 0)
+        return auto_ranges(f, high_gap=getattr(args, "merge_high_gap", None))
     return None
 
 
@@ -1244,6 +1283,7 @@ def cmd_viz(args):
             config_base=config,
             x_axis_unit=x_axis_unit,
             checklist=_load_checklist(args),
+            merge_note=config.get("merge_note") or "",
         )
 
     serve_mode = args.serve if args.serve is not None else (not args.html)
@@ -1763,10 +1803,12 @@ def main():
     ps.add_argument(
         "--merge-high-gap",
         type=int,
-        default=0,
+        default=None,
         metavar="CYCLES",
-        help="Merge consecutive high plateaus across an unclassified gap "
-        "of at most this many cycles (default: disabled)",
+        help="Force the gap cap when joining consecutive high plateaus. By default "
+        "every gap is judged on evidence — it merges only if it stayed within its "
+        "neighbours' level and covered under ~60 s of acquisition. 0 never merges "
+        "high plateaus",
     )
     ps.set_defaults(func=cmd_segments)
 
@@ -1793,10 +1835,11 @@ def main():
     pa.add_argument(
         "--merge-high-gap",
         type=int,
-        default=0,
+        default=None,
         metavar="CYCLES",
-        help="With --auto-segments, merge consecutive high plateaus "
-        "across a short unclassified gap",
+        help="With --auto-segments, force the gap cap when joining consecutive "
+        "high plateaus (default: judge each gap on the signal itself, across "
+        "~60 s of acquisition; 0 never merges high plateaus)",
     )
     pa.add_argument(
         "--include-cycle-rows",

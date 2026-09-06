@@ -656,6 +656,23 @@ def extract_traces(
 
 
 # ---------- automatic segmentation ----------
+
+# Gap merging. A plateau can be split by a wobble in one sample rather than by a
+# real change of phase, and a cycle count cannot tell those apart across
+# instruments, so the limit is a wall-clock window and the decision is made from
+# the discriminator itself (see merge_adjacent_segments).
+MERGE_BAND = 2.0  # how far a gap may leave its neighbours' level and still merge
+MERGE_GAP_WINDOW_S = 60.0  # merged gaps cover at most this much acquisition time
+MERGE_MIN_GAP_CYCLES = 30  # ... but never fewer cycles than this
+# the historical length limits, kept for callers with segments but no signal
+MERGE_HIGH_GAP_DEFAULT = 60
+MERGE_LOW_GAP_DEFAULT = 200
+MERGE_REASON_HELD = "level held"
+MERGE_REASON_FELL = "fell to baseline"
+MERGE_REASON_ADJACENT = "adjacent"
+MERGE_REASON_LENGTH = "length only"
+
+
 def build_discriminator(f, mz_lo=40.0, mz_hi=200.0, block=400):
     """Per-cycle composite VOC signal, ~1 at background and high during samples.
 
@@ -717,7 +734,7 @@ def detect_segments(
         L = np.convolve(L, np.ones(smooth) / smooth, mode="same")
     g = np.abs(np.gradient(L))
     stable = g < grad_thr
-    baseline = np.percentile(D, 20) or 1.0
+    baseline = discriminator_baseline(D)
 
     segs = []
     i = 0
@@ -747,19 +764,148 @@ def detect_segments(
     return segs
 
 
-def merge_adjacent_segments(segments, high_gap=60, low_gap=200):
+def discriminator_baseline(D):
+    """The level reference every segment level is measured against.
+
+    The 20th percentile of the discriminator — the run's own background — or 1.0
+    when that is degenerate (an empty or wholly non-finite trace). detect_segments
+    and merge_adjacent_segments both take their levels from here, which is what makes
+    a gap's level directly comparable to a plateau's."""
+    values = np.asarray(D, dtype=np.float64)
+    if values.size == 0:
+        return 1.0
+    value = float(np.percentile(values, 20))
+    return value if np.isfinite(value) and value > 0 else 1.0
+
+
+def merge_gap_cap(f, window_s=MERGE_GAP_WINDOW_S):
+    """How many cycles a merged gap may cover, from the file's own cycle time.
+
+    ``window_s`` seconds of acquisition, floored at ``MERGE_MIN_GAP_CYCLES`` so a fast
+    file is never capped below a few dozen cycles. This is what makes the merge verdict
+    independent of the acquisition speed: the same 40-second wobble is 40 cycles at
+    1 s/cycle and 8 at 5 s/cycle, and both are one sample either way."""
+    return max(MERGE_MIN_GAP_CYCLES, int(round(window_s / spec_duration_s(f))))
+
+
+def _gap_record(previous, current, gap, D, baseline, band, evidence):
+    """Provenance for one candidate gap, or None when the gap refuses the merge.
+
+    The gap's cycles are ``prev.end_cycle + 1 … cur.start_cycle - 1`` (1-based
+    inclusive), i.e. ``D[prev.end_cycle : cur.start_cycle - 1]`` in 0-based slice
+    form — the same convention detect_segments writes start_cycle/end_cycle with.
+    """
+    if not evidence:
+        return {
+            "cycles": gap,
+            "min_level": None,
+            "max_level": None,
+            "reason": MERGE_REASON_LENGTH,
+        }
+    if gap <= 0:
+        return {
+            "cycles": gap,
+            "min_level": None,
+            "max_level": None,
+            "reason": MERGE_REASON_ADJACENT,
+        }
+    lo = max(0, min(int(previous["end_cycle"]), D.size))
+    hi = max(lo, min(int(current["start_cycle"]) - 1, D.size))
+    window = D[lo:hi]
+    if window.size == 0:
+        return None  # the gap lies outside the signal: no evidence either way
+    low = float(np.min(window)) / baseline
+    high = float(np.max(window)) / baseline
+    if not (np.isfinite(low) and np.isfinite(high)):
+        return None  # cycles we cannot measure are not evidence of a wobble
+    levels = [float(segment.get("level") or 0.0) for segment in (previous, current)]
+    # the gap must never have left the phase its neighbours are in, in either
+    # direction: no collapse to the baseline, no excursion out of the phase
+    if low < min(levels) / band or high > max(levels) * band:
+        return None
+    # the reason says how far the gap came down, measured against the background
+    # itself: at least band x baseline it held a level of its own (a wobble), below
+    # that it sat at the run's background and only stayed mergeable inside the band
+    reason = MERGE_REASON_HELD if low >= band else MERGE_REASON_FELL
+    return {
+        "cycles": gap,
+        "min_level": round(low, 2),
+        "max_level": round(high, 2),
+        "reason": reason,
+    }
+
+
+def merge_adjacent_segments(
+    segments,
+    high_gap=MERGE_HIGH_GAP_DEFAULT,
+    low_gap=MERGE_LOW_GAP_DEFAULT,
+    *,
+    discriminator=None,
+    baseline=None,
+    band=MERGE_BAND,
+    cap=None,
+):
     """Merge consecutive same-class plateaus separated only by a short transition.
 
     Plateau detection splits one physical period into several entries whenever the
     signal briefly wobbles — a sample that momentarily dips, or (very commonly) a
     long background/setup phase broken by transients into a run of small pieces plus
-    slivers. Merge adjacent entries of the SAME class whose unclassified gap is within
-    the class-specific limit; an opposite-class plateau between them is always a hard
-    boundary (samples never merge across a background and vice-versa). ``high_gap`` /
-    ``low_gap`` are the max gaps (cycles) for high / low runs; 0 disables that class.
-    Backgrounds get a generous default so a fragmented baseline collapses to one
-    reference interval, while samples stay conservative (only merged when asked)."""
-    limits = {"high": max(0, high_gap), "low": max(0, low_gap)}
+    slivers. Merge adjacent entries of the SAME class whose unclassified gap passes
+    the test for that class; an opposite-class plateau between them is always a hard
+    boundary (samples never merge across a background and vice-versa).
+
+    Two tests are available, and every merged gap says which one ran:
+
+    * **evidence** — given whenever the caller has the file, i.e. every real path.
+      With ``gap`` the cycles strictly between the two plateaus, ``level`` the same
+      x-baseline level detect_segments reports, and ``baseline`` the run's own
+      background, a gap merges only when ALL of
+
+          gap_cycles <= cap
+          min(D[gap]) / baseline >= min(prev.level, cur.level) / band
+          max(D[gap]) / baseline <= max(prev.level, cur.level) * band
+
+      so a gap that collapses to the baseline or spikes out of the phase stays a
+      break however short it is, while a wobble merges whatever the cycle time is.
+      ``cap`` is the wall-clock-derived length limit (merge_gap_cap); ``high_gap`` /
+      ``low_gap`` override it with a forced cycle count for high / low runs, and a
+      class capped at 0 never merges. A gap holding a non-finite cycle is refused.
+    * **length** — no ``discriminator``: the historical rule, merge when the gap
+      ``<= high_gap``/``low_gap``. Kept so callers holding segments but no signal
+      still get the behaviour they had.
+
+    A class capped at 0 never merges, whatever the path.
+
+    Returns copies. Each merged gap is appended to ``merged_gaps`` as
+    ``{cycles, min_level, max_level, reason}``: ``level held`` means the gap kept a
+    level of its own (at least ``band`` x baseline — a wobble in one sample),
+    ``fell to baseline`` means it came back down to the run's background yet stayed
+    inside the band, ``adjacent`` means nothing separated them, and ``length only``
+    is the legacy path, which knows nothing about the level."""
+    evidence = discriminator is not None
+    if evidence:
+        D = np.asarray(discriminator, dtype=np.float64)
+        floor = discriminator_baseline(D) if baseline is None else float(baseline)
+        if not np.isfinite(floor) or floor <= 0:
+            floor = 1.0
+        if high_gap is None:
+            # 'no cap asked for' means whatever the cycle time implies
+            high_limit = MERGE_HIGH_GAP_DEFAULT if cap is None else int(cap)
+        else:
+            high_limit = int(high_gap)
+        limits = {
+            "high": max(0, high_limit),
+            "low": max(0, int(low_gap if low_gap is not None else 0)),
+        }
+    else:
+        D = np.zeros(0)
+        floor = 1.0
+        high_limit = MERGE_HIGH_GAP_DEFAULT if high_gap is None else int(high_gap)
+        low_limit = MERGE_LOW_GAP_DEFAULT if low_gap is None else int(low_gap)
+        limits = {
+            "high": max(0, high_limit),
+            "low": max(0, low_limit),
+        }
     if not any(limits.values()):
         return [dict(segment) for segment in segments]
 
@@ -770,9 +916,13 @@ def merge_adjacent_segments(segments, high_gap=60, low_gap=200):
         current.setdefault("merged_gaps", [])
         if merged:
             previous = merged[-1]
-            gap = current["start_cycle"] - previous["end_cycle"] - 1
             cls = current.get("class")
-            if previous.get("class") == cls and 0 <= gap <= limits.get(cls, 0):
+            limit = limits.get(cls, 0)
+            gap = current["start_cycle"] - previous["end_cycle"] - 1
+            record = None
+            if previous.get("class") == cls and 0 <= gap <= limit and limit > 0:
+                record = _gap_record(previous, current, gap, D, floor, band, evidence)
+            if record is not None:
                 previous_cycles = previous["n_cycles"]
                 current_cycles = current["n_cycles"]
                 stable_cycles = previous_cycles + current_cycles
@@ -790,14 +940,36 @@ def merge_adjacent_segments(segments, high_gap=60, low_gap=200):
                     2,
                 )
                 previous["merged_segments"] += current["merged_segments"]
-                previous["merged_gaps"].append(gap)
+                previous["merged_gaps"].append(record)
                 previous["merged_gaps"].extend(current["merged_gaps"])
                 continue
         merged.append(current)
     return merged
 
 
-def merge_adjacent_high_segments(segments, max_gap_cycles=60):
+def merge_gaps_note(gaps):
+    """Say in one line what a merge did, e.g. `joined 2 wobbles, level held
+    (<= 28 cycles)` — the reviewer in the browser has no command line to ask with."""
+    records = [gap for gap in gaps if isinstance(gap, dict)]
+    if not records:
+        return ""
+    reasons = [str(gap.get("reason") or "no evidence recorded") for gap in records]
+    distinct = list(dict.fromkeys(reasons))
+    count = len(records)
+    if len(distinct) == 1:
+        why = distinct[0]
+        noun = "wobble" if why == MERGE_REASON_HELD else "gap"
+    else:
+        why = ", ".join(f"{reasons.count(r)} {r}" for r in distinct)
+        noun = "gap"
+    widest = max(int(gap.get("cycles") or 0) for gap in records)
+    return (
+        f"joined {count} {noun}{'' if count == 1 else 's'}, {why} "
+        f"(\u2264 {widest} cycles)"
+    )
+
+
+def merge_adjacent_high_segments(segments, max_gap_cycles=MERGE_HIGH_GAP_DEFAULT):
     """Back-compat: merge only high plateaus (see merge_adjacent_segments)."""
     return merge_adjacent_segments(segments, high_gap=max_gap_cycles, low_gap=0)
 
