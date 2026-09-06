@@ -98,27 +98,22 @@ jobs:
         if: matrix.installer == 'pkg'
         run: |
           installer -pkginfo -pkg dist/ptr.pkg
-          # -target / means the system volume, which since macOS 11 is a separate
-          # read-only volume with /Applications behind a firmlink into the data
-          # volume. Command-line installer skips firmlinked directories and still
-          # writes a receipt, so it reports a successful install of files that are
-          # not there. Point it at the data volume, which is what Installer.app
-          # resolves when you double-click the package.
-          target=/
-          for volume in /Volumes/Data /System/Volumes/Data; do
-            [ -d "$volume/Applications" ] && target=$volume && break
+          # installer returns once installd has written the receipt, but the
+          # payload is staged in an InstallerSandbox and the bundle is moved into
+          # place afterwards -- "atomically shoved", in install.log. Poll for it
+          # rather than trusting the exit status, which says nothing about the
+          # destination. -target / is what double-clicking resolves to, so that is
+          # what is tested here.
+          sudo installer -pkg dist/ptr.pkg -target / -verboseR
+          installed=""
+          for _ in $(seq 1 60); do
+            installed=$(find /Applications -maxdepth 1 -name "PTR-MS Review.app" | head -1)
+            [ -n "$installed" ] && break
+            sleep 0.5
           done
-          echo "installing onto $target"
-          sudo installer -pkg dist/ptr.pkg -target "$target" -verboseR
-          echo "--- what install.log says the installer did ---"
-          sudo grep -i "ptrms\|PTR-MS" /var/log/install.log | tail -25 || echo "nothing in install.log"
-          echo "--- receipts on disk ---"
-          sudo ls /var/db/receipts 2>/dev/null | grep -i ptrms || echo "no receipt files"
-          installed=$(find /Applications -maxdepth 1 -name "PTR-MS Review.app" | head -1)
           if [ -z "$installed" ]; then
-            echo "--- not under /Applications; searching the volume ---"
-            find / -maxdepth 5 -name "PTR-MS Review.app" \
-              -not -path "/System/*" -not -path "/private/*" 2>/dev/null | head -3
+            echo "installed nothing under /Applications; install.log said:"
+            sudo grep -i "ptrms\|PTR-MS" /var/log/install.log | tail -15 || true
             exit 1
           fi
           echo "installed at: $installed"
