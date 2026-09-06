@@ -100,14 +100,20 @@ jobs:
           installer -pkginfo -pkg dist/ptr.pkg
           sudo installer -pkg dist/ptr.pkg -target /
           # Where did it actually go? A pkg that reports success and lands
-          # elsewhere is the failure mode this step exists to catch.
+          # somewhere else is the failure mode this step exists to catch, so the
+          # bundle is located rather than assumed -- and if it is not under
+          # /Applications the run says so and fails.
           echo "--- receipt ---"
-          pkgutil --pkgs | grep -i ptrms || echo "no receipt for dk.samsmart.ptrms"
-          pkgutil --files dk.samsmart.ptrms 2>/dev/null | head -3 || true
-          echo "--- /Applications ---"
-          ls -d /Applications/PTR-MS* 2>/dev/null || echo "nothing matching PTR-MS in /Applications"
-          find /Applications -maxdepth 3 -name "ptr" 2>/dev/null | head -3 || true
-          python scripts/smoke_frozen.py "/Applications/PTR-MS Review.app/Contents/MacOS/ptr"
+          pkgutil --pkg-info dk.samsmart.ptrms || echo "no receipt for dk.samsmart.ptrms"
+          installed=$(find /Applications -maxdepth 1 -name "PTR-MS Review.app" | head -1)
+          if [ -z "$installed" ]; then
+            echo "--- not under /Applications; searching the volume ---"
+            find / -maxdepth 5 -name "PTR-MS Review.app" \
+              -not -path "/System/*" -not -path "/private/*" 2>/dev/null | head -3
+            exit 1
+          fi
+          echo "installed at: $installed"
+          python scripts/smoke_frozen.py "$installed/Contents/MacOS/ptr"
 
       # Named after the installer exists: naming it before building it is a mistake
       # worth remembering, because the smoke test above passes either way.
