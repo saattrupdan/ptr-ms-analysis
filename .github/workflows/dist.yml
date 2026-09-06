@@ -1,9 +1,9 @@
 name: package
 
 # PyInstaller cannot cross-compile, and neither can an installer tool: an .msi has to
-# be built by Windows Installer tooling and a .dmg by hdiutil. So each operating system
-# builds its own artifact. The repo is public, so these runners are free; a tag
-# additionally publishes a GitHub Release.
+# be built by Windows Installer tooling and a .pkg by pkgbuild and productbuild. So each
+# operating system builds its own artifact. The repo is public, so these runners are
+# free; a tag additionally publishes a GitHub Release. packaging/README.md is the guide.
 
 on:
   workflow_dispatch:
@@ -36,7 +36,7 @@ jobs:
             exe: dist/ptr/ptr.exe
           - os: macos-latest
             label: macos-arm64
-            installer: dmg
+            installer: pkg
             exe: dist/PTR-MS Review.app/Contents/MacOS/ptr
             # An Intel Mac build would be a third entry: { os: macos-13,
             # label: macos-x86_64, exe: dist/PTR-MS Review.app/Contents/MacOS/ptr }.
@@ -81,32 +81,25 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "silent install failed with exit code $($p.ExitCode)" }
           python scripts/smoke_frozen.py "C:\Program Files\PTR-MS Review\ptr.exe"
 
-      - name: Build the disk image
-        if: matrix.installer == 'dmg'
+      - name: Build the macOS package
+        if: matrix.installer == 'pkg'
         run: |
-          stage=$(mktemp -d)
-          cp -R "dist/PTR-MS Review.app" "$stage/"
-          ln -s /Applications "$stage/Applications"
-          cat > "$stage/Read me first.txt" <<'TXT'
-          PTR-MS Review
+          # Two tools, two artifacts-in-one: pkgbuild wraps the bundle in a component
+          # package (payload plus bill of materials) and productbuild wraps that in the
+          # distribution make_pkg.py writes (title, version, minimum system, arch).
+          version=$(python packaging/make_pkg.py --print-version)
+          python packaging/make_pkg.py --out build/pkg --arch "$(uname -m)"
+          pkgbuild --component "dist/PTR-MS Review.app" --install-location /Applications \
+            --identifier dk.samsmart.ptrms --version "$version" build/pkg/ptr-component.pkg
+          productbuild --distribution build/pkg/distribution.xml \
+            --package-path build/pkg dist/ptr.pkg
 
-          Drag the icon onto Applications, then start it from Launchpad or the Terminal
-          (`ptr app`). It opens its review page in your browser and serves it from this
-          computer only. To stop it, use "Stop the app" on that page.
-
-          The first start is blocked by macOS because the app is unsigned: open it once
-          with right-click (or Control-click) → Open. Nothing is downloaded or uploaded;
-          the page talks to 127.0.0.1.
-          TXT
-          hdiutil create -quiet -volname "PTR-MS Review" -srcfolder "$stage" -ov \
-            -format UDZO dist/ptr.dmg
-
-      - name: Check the mounted image, not just the built app
-        if: matrix.installer == 'dmg'
+      - name: Check the installed app, not just the built one
+        if: matrix.installer == 'pkg'
         run: |
-          hdiutil attach -nobrowse -readonly -mountpoint /tmp/ptr-mount dist/ptr.dmg
-          python scripts/smoke_frozen.py "/tmp/ptr-mount/PTR-MS Review.app/Contents/MacOS/ptr"
-          hdiutil detach /tmp/ptr-mount
+          installer -pkginfo -pkg dist/ptr.pkg
+          sudo installer -pkg dist/ptr.pkg -target /
+          python scripts/smoke_frozen.py "/Applications/PTR-MS Review.app/Contents/MacOS/ptr"
 
       # Named after the installer exists: naming it before building it is a mistake
       # worth remembering, because the smoke test above passes either way.
