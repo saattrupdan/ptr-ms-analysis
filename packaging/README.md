@@ -213,13 +213,27 @@ sudo installer -pkg dist/ptr-review-macos-arm64.pkg -target /
 That is the whole install; there is no drag-to-Applications step, and the path
 never varies.
 
-One caution when scripting it: `installer` returns, and writes its receipt, while
-`installd` is still moving the payload from the staging sandbox into place —
-`install.log` calls this "atomically shoved". The exit status therefore says nothing
-about the destination, and a check placed immediately afterwards can look for the
-bundle before the rename has happened. Ask the filesystem, with a wait around it:
+One caution when scripting it: **a successful `installer` run is not proof that
+anything arrived in `/Applications`.** It reports success and writes its receipt
+without regard to where the payload ended up, and there is a specific way to lose the
+files. If some copy of the bundle has been *run* from another path, LaunchServices
+registers the bundle id there, and `installd` then treats that path as the bundle's
+home and moves the installed payload onto it — `/Applications` stays empty, and
+`install.log` says so in plain sight:
+
+```text
+PackageKit: Applications/PTR-MS Review.app relocated to Users/you/work/…/dist/PTR-MS Review.app
+PackageKit: Touched bundle /Users/you/work/…/dist/PTR-MS Review.app
+```
+
+This is what the CI job hit: it smoke-tested the bundle inside `dist/` first, and the
+package install then landed there. The same commands passed on one runner and failed on
+the next, because whether the id was still registered was a property of the machine.
+The check is therefore to move any built copy out of the way, unregister it, and then
+ask the filesystem rather than the exit status:
 
 ```bash
+mv "dist/PTR-MS Review.app" "$RUNNER_TEMP/built-app"
 sudo installer -pkg dist/ptr.pkg -target / -verboseR
 for _ in $(seq 1 60); do
   [ -d "/Applications/PTR-MS Review.app" ] && break
