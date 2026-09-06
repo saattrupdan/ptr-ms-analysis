@@ -98,21 +98,18 @@ jobs:
         if: matrix.installer == 'pkg'
         run: |
           installer -pkginfo -pkg dist/ptr.pkg
-          sudo installer -pkg dist/ptr.pkg -target /
-          # Where did it actually go? A pkg that reports success and lands
-          # somewhere else is the failure mode this step exists to catch, so the
-          # bundle is located rather than assumed -- and if it is not under
-          # /Applications the run says so and fails.
-          echo "--- what kind of directory is /Applications here ---"
-          csrutil status || true
-          ls -ldO /Applications
-          df -h / | tail -1
-          sudo touch /Applications/ptr-write-test \
-            && echo "sudo can write to /Applications" \
-            || echo "sudo cannot write to /Applications"
-          sudo rm -f /Applications/ptr-write-test
-          echo "--- receipt ---"
-          pkgutil --pkg-info dk.samsmart.ptrms || echo "no receipt for dk.samsmart.ptrms"
+          # -target / means the system volume, which since macOS 11 is a separate
+          # read-only volume with /Applications behind a firmlink into the data
+          # volume. Command-line installer skips firmlinked directories and still
+          # writes a receipt, so it reports a successful install of files that are
+          # not there. Point it at the data volume, which is what Installer.app
+          # resolves when you double-click the package.
+          target=/
+          for volume in /Volumes/Data /System/Volumes/Data; do
+            [ -d "$volume/Applications" ] && target=$volume && break
+          done
+          echo "installing onto $target"
+          sudo installer -pkg dist/ptr.pkg -target "$target"
           installed=$(find /Applications -maxdepth 1 -name "PTR-MS Review.app" | head -1)
           if [ -z "$installed" ]; then
             echo "--- not under /Applications; searching the volume ---"
