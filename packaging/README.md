@@ -211,7 +211,22 @@ sudo installer -pkg dist/ptr-review-macos-arm64.pkg -target /
 ```
 
 That is the whole install; there is no drag-to-Applications step, and the path
-never varies. `sudo installer` is what CI runs, and it is worth running once
+never varies.
+
+One caution when scripting it: `installer` returns, and writes its receipt, while
+`installd` is still moving the payload from the staging sandbox into place —
+`install.log` calls this "atomically shoved". The exit status therefore says nothing
+about the destination, and a check placed immediately afterwards can look for the
+bundle before the rename has happened. Ask the filesystem, with a wait around it:
+
+```bash
+sudo installer -pkg dist/ptr.pkg -target / -verboseR
+for _ in $(seq 1 60); do
+  [ -d "/Applications/PTR-MS Review.app" ] && break
+  sleep 0.5
+done
+test -x "/Applications/PTR-MS Review.app/Contents/MacOS/ptr" || exit 1
+``` `sudo installer` is what CI runs, and it is worth running once
 even if you mean to double-click, because it fails loudly and prints the
 destination. To see what a machine already has:
 
@@ -230,8 +245,9 @@ sudo pkgutil --forget dk.samsmart.ptrms   # drop the receipt too
 ```
 
 To install into a scratch root instead of a real system, pass a directory:
-`sudo installer -pkg dist/ptr.pkg -target /tmp/ptrroot` builds the tree there rather than
-in `/Applications`, and records its receipts in that image, not in yours. The Windows
+`sudo installer -pkg dist/ptr.pkg -target /tmp/ptrroot` builds the tree there rather
+than in `/Applications`, and writes its receipts into that image rather than your
+system's. It still needs root, so it is not a way to avoid `sudo`. The Windows
 equivalent is `msiexec /i dist\ptr.msi /qn` to install and `msiexec /x dist\ptr.msi /qn`
 to remove it, with the app in `C:\Program Files\PTR-MS Review`.
 
