@@ -103,6 +103,14 @@ jobs:
           # somewhere else is the failure mode this step exists to catch, so the
           # bundle is located rather than assumed -- and if it is not under
           # /Applications the run says so and fails.
+          echo "--- what kind of directory is /Applications here ---"
+          csrutil status || true
+          ls -ldO /Applications
+          df -h / | tail -1
+          sudo touch /Applications/ptr-write-test \
+            && echo "sudo can write to /Applications" \
+            || echo "sudo cannot write to /Applications"
+          sudo rm -f /Applications/ptr-write-test
           echo "--- receipt ---"
           pkgutil --pkg-info dk.samsmart.ptrms || echo "no receipt for dk.samsmart.ptrms"
           installed=$(find /Applications -maxdepth 1 -name "PTR-MS Review.app" | head -1)
