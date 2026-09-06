@@ -109,7 +109,11 @@ jobs:
             [ -d "$volume/Applications" ] && target=$volume && break
           done
           echo "installing onto $target"
-          sudo installer -pkg dist/ptr.pkg -target "$target"
+          sudo installer -pkg dist/ptr.pkg -target "$target" -verboseR
+          echo "--- what install.log says the installer did ---"
+          sudo grep -i "ptrms\|PTR-MS" /var/log/install.log | tail -25 || echo "nothing in install.log"
+          echo "--- receipts on disk ---"
+          sudo ls /var/db/receipts 2>/dev/null | grep -i ptrms || echo "no receipt files"
           installed=$(find /Applications -maxdepth 1 -name "PTR-MS Review.app" | head -1)
           if [ -z "$installed" ]; then
             echo "--- not under /Applications; searching the volume ---"
