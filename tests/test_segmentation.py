@@ -188,6 +188,63 @@ class GapCapTest(unittest.TestCase):
         self.assertEqual(len(_merge(*slow, cap=30)), 2)
         self.assertEqual(len(_merge(*fast, cap=30)), 1)
 
+    def test_a_chain_of_plateaus_is_judged_gap_by_gap(self):
+        # A sample that drifts reads as a chain of plateaus in one phase. Each gap has
+        # to be judged against the plateau it actually sits next to: judged against
+        # the running blend instead, the chain starts refusing itself after the first
+        # merge, and the verdict depends on which plateau happened to come first.
+        cycles, edge, gap = 30, 120, 20
+        D = np.concatenate(
+            [
+                np.full(edge, BASELINE),
+                np.full(cycles, 40.0 * BASELINE),
+                np.full(gap, 10.0 * BASELINE),
+                np.full(cycles, 4.0 * BASELINE),
+                np.full(gap, 2.1 * BASELINE),
+                np.full(cycles, 8.0 * BASELINE),
+                np.full(edge, BASELINE),
+            ]
+        )
+        baseline = ptrms.discriminator_baseline(D)
+        segments = []
+        start = edge + 1
+        for _ in range(3):
+            segments.append(_plateau(D, start, start + cycles - 1, baseline))
+            start += cycles + gap
+
+        merged = _merge(segments, D, _FakeRun(1.0))
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual([gap["cycles"] for gap in merged[0]["merged_gaps"]], [20, 20])
+        # the level is the plateaus' mean weighted by their own cycles, so the cycles
+        # between them cannot drag a merged interval's level toward the baseline
+        self.assertEqual(
+            merged[0]["level"], round((40.0 * 30 + 4.0 * 30 + 8.0 * 30) / 90, 2)
+        )
+
+    def test_a_dropout_inside_a_background_stays_one_blank(self):
+        # A background cannot fall out of itself: a stretch where the signal nearly
+        # vanished is still the same blank, and splitting it would replace one good
+        # reference interval with two shorter ones.
+        segments, D, f = _sample_pair(20, 0.02, sample_level=1.0)
+
+        merged = _merge(segments, D, f)
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["class"], "low")
+        self.assertEqual(
+            merged[0]["merged_gaps"][0]["reason"], "fell to baseline"
+        )
+
+    def test_a_transient_of_sample_signal_keeps_a_background_split(self):
+        # The upper test still belongs to a background: signal that clearly belongs to
+        # a sample must not be averaged into the blank it sits in the middle of.
+        segments, D, f = _sample_pair(20, 12.0, sample_level=1.0)
+
+        merged = _merge(segments, D, f)
+
+        self.assertEqual(len(merged), 2)
+
     def test_gap_longer_than_the_window_stays_split(self):
         # 200 s of dip is over the ~60 s window at both speeds, so neither merges
         slow = _sample_pair(

@@ -244,11 +244,14 @@ axis it sits on. Its legend entry says so and doubles as a switch, remembered as
 A plateau can also be split by a wobble rather than by a real change of phase, so two
 adjacent plateaus of the same class are joined when the unclassified gap between them
 never left that phase: it must cover under ~60 s of acquisition (never fewer than 30
-cycles), and its lowest and highest cycles must stay within a factor of 2 of the two
-neighbours' own levels. Those levels are read against the run's own background, so the
-same physical wobble merges at 1 s/cycle and at 5 s/cycle alike, while a gap that fell
-toward the background or strayed out of the phase stays a break however short it is. An
-opposite-class plateau in between is always a boundary. `--merge-high-gap N` overrides
+cycles), and its highest cycle must stay within a factor of 2 of the higher neighbour's
+level. A sample gap has to keep its lowest cycle within that factor of the lower
+neighbour too — a sample that came back down to the background ended — while a
+background has no lower test, because a dropout toward zero is still the same blank.
+Those levels are read against the run's own background, so the same physical wobble
+merges at 1 s/cycle and at 5 s/cycle alike, and each gap is judged against the plateau
+it abuts, so nothing depends on which plateau came first. An opposite-class plateau in
+between is always a boundary. `--merge-high-gap N` overrides
 the ~60 s cap with a fixed cycle count (`0` never joins high plateaus), and every join
 says what it did: per gap in `ptr segments` JSON, and as one line on the Intervals card
 of the review app.

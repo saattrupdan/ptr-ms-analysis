@@ -65,16 +65,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - **Adjacent plateaus are now joined on evidence, not on a cycle count.** A gap between
   two same-class plateaus merges only when it covers under ~60 s of acquisition (never
-  fewer than 30 cycles) *and* never left the phase its neighbours are in: its lowest
-  cycle stays above the lower neighbour's level divided by 2 and its highest below the
-  higher neighbour's times 2, both read against the run's own background. A wobble
-  inside one sample therefore merges at 1 s/cycle and at 5 s/cycle alike, while a gap
-  that fell toward the background — or spiked out of the phase — stays a break however
-  short it is. An opposite-class plateau between two segments is still a hard boundary.
-  On a 20,725-cycle IoniTOF run this reproduced all 15 joins chosen by hand at
-  `--merge-high-gap 30`, added 7 gaps that are genuinely one decaying sample, and
-  refused 3 that collapse to 0.05–0.18× the background and are merged as soon as a
-  length limit reaches 55 cycles. `--merge-high-gap N` survives as a cap override and
+  fewer than 30 cycles) *and* never left the phase its neighbours are in: its highest
+  cycle stays below the higher neighbour's level times 2, read against the run's own
+  background, and for a sample its lowest cycle also stays above the lower neighbour's
+  level divided by 2. A background has no lower test, since a background cannot fall out
+  of itself — a dropout toward zero is still the same blank, and splitting it would cost
+  the longer reference interval a blank exists to provide. A wobble
+  inside one sample therefore merges at 1 s/cycle and at 5 s/cycle alike, while a sample
+  that fell back to the background — or a gap that spiked out of the phase — stays a
+  break however short it is. An opposite-class plateau between two segments is still a
+  hard boundary, and each gap is judged against the plateau it abuts rather than the
+  running average of a partly merged interval, so the verdict does not depend on which
+  plateau came first. On a 20,725-cycle IoniTOF run this gave 12 sample and 11
+  background intervals where a reviewer curated 12 and 10 by hand, and where the length
+  rule at 30 cycles gave 17 and 7 — it joined two samples whenever the gap between them
+  happened to be short. `--merge-high-gap N` survives as a cap override and
   `0` still means never join high plateaus; `ptr segments --merge-high-gap` and
   `ptr analyze --merge-high-gap` now default to the automatic test instead of off.
 - **Every merge explains itself.** `merged_gaps` now carries, per gap, its length, the
@@ -82,7 +87,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `adjacent`, or `length only` on the legacy path), and the review app says the same in
   one line on the Intervals card — `joined 2 wobbles, level held (≤ 28 cycles)` — via
   the config's `merge_note`. The reviewer in `ptr app` never sees a command line, so a
-  silent join of their intervals would have been unfalsifiable.
+  silent join of their intervals would have been unfalsifiable. A merged interval's
+  level is the mean of its plateaus weighted by plateau cycles, so the cycles between
+  them cannot drag the reported level toward the baseline.
 - The interval in scope and its sample/background class now sit in the Peaks sidebar,
   one click away on either tab instead of only in the Intervals card. Switching class
   renames the interval, because the analysis reads the class from the interval name;

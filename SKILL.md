@@ -285,22 +285,28 @@ A physical sample can be split into two high plateaus by a short signal change, 
 long background can be broken into slivers by transients, so adjacent same-class
 plateaus are joined when the gap between them was in the same phase as its neighbours.
 The test is on the signal, never on a magic cycle count: the gap must cover under ~60 s
-of acquisition (and never fewer than 30 cycles), its lowest cycle must stay above the
-lower neighbour's level divided by a factor of 2, and its highest cycle below the higher
-neighbour's level times that factor. A gap that collapsed toward the background, or
-strayed out of the phase, stays a break however short it is, and an opposite-class
-plateau between two segments is always a hard boundary. Because the levels are read
-against the run's own baseline, the verdict does not change with the cycle time.
+of acquisition (and never fewer than 30 cycles), and its highest cycle must stay below
+the higher neighbour's level times a factor of 2. A sample gap must also keep its lowest
+cycle above the lower neighbour's level divided by that factor, because a sample that
+came back down to the background did end. A background gets no lower test, because a
+background cannot fall out of itself: a dropout toward zero is still the same blank, and
+splitting it would cost the longer reference interval that a blank exists to provide. An
+opposite-class plateau between two segments is always a hard boundary. Levels are read
+against the run's own baseline, and each gap against the plateau it abuts rather than
+the average of everything merged so far, so the verdict depends on neither the cycle
+time nor the order the plateaus were walked in.
 Every merge is reported: `merged_segments > 1` plus `merged_gaps`, where each gap gives
 its length, its level range, and why it merged — `level held` (it kept a level of its
 own, one sample wobbling) or `fell to baseline` (it came back down to the background
 but stayed inside the band, as a decaying sample or an ordinary background gap does).
 `--merge-high-gap N` overrides the ~60 s cap with a fixed cycle count; `0` never joins
 high plateaus. The evidence test applies in both cases. On the validated 20,725-cycle
-breath run the rule reproduced all 15 joins a reviewer chose by hand at
-`--merge-high-gap 30`, added 7 longer gaps that are genuinely one decaying sample, and
-refused 3 gaps that drop to 0.05–0.18× baseline and are merged as soon as a length
-limit reaches 55. Inspect every merge.
+breath run the rule gave 12 sample and 11 background intervals, against the 12 and 10 a
+reviewer curated by hand — the same verdict reached without anyone setting a flag, and
+without the length rule's habit of joining two samples the moment their gap happened to
+be short.
+
+Inspect every merge.
 
 Detection is only a proposal. Curate stable windows, avoid transitions, and save ranges
 explicitly. Always assign generic labels in chronological order: `sample_01`,

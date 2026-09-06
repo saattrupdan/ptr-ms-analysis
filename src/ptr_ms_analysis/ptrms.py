@@ -788,8 +788,13 @@ def merge_gap_cap(f, window_s=MERGE_GAP_WINDOW_S):
     return max(MERGE_MIN_GAP_CYCLES, int(round(window_s / spec_duration_s(f))))
 
 
-def _gap_record(previous, current, gap, D, baseline, band, evidence):
+def _gap_record(previous, current, gap, D, baseline, band, evidence,
+                previous_level=None, lower_bound=True):
     """Provenance for one candidate gap, or None when the gap refuses the merge.
+
+    ``previous_level`` is the level of the plateau the gap actually abuts. A merged
+    interval carries a blended level, and testing a decay against that average rather
+    than against its last plateau makes the verdict depend on what was merged first.
 
     The gap's cycles are ``prev.end_cycle + 1 … cur.start_cycle - 1`` (1-based
     inclusive), i.e. ``D[prev.end_cycle : cur.start_cycle - 1]`` in 0-based slice
@@ -818,10 +823,17 @@ def _gap_record(previous, current, gap, D, baseline, band, evidence):
     high = float(np.max(window)) / baseline
     if not (np.isfinite(low) and np.isfinite(high)):
         return None  # cycles we cannot measure are not evidence of a wobble
-    levels = [float(segment.get("level") or 0.0) for segment in (previous, current)]
-    # the gap must never have left the phase its neighbours are in, in either
-    # direction: no collapse to the baseline, no excursion out of the phase
-    if low < min(levels) / band or high > max(levels) * band:
+    levels = [
+        float(previous_level if previous_level is not None
+              else previous.get("level") or 0.0),
+        float(current.get("level") or 0.0),
+    ]
+    # the gap must never have left the phase its neighbours are in: no excursion out
+    # of the phase, and for a sample no collapse back to the baseline either. The
+    # collapse test only means something for a sample: a background cannot fall out of
+    # itself, so a dropout toward zero is still background and must not split a blank
+    # into two shorter ones, which is the one thing a good blank is needed for.
+    if (lower_bound and low < min(levels) / band) or high > max(levels) * band:
         return None
     # the reason says how far the gap came down, measured against the background
     # itself: at least band x baseline it held a level of its own (a wobble), below
@@ -862,14 +874,21 @@ def merge_adjacent_segments(
       background, a gap merges only when ALL of
 
           gap_cycles <= cap
-          min(D[gap]) / baseline >= min(prev.level, cur.level) / band
           max(D[gap]) / baseline <= max(prev.level, cur.level) * band
+          min(D[gap]) / baseline >= min(prev.level, cur.level) / band  (samples only)
 
-      so a gap that collapses to the baseline or spikes out of the phase stays a
-      break however short it is, while a wobble merges whatever the cycle time is.
-      ``cap`` is the wall-clock-derived length limit (merge_gap_cap); ``high_gap`` /
-      ``low_gap`` override it with a forced cycle count for high / low runs, and a
-      class capped at 0 never merges. A gap holding a non-finite cycle is refused.
+      The upper test belongs to both classes: signal that left the phase is a
+      boundary. The lower one is a sample test only, because a background cannot fall
+      out of itself — a dropout toward zero is still the same blank, and splitting it
+      would cost the longer reference interval a good blank exists to provide. A
+      sample that came back down to the baseline, on the other hand, did end.
+
+      A gap is judged against the plateau it abuts: in a chain of merges that plateau,
+      not the running average of everything merged so far, or the verdict would depend
+      on which plateau happened to come first. ``cap`` is the wall-clock-derived length
+      limit (merge_gap_cap); ``high_gap`` / ``low_gap`` override it with a forced cycle
+      count for high / low runs, and a class capped at 0 never merges. A gap holding a
+      non-finite cycle is refused.
     * **length** — no ``discriminator``: the historical rule, merge when the gap
       ``<= high_gap``/``low_gap``. Kept so callers holding segments but no signal
       still get the behaviour they had.
@@ -910,6 +929,8 @@ def merge_adjacent_segments(
         return [dict(segment) for segment in segments]
 
     merged = []
+    edges = []  # the level each merged interval ends with, which the next gap abuts
+    stable = []  # plateau cycles only, so a level never counts the gaps it spans
     for segment in segments:
         current = dict(segment)
         current.setdefault("merged_segments", 1)
@@ -921,9 +942,19 @@ def merge_adjacent_segments(
             gap = current["start_cycle"] - previous["end_cycle"] - 1
             record = None
             if previous.get("class") == cls and 0 <= gap <= limit and limit > 0:
-                record = _gap_record(previous, current, gap, D, floor, band, evidence)
+                record = _gap_record(
+                    previous,
+                    current,
+                    gap,
+                    D,
+                    floor,
+                    band,
+                    evidence,
+                    previous_level=edges[-1],
+                    lower_bound=cls == "high",
+                )
             if record is not None:
-                previous_cycles = previous["n_cycles"]
+                previous_cycles = stable[-1]
                 current_cycles = current["n_cycles"]
                 stable_cycles = previous_cycles + current_cycles
                 previous["end_cycle"] = current["end_cycle"]
@@ -942,8 +973,12 @@ def merge_adjacent_segments(
                 previous["merged_segments"] += current["merged_segments"]
                 previous["merged_gaps"].append(record)
                 previous["merged_gaps"].extend(current["merged_gaps"])
+                edges[-1] = float(current.get("level") or 0.0)
+                stable[-1] = stable_cycles
                 continue
         merged.append(current)
+        edges.append(float(current.get("level") or 0.0))
+        stable.append(int(current["n_cycles"]))
     return merged
 
 
