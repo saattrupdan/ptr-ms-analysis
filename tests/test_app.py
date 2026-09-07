@@ -671,6 +671,35 @@ def test_an_agent_answer_of_empty_lists_is_refused(tmp_path):
     assert "no peaks or ranges" in session.agent_status
 
 
+def _review_js(mode="app"):
+    data = {"file": "x.h5", "peaks": [], "ranges": [], "meta": {}}
+    page = viz.render_html(data, mode=mode)
+    return "\n".join(re.findall(r"<script>(.*?)</script>", page, re.S))
+
+
+def test_the_export_dialog_hands_the_review_back():
+    """Export used to end on a disabled button reading "Opened - you can close this
+    tab", which did nothing and left the modal as the only screen. The dialog has to
+    get out of the way once the CSV is revealed, and must be escapable without
+    revealing at all, in the failure case too."""
+    js = _review_js()
+    assert 'id="keepreviewing"' in js, "no way back to the review from the dialog"
+    assert ".remove()" in js and 'getElementById("doneov")' in js, (
+        "the dialog is never dismissed"
+    )
+    # revealing the CSV must return to the review before anything is said about the
+    # tab, or the user is left holding a dead button
+    start = js.index('fetch(isExport?"/reveal":"/open"')
+    end = js.index("else { ob.disabled=false", start)
+    handler = js[start:end]
+    assert handler.index("closeOverlay()") < handler.index("Opened"), (
+        "app mode still ends on a relabelled button instead of closing the dialog"
+    )
+    assert "you can close this tab" in handler, "the one-shot flow lost its wording"
+    failure = js[js.index('st.status==="error"'):js.index('st.status==="error"') + 1200]
+    assert "keepreviewing" in failure, "a failed export leaves no way out of the modal"
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 def test_the_embedded_scripts_are_valid_javascript():
     """The page is one very long Python string: a missing ``+`` between two literals

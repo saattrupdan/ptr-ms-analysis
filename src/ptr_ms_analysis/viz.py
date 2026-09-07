@@ -2248,13 +2248,19 @@ function submitRun(isExport){
     if(el) el.textContent=((performance.now()-t0)/1000).toFixed(0)+"s elapsed"; },500);
   const finish=(html)=>{ clearInterval(timer); clearInterval(poll);
     document.querySelector("#doneov .ovcard").innerHTML=html; };
+  const closeOverlay=()=>{ const o=document.getElementById("doneov"); if(o) o.remove(); };
+  const wireDismiss=()=>{ const k=document.getElementById("keepreviewing"); if(k) k.onclick=closeOverlay; };
   const ackNow=()=>{ try{ if(navigator.sendBeacon) navigator.sendBeacon("/ack"); }catch(e){} };
   const poll=setInterval(()=>{ fetch("/status").then(r=>r.json()).then(st=>{
     if(st.status==="done"){
-      // the app never exits on its own, so the button reveals the file instead of
-      // the tab closing; the one-shot review keeps its original wording.
+      // The app never exits on its own, so in app mode the button reveals the CSV
+      // and the dialog gets out of the way: it has no further use once the folder
+      // is open, and revealing must not be the only route back to the review,
+      // because a CSV is rarely the last thing anyone wants from a run. The
+      // one-shot review keeps its original wording and its tab-closing button.
       const btn=st.out?(isExport
-        ?'<button class="primary" id="openclose" style="margin:16px 0 6px">Show the CSV in the folder</button>'
+        ?'<button class="primary" id="openclose" style="margin:16px 6px 6px 0">Show the CSV in the folder</button>'+
+         '<button class="ghost" id="keepreviewing" style="margin:16px 0 6px">Keep reviewing</button>'
         :'<button class="primary" id="openclose" style="margin:16px 0 6px">Open results &amp; close tab</button>'):'';
       finish('<div class="check">✓</div><h2>Results ready</h2>'+
         '<p class="mut">The full-precision analysis is complete'+
@@ -2263,6 +2269,7 @@ function submitRun(isExport){
         '<p class="mut" style="font-size:12px">'+(isExport
           ?'The app stays open — keep reviewing, and export again when you change something.'
           :((st.out?'…or just ':'You can ')+'close this tab when you’re done.</p>')));
+      wireDismiss();
       const ob=document.getElementById("openclose");
       if(ob) ob.onclick=()=>{ ob.disabled=true; ob.textContent="Opening…";
         // open the file first and wait for the server's confirmation; only report
@@ -2270,8 +2277,10 @@ function submitRun(isExport){
         // they opened (not script-opened), so we don't depend on it — we tell the
         // user they can close the tab, and try close() as a best-effort convenience.
         fetch(isExport?"/reveal":"/open",{method:"POST"}).then(r=>r.json()).catch(()=>({ok:false})).then(res=>{
-          if(res&&res.ok){ ob.textContent="Opened ✓ — you can close this tab";
-            if(!isExport) setTimeout(()=>{ try{window.close()}catch(e){} },300); }
+          if(res&&res.ok){
+            if(isExport) return closeOverlay();   // back to the review, no dead end
+            ob.textContent="Opened ✓ — you can close this tab";
+            setTimeout(()=>{ try{window.close()}catch(e){} },300); }
           else { ob.disabled=false; ob.textContent="Couldn’t open automatically — open it from: ";
             const code=document.createElement("code"); code.textContent=st.out||""; ob.after(code); } }); };
       // if the user just closes the tab (never clicks Open), let the CLI finish.
@@ -2279,10 +2288,18 @@ function submitRun(isExport){
         window.addEventListener("pagehide",ackNow); window.addEventListener("beforeunload",ackNow);
       }
     }
-    else if(st.status==="error"){ finish('<div class="xmark">!</div><h2>Analysis failed</h2>'+
-      '<p class="mut">'+(st.error||"Unknown error")+'</p>'+
-      '<p class="mut" style="font-size:12px">Your edits are saved in the config'+
-      (isExport?'; fix the cause and export again.':'; re-run from the terminal.')+'</p>');
+    else if(st.status==="error"){
+      // nothing else on the page is reachable behind this card, so a failed export
+      // still has to hand the review back rather than park the user on an error.
+      finish('<div class="xmark">!</div><h2>Analysis failed</h2>'+
+        '<p class="mut">'+(st.error||"Unknown error")+'</p>'+
+        '<p class="mut" style="font-size:12px">Your edits are saved in the config'+
+        (isExport?'; fix the cause and export again.':'')+'</p>'+
+        (isExport
+          ?'<p class="mut" style="font-size:12px">Re-run from the terminal to see the full trace.</p>'+
+            '<button class="ghost" id="keepreviewing" style="margin:16px 0 6px">Keep reviewing</button>'
+          :''));
+      wireDismiss();
       ackNow(); }
   }).catch(()=>{}); },600);
   fetch(isExport?"/export":"/done",{method:"POST",headers:{"Content-Type":"application/json"},

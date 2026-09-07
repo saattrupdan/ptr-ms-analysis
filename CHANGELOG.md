@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Exporting no longer ends on a dead end.** The results dialog used to turn its own
+  button into a disabled label reading "Opened ✓ — you can close this tab" — which does
+  nothing in an app that has no tab to close — and a failed export left an error card
+  with no way out at all. Revealing the CSV now closes the dialog and returns you to the
+  review, **Keep reviewing** closes it without revealing, and both routes leave the
+  **Export** button ready to run again. The one-shot `ptr viz` flow is unchanged.
+
 ### Added
 
 - **The app can open in its own desktop window.** `ptr app --window` runs the review in
