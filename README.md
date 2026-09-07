@@ -214,9 +214,9 @@ Set `viz.x_axis_unit` in the config, or use the matching `--x-axis-unit` option 
 ```
 
 Precedence is CLI override > config value > cycle default. The selector is shown only
-on the **Signal over time** tab and updates that plot and the Intervals card; it sits
-on the right of the header, where **average over** sits on the Mass spectrum tab, so
-the Raw/Conc selector keeps the same slot either way. Saved ranges and CSV `Cycle`
+on the **Signal over time** tab and updates that plot and the Intervals card; it sits on
+the right of the header, and nothing else sits there, so the Raw/Conc selector keeps the
+same slot either way. Saved ranges and CSV `Cycle`
 rows remain integer, 1-based, inclusive cycle boundaries. The Intervals card stays in
 chronological order as intervals are added, dragged and undone, and each row's range
 updates while you drag an edge.
@@ -224,9 +224,9 @@ updates while you drag an edge.
 The **Peaks** sidebar can also be ordered by descending abundance or alphabetically by
 label. Abundance is the mean per-cycle integrated Raw signal (the peak integral), with
 m/z used to break ties. The compact list shows only the active sort field; the details
-view shows both m/z and abundance. The m/z and abundance values follow the Mass
-spectrum tab's selected average-over interval; isolated peaks use that interval's apex
-and clustered peaks retain their fixed model centres. The choice is saved as
+view shows both m/z and abundance. The m/z and abundance values follow the interval
+selected above the peak list; isolated peaks use that interval's apex and clustered
+peaks retain their fixed model centres. The choice is saved as
 `viz.peak_order` and does not change the peak order in the analysis config or CSV.
 Arrow keys move the selection down and up the order you chose, not the stored one.
 

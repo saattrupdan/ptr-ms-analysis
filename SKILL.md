@@ -446,17 +446,17 @@ be converted (no correction curve, no **K**, or no primary signal), the sidebar 
 the Raw value and says why in its tooltip instead of inventing one.
 
 Each peak's box in the sidebar is a **per-sample** tick, not a plain on/off box, and
-it follows the mass-spectrum **average over** choice: with one sample selected the box
-is that sample's own tick and touching it leaves every other interval alone; with the
-whole run (or a background) selected it is the aggregate — ticked when the compound is
-part of every sample interval, empty in none, and a partial (dash) tick when some
+the interval selector above the list decides what it means: with one sample selected the
+box is that sample's own tick and touching it leaves every other interval alone; with
+the whole run (or a background) selected it is the aggregate — ticked when the compound
+is part of every sample interval, empty in none, and a partial (dash) tick when some
 samples only, which is also how a mixed selection from the check/uncheck-all toggle
 reads. Clicking an aggregate box only ever flicks it: a dash becomes a proper tick, the
-next click clears it, the next ticks it again. In the Details view each row also carries
-one small box per sample interval, labelled by interval number, so which samples a
-compound belongs to is visible without opening anything; clicking one changes that
-sample only. The heading says which of the two the boxes mean (`Peaks · all samples`,
-`Peaks · sample_03`). A peak recorded in every sample writes no extra config field; a
+next click clears it, the next ticks it again. The same selector picks which interval
+the mass spectrum averages over, so one control moves the plot, the sidebar figures and
+the meaning of the boxes together; a compound's membership of the other samples is
+seen by selecting those intervals, not by a separate list of boxes. A peak recorded in
+every sample writes no extra config field; a
 partial one writes `samples`, the list of interval labels it belongs to. Either way a
 compound selected for at least one sample still appears in the summary CSV exactly as
 before — the per-sample split is recorded
@@ -465,9 +465,9 @@ selection, so a rename that would duplicate a label is rejected, and a `samples`
 whose labels no longer exist falls back to every sample rather than silently dropping
 the compound.
 
-Above that list the sidebar names the **interval** the boxes speak about and switches it
-between **sample** and **background**, whichever tab is open; it is the same control as
-the class column in the **Intervals** card, mirrored with it. An interval's class is
+The interval selector is the only scope control; an interval's **sample** or
+**background** class is set in the class column of the **Intervals** card, on either
+tab. An interval's class is
 carried by its label — `background_*` is what the analysis blanks against — so
 changing the class renames the interval to the first free label of the target class
 and rewrites the `samples` lists that referenced it. Classifying back restores the name

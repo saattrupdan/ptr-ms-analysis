@@ -757,12 +757,12 @@ def _review_round_browser_pass(session: str) -> None:
     )
     renamed = _eval(
         session,
-        "({options:Array.from(document.querySelectorAll('#specrange option'))"
+        "({options:Array.from(document.querySelectorAll('#scoperange option'))"
         ".map(o=>o.textContent), ticks:buildConfig().peaks.map(p=>p.samples||null)})",
     )
     _assert(
-        any(o.startswith("breath_01 (") for o in renamed["options"]),
-        "average-over options kept a stale interval name: " + str(renamed["options"]),
+        "breath_01" in renamed["options"],
+        "the interval list kept a stale interval name: " + str(renamed["options"]),
     )
     _assert(
         all(t is None for t in renamed["ticks"]) and len(renamed["ticks"]) == 6,
@@ -777,12 +777,12 @@ def _review_round_browser_pass(session: str) -> None:
     )
     back = _eval(
         session,
-        "({options:Array.from(document.querySelectorAll('#specrange option'))"
+        "({options:Array.from(document.querySelectorAll('#scoperange option'))"
         ".map(o=>o.textContent), config:buildConfig()})",
     )
     _assert(
-        any(o.startswith("sample_01 (") for o in back["options"]),
-        "interval rename did not round-trip into the average-over list",
+        "sample_01" in back["options"],
+        "interval rename did not round-trip into the interval list",
     )
     _assert_config_round_trip(back["config"])
 
@@ -838,48 +838,115 @@ def _review_round_browser_pass(session: str) -> None:
         "the new-interval check did not restore the review state: " + str(new_interval),
     )
 
-    # --- the boxes are per sample interval, and shown in the row itself ---
+    # --- one sample interval at a time: the tick box speaks about the interval in
+    # scope, so dropping a compound out of one sample leaves the others alone ---
     _browser(session, "eval", "document.querySelector('#pkdetails').click()")
-    chips = _eval(
+    scoped = _eval(
         session,
-        "(() => { const row=()=>Array.from(document.querySelectorAll('#peaksbody li'))"
+        "(() => { const p=peaks.find(q=>q.label==='Curated solvent'); "
+        "const si=sampleIntervals(); "
+        "const row=()=>Array.from(document.querySelectorAll('#peaksbody li'))"
         ".find(e=>e.querySelector('.lbl').value==='Curated solvent'); "
-        "const p=peaks.find(q=>q.label==='Curated solvent'); "
-        "const boxes=()=>Array.from(row().querySelectorAll('[data-a=smp]')); "
-        "const on=boxes().map(b=>b.classList.contains('on')); "
-        "boxes()[0].click();                                   /* out of sample_01 only */ "
-        "const box=row().querySelector('[data-a=use]'); "
+        "const box=()=>row().querySelector('[data-a=use]'); "
+        "const setScope=r=>{ const sel=document.getElementById('scoperange'); "
+        "  sel.value=r==null?'all':'i'+r._id; "
+        "  sel.dispatchEvent(new Event('change',{bubbles:true})); }; "
+        "setScope(si[0]); "
+        "const onTick=[box().checked,box().indeterminate]; "
+        "box().click();                                    /* out of this sample only */ "
         "const written=buildConfig().peaks.find(q=>q.label==='Curated solvent'); "
-        "return {n:boxes().length, on, "
-        "after:boxes().map(b=>b.classList.contains('on')), state:selState(p), "
-        "box:[box.checked,box.indeterminate], samples:written.samples}; })()",
+        "const out={scoped:scopeRange()===si[0], onTick, "
+        "  off:{state:selState(p), box:[box().checked,box().indeterminate], "
+        "  samples:written.samples, aggregate:selState(p,null)}}; "
+        "box().click(); out.back=selState(p,null); "
+        "setScope(si[1]); out.other=box().checked; "
+        "setScope(null); out.aggregate=selState(p); return out; })()",
     )
     _assert(
-        chips["n"] == 2 and chips["on"] == [True, True],
-        "the row does not carry one box per sample interval: " + str(chips),
+        scoped["scoped"] and scoped["onTick"] == [True, False],
+        "with one sample in scope the tick box is not that sample's own tick: "
+        + str(scoped),
     )
     _assert(
-        chips["after"] == [False, True]
-        and chips["state"] == "some"
-        and chips["box"] == [True, True]
-        and chips["samples"] == ["sample_02"],
-        "unticking one sample interval did not leave a partial tick: " + str(chips),
+        scoped["off"]["samples"] == ["sample_02"]
+        and scoped["off"]["state"] == "none"
+        and scoped["off"]["aggregate"] == "some"
+        and scoped["off"]["box"] == [False, False],
+        "unticking one sample interval changed the other samples too: " + str(scoped),
     )
-    _browser(
+    _assert(
+        scoped["back"] == "all" and scoped["other"] is True
+        and scoped["aggregate"] == "all",
+        "ticking the sample back did not restore the compound everywhere: " + str(scoped),
+    )
+
+    # ticking one sample and unticking another between renders must not cancel the
+    # compound out of the analysis
+    two_toggles = _eval(
         session,
-        "eval",
-        "(() => { const li=Array.from(document.querySelectorAll('#peaksbody li'))"
+        "(() => { const p=peaks.find(q=>q.label==='Curated solvent'); "
+        "setSel(p,[sampleLabels()[0]]); renderPeaks(); "
+        "const row=()=>Array.from(document.querySelectorAll('#peaksbody li'))"
         ".find(e=>e.querySelector('.lbl').value==='Curated solvent'); "
-        "li.querySelector('[data-a=use]').click(); })()",
-    )
-    ticked = _eval(
-        session,
-        "({state:selState(peaks.find(p=>p.label==='Curated solvent')), "
-        "has:('samples' in (buildConfig().peaks.find(p=>p.label==='Curated solvent')||{}))})",
+        "const box=()=>row().querySelector('[data-a=use]'); "
+        "const setScope=r=>{ const sel=document.getElementById('scoperange'); "
+        "  sel.value=r==null?'all':'i'+r._id; "
+        "  sel.dispatchEvent(new Event('change',{bubbles:true})); }; "
+        "setScope(sampleIntervals()[1]); box().click();    /* in with the second */ "
+        "setScope(sampleIntervals()[0]); box().click();    /* out with the first */ "
+        "const written=buildConfig().peaks.find(q=>q.label==='Curated solvent'); "
+        "const out={state:selState(p,null), samples:written?written.samples:null, "
+        "  listed:!!written}; "
+        "selAll(p); setScope('all'); renderPeaks(); redraw(); return out; })()",
     )
     _assert(
-        ticked["state"] == "all" and not ticked["has"],
-        "clicking a partial tick did not include every sample: " + str(ticked),
+        two_toggles["state"] == "some"
+        and two_toggles["samples"] == ["sample_02"]
+        and two_toggles["listed"],
+        "ticking one sample and unticking another lost the compound: " + str(two_toggles),
+    )
+
+    # --- the interval in scope is one control, and it follows the interval the
+    # review is looking at; reclassifying happens in the table, by name ---
+    scope = _eval(
+        session,
+        "(() => { const p=peaks.find(q=>q.label==='Curated solvent'); "
+        "p.samples=sampleLabels().slice(); renderPeaks();  /* in both, recorded by hand */ "
+        "const before=JSON.stringify(buildConfig()); "
+        "const sel=document.getElementById('scoperange'); "
+        "const r=sampleIntervals()[sampleIntervals().length-1], first=r.label; "
+        "sel.value='i'+r._id; sel.dispatchEvent(new Event('change')); "
+        "const follows=SPECWIN.lo===r.start && SPECWIN.hi===r.end && scopeRange()===r; "
+        "const row=()=>document.querySelector('#rngtbl tbody tr.sel'); "
+        "const cls=()=>row().querySelector('select'); "
+        "cls().value='background'; cls().dispatchEvent(new Event('change',{bubbles:true})); "
+        "const off={cls:r.class, label:r.label, "
+        "  saved:buildConfig().ranges.some(q=>q.label===r.label)}; "
+        "cls().value='sample'; cls().dispatchEvent(new Event('change',{bubbles:true})); "
+        "const w=buildConfig().peaks.find(q=>q.label==='Curated solvent'); "
+        "return {follows, off, first, plotSelected:selRange===r._id, "
+        "  clsBack:r.class, labelBack:r.label, "
+        "  samples:(w && 'samples' in w) ? w.samples : null, "
+        "  untouched:JSON.stringify(buildConfig())===before}; })()",
+    )
+    _assert(
+        scope["follows"] and scope["plotSelected"],
+        "the interval selector does not drive the spectrum and the plot together: "
+        + str(scope),
+    )
+    # the class is carried by the interval name, which is what the analysis blanks on,
+    # so a class switch that did not rename would be lost on save
+    _assert(
+        scope["off"]["cls"] == "background"
+        and str(scope["off"]["label"]).startswith("background")
+        and scope["off"]["saved"],
+        "reclassifying did not rename the interval for the analysis: "
+        + str(scope["off"]),
+    )
+    _assert(
+        scope["clsBack"] == "sample" and scope["labelBack"] == scope["first"]
+        and scope["untouched"] and scope["samples"] is None,
+        "classing an interval background and back changed the config: " + str(scope),
     )
 
     # --- whole run: partial -> tick -> empty -> tick, never a dead end ---
@@ -904,125 +971,6 @@ def _review_round_browser_pass(session: str) -> None:
         and cycle["none"] == ["none", False, False]
         and cycle["again"] == ["all", True, False],
         "the whole-run box does not flick between tick and empty: " + str(cycle),
-    )
-
-    # --- one sample selected: the box speaks about that sample alone ---
-    _browser(
-        session,
-        "eval",
-        "(() => { const s=document.querySelector('#specrange'); "
-        "s.value=[...s.options].find(o=>o.value!=='all').value; "
-        "s.dispatchEvent(new Event('change')); })()",
-    )
-    _browser(session, "wait", "1000")
-    scoped = _eval(
-        session,
-        "(() => { const p=peaks.find(q=>q.label==='Curated solvent'); "
-        "const row=()=>Array.from(document.querySelectorAll('#peaksbody li'))"
-        ".find(e=>e.querySelector('.lbl').value==='Curated solvent'); "
-        "const scope=scopeRange(); const box=row().querySelector('[data-a=use]'); "
-        "const shown=[box.checked,box.indeterminate]; "
-        "const on=()=>Array.from(row().querySelectorAll('[data-a=smp]'))"
-        ".map(b=>b.classList.contains('on')); "
-        "const before=on(); "
-        "box.click();                                    /* out of this sample only */ "
-        "const out={scope:scope?scope.label:null, shown, before, "
-        "  chips:on(), here:selState(p), aggregate:selState(p,null), "
-        "  samples:(buildConfig().peaks.find(q=>q.label==='Curated solvent')||{}).samples}; "
-        "row().querySelector('[data-a=use]').click();    /* and back in */ "
-        "out.back=selState(p,null); setSpecRange('all'); renderPeaks(); return out; })()",
-    )
-    _assert(
-        scoped["scope"] == "sample_01"
-        and scoped["shown"] == [True, False]
-        and scoped["before"] == [True, True],
-        "with one sample averaged the box is not that sample's own tick: " + str(scoped),
-    )
-    _assert(
-        scoped["chips"] == [False, True]
-        and scoped["here"] == "none"
-        and scoped["aggregate"] == "some"
-        and scoped["samples"] == ["sample_02"],
-        "ticking a single sample changed the other samples too: " + str(scoped),
-    )
-    _assert(
-        scoped["back"] == "all",
-        "ticking the sample back did not restore the compound everywhere: " + str(scoped),
-    )
-
-    # ticking one sample and unticking another between renders must not cancel the
-    # compound out of the analysis
-    two_toggles = _eval(
-        session,
-        "(() => { const p=peaks.find(q=>q.label==='Curated solvent'); "
-        "setSel(p,[sampleLabels()[0]]); renderPeaks(); "
-        "const row=()=>Array.from(document.querySelectorAll('#peaksbody li'))"
-        ".find(e=>e.querySelector('.lbl').value==='Curated solvent'); "
-        "const boxes=()=>Array.from(row().querySelectorAll('[data-a=smp]')); "
-        "boxes()[1].click(); boxes()[0].click(); "
-        "const written=buildConfig().peaks.find(q=>q.label==='Curated solvent'); "
-        "const out={after:boxes().map(b=>b.classList.contains('on')), state:selState(p), "
-        "samples:written?written.samples:null, listed:!!written}; "
-        "selAll(p); renderPeaks(); redraw(); return out; })()",
-    )
-    _assert(
-        two_toggles["after"] == [False, True]
-        and two_toggles["state"] == "some"
-        and two_toggles["samples"] == ["sample_02"]
-        and two_toggles["listed"],
-        "ticking one sample and unticking another lost the compound: " + str(two_toggles),
-    )
-
-    # --- the interval in scope and its class are editable from the sidebar, in either
-    # tab, and reclassifying must be reversible ---
-    scope = _eval(
-        session,
-        "(() => { const p=peaks.find(q=>q.label==='Curated solvent'); "
-        "p.samples=sampleLabels().slice(); renderPeaks();  /* in both, recorded by hand */ "
-        "const before=JSON.stringify(buildConfig()); "
-        "const sel=document.getElementById('scoperange'); "
-        "const r=ranges.find(x=>x.label==='sample_02'); "
-        "sel.value='i'+r._id; sel.dispatchEvent(new Event('change')); "
-        "const mirror=document.getElementById('specrange').value==='i'+r._id; "
-        "const badge=document.getElementById('pkscope').textContent.trim(); "
-        "const chips=Array.from(document.querySelectorAll('#scopechips .chip'))"
-        ".map(b=>b.classList.contains('on')); "
-        "document.querySelector('#scopeclass button[data-c=background]').click(); "
-        "const off={cls:r.class, label:r.label, "
-        "saved:buildConfig().ranges.some(q=>q.label===r.label), "
-        "table:(document.querySelector('#rngtbl tbody tr.sel select')||{}).value, "
-        "on:[...document.querySelectorAll('#scopeclass button.on')].map(b=>b.dataset.c)}; "
-        "document.querySelector('#scopeclass button[data-c=sample]').click(); "
-        "const w=buildConfig().peaks.find(q=>q.label==='Curated solvent'); "
-        "return {mirror, badge, chips, off, "
-        "clsBack:r.class, labelBack:r.label, "
-        "samples:(w && 'samples' in w) ? w.samples : null, "
-        "untouched:JSON.stringify(buildConfig())===before}; })()",
-    )
-    _assert(
-        scope["mirror"] and scope["badge"] == "\u00b7 sample_02",
-        "the sidebar scope row does not follow the interval it names: " + str(scope),
-    )
-    _assert(
-        scope["chips"] == [True, True],
-        "the sidebar's per-sample boxes are not showing the compound's state: "
-        + str(scope),
-    )
-    # the class is carried by the interval name, which is what the analysis blanks on,
-    # so a class switch that did not rename would be lost on save
-    _assert(
-        scope["off"]["cls"] == "background"
-        and str(scope["off"]["label"]).startswith("background")
-        and scope["off"]["saved"]
-        and scope["off"]["table"] == "background"
-        and scope["off"]["on"] == ["background"],
-        "reclassifying from the sidebar did not rename the interval for the analysis: "
-        + str(scope["off"]),
-    )
-    _assert(
-        scope["clsBack"] == "sample" and scope["labelBack"] == "sample_02"
-        and scope["untouched"] and scope["samples"] is None,
-        "classing an interval background and back changed the config: " + str(scope),
     )
 
     # --- the faint composite VOC curve names itself and can be switched off ---
@@ -1098,8 +1046,20 @@ def _review_round_browser_pass(session: str) -> None:
         "the fixture orders are indistinguishable, so the arrow test proves nothing",
     )
 
-    # --- the unit selector keeps its slot across the two tabs, and whichever axis
-    # selector belongs to the tab sits on the right ---
+    # --- the unit selector keeps its slot across the two tabs, and the axis selector
+    # that belongs to the trace tab sits hard right. The spectrum header carries no
+    # right-hand control now that the interval lives in the sidebar, so what is worth
+    # pinning down is that the two tab groups refuse to shrink: a flexible sibling
+    # used to spread its deficit over every item on the line, which showed up as the
+    # unit buttons sliding by 11-22 px when the tab changed. Details are closed first:
+    # an expanded row is deliberately wide, and a wide row decides how much of the
+    # window the sidebar takes, which is a separate question from this header. ---
+    _browser(
+        session,
+        "eval",
+        "(() => { const l=document.querySelector('#peaksbody .plist'); "
+        "if(l && l.classList.contains('det')) document.getElementById('pkdetails').click(); })()",
+    )
     header = _eval(
         session,
         "(() => { const q=document.querySelector('#qtabs'); const headEl=q.closest('h2'); "
@@ -1109,18 +1069,13 @@ def _review_round_browser_pass(session: str) -> None:
         "const onTrace=go('trace'); "
         "const xa=document.getElementById('xaxiswrap').getBoundingClientRect(); "
         "const afterUnit=xa.left>q.getBoundingClientRect().right; "
-        "const onSpec=go('spec'); "
-        "const sr=document.getElementById('specrangewrap').getBoundingClientRect(); "
-        "/* squeeze the header: only a pinned left group can refuse to shrink when "
-        "nothing else on the line can give any more */ "
-        "const sel=document.getElementById('specrange'), keep=sel.style.minWidth; "
-        "sel.style.minWidth='1400px'; "
-        "const tightTrace=go('trace'), tightSpec=go('spec'); "
-        "sel.style.minWidth=keep; go('trace'); "
-        "return {onTrace, onSpec, tightTrace, tightSpec, afterUnit, "
+        "const onSpec=go('spec'); go('trace'); "
+        "const kids=[...headEl.children].filter(e=>getComputedStyle(e).display!=='none'); "
+        "const rightmost=kids.reduce((a,e)=>Math.max(a,e.getBoundingClientRect().right),0); "
+        "return {onTrace, onSpec, afterUnit, "
         "pinned:[...document.querySelectorAll('#maintabs,#qtabs')]"
         ".every(el=>getComputedStyle(el).flexShrink==='0'), "
-        "xaxisGapFromRight:head.right-xa.right, specGapFromRight:head.right-sr.right}; })()",
+        "isRightmost:Math.abs(rightmost-xa.right)<1, gap:head.right-xa.right}; })()",
     )
     _assert(
         abs(header["onTrace"] - header["onSpec"]) <= 1,
@@ -1133,25 +1088,21 @@ def _review_round_browser_pass(session: str) -> None:
         "on the header line: " + str(header),
     )
     _assert(
-        abs(header["tightTrace"] - header["onTrace"]) <= 1
-        and abs(header["tightSpec"] - header["onSpec"]) <= 1,
-        "a cramped header slides the unit selector sideways: {} px vs {} px on the "
-        "trace tab, {} px vs {} px on the spectrum tab".format(
-            header["tightTrace"],
-            header["onTrace"],
-            header["tightSpec"],
-            header["onSpec"],
-        ),
-    )
-    _assert(
-        header["afterUnit"] and header["xaxisGapFromRight"] <= 24,
-        "the x-axis selector is not in the right-hand slot on the trace tab: "
+        header["isRightmost"] and header["afterUnit"] and 0 < header["gap"] < 24,
+        "the x-axis selector is not the right-hand control on the trace tab: "
         + str(header),
     )
-    _assert(
-        header["specGapFromRight"] <= 24,
-        "'average over' is no longer flush right: " + str(header),
+    interval_controls = _eval(
+        session,
+        "({n:document.querySelectorAll('#scoperange,#specrange').length,"
+        "head:document.querySelectorAll('#specrangewrap').length})",
     )
+    _assert(
+        interval_controls == {"n": 1, "head": 0},
+        "there is not exactly one interval selector: " + str(interval_controls),
+    )
+    _browser(session, "eval", "document.getElementById('pkdetails').click()")
+
 
     # --- the selected unit drives the sidebar values and the spectrum alike ---
     # Details stays open: the abundance cells and the pills only render there
@@ -1753,13 +1704,13 @@ def main() -> int:
         spectrum_layout = _eval(
             session,
             "(() => { const h=document.querySelector('.main>.card h2').getBoundingClientRect(); "
-            "const a=document.querySelector('#specrangewrap').getBoundingClientRect(); "
-            "return {averageRight:Math.abs(a.right-(h.right-15))<1, "
+            "const c=document.querySelector('.main>.card').getBoundingClientRect(); "
+            "return {headerFlush:Math.abs(h.right-c.right)<=1, "
             "bottomAligned:Math.abs(document.querySelector('.sidebar .card').getBoundingClientRect().bottom-"
             "document.querySelector('#idcard').getBoundingClientRect().bottom)<1}; })()",
         )
         _assert(
-            spectrum_layout == {"averageRight": True, "bottomAligned": True},
+            spectrum_layout == {"headerFlush": True, "bottomAligned": True},
             "Mass spectrum header or card is not aligned to the viewport",
         )
         _browser(
@@ -2050,9 +2001,9 @@ def main() -> int:
         _browser(
             session,
             "eval",
-            "(() => { const s=document.querySelector('#specrange'); "
+            "(() => { const s=document.querySelector('#scoperange'); "
             "s.value=[...s.options].find(o=>o.value!=='all').value; "
-            "s.dispatchEvent(new Event('change')); })()",
+            "s.dispatchEvent(new Event('change',{bubbles:true})); })()",
         )
         _browser(session, "wait", "1000")
         clustered = _eval(

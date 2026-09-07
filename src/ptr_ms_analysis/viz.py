@@ -631,30 +631,23 @@ _TEMPLATE = r"""<!DOCTYPE html>
            display:flex;align-items:center;gap:10px;font-weight:700}
   .card h2 .sub{text-transform:none;letter-spacing:0;font-weight:400;color:var(--mut);font-size:11.5px}
   .card h2 .grow{flex:1}
+  /* the slide-out panels (Configuration, Method, Checklist) are not inside a
+     .card, so the spacer that pushes their close button to the right edge needs
+     the rule of their own rather than a margin a sibling can absorb */
+  .grow{flex:1 1 auto}
   .card h2.pkhead{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
   .pkhead .pktitle{align-self:flex-start;line-height:1.1}
   .pktitle .mut{text-transform:none;letter-spacing:0;font-size:10px;font-weight:400}
   .pkcontrols{align-self:flex-end;display:flex;align-items:center;gap:8px}
   .pkcontrols .pkorder{flex-direction:row;align-items:center;gap:5px;text-align:left}
   .pkheadbtn{padding:4px 7px;font-size:10px}
-  .pktitle .scope{font-size:10px;font-weight:400;color:var(--mut)}
-  /* the interval in scope, and its class, belong to the tick boxes rather than to one
-     tab, so they live in the always-visible Peaks sidebar */
+  /* the interval in scope belongs to the tick boxes rather than to one tab, so it
+     lives in the always-visible Peaks sidebar */
   .scoperow{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;padding:6px 12px;
             border-bottom:1px solid var(--line);font-size:11px;color:var(--mut)}
   .scoperow[hidden]{display:none}
   .scoperow label.ctl{flex:1 1 auto;min-width:0;display:inline-flex;align-items:center;gap:5px}
   .scoperow select{padding:4px 6px;font-size:11px;width:100%;min-width:0}
-  .scoperow .mini{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .scoperow .smpsel{flex:0 0 auto}
-  .scoperow .tabs{display:inline-flex;gap:2px}
-  .scoperow .tabs button{padding:3px 8px;font-size:10.5px;border:1px solid var(--line);
-            background:transparent;color:var(--mut);border-radius:6px;cursor:pointer}
-  .scoperow .tabs button:hover{border-color:var(--hi);color:var(--fg)}
-  .scoperow .tabs button.on{border-color:var(--hi);color:var(--bg);font-weight:600}
-  .scoperow .tabs button.on[data-c="sample"]{background:#f59e0b}
-  .scoperow .tabs button.on[data-c="background"]{background:#64748b}
-  .pktitle .scope.one{color:var(--hi)}
   .pad{padding:14px 15px}
   canvas{width:100%;display:block;background:var(--panel2)}
   #plot{cursor:grab} #plot.grabbing{cursor:grabbing}
@@ -821,14 +814,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .plist .dc.kv{min-width:50px;text-align:right}
   .plist .dc.win{min-width:92px;text-align:right}
   .plist .dc.pills{display:flex;gap:4px;flex:0 0 var(--tag-width,1px);min-width:var(--tag-width,1px);overflow:visible}
-  .smpsel{display:grid;justify-content:start;gap:3px 2px}
-  .plist .dc.smpsel{flex:0 0 auto}
-  .chip{width:17px;height:16px;padding:0;font-size:8.5px;line-height:14px;text-align:center;cursor:pointer;
-    border:1px solid var(--line);border-radius:4px;background:transparent;color:var(--mut);
-    -webkit-appearance:none;appearance:none}
-  .chip.on{background:var(--hi);border-color:var(--hi);color:var(--bg);font-weight:600}
-  .chip.cur{outline:1px solid var(--hi);outline-offset:1px}
-  .chip:hover{border-color:var(--hi)}
   .plist .dc.del{display:inline-flex;align-items:center;justify-content:center;flex:0 0 28px;width:28px;
                  cursor:pointer;color:var(--mut);background:none;border:0;font-size:12px;padding:2px 4px;text-align:center}
   .plist .dc.del:hover{color:#f87171}
@@ -925,7 +910,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <aside class="sidebar">
     <div class="card">
       <h2 class="pkhead">
-        <span class="pktitle">Peaks<span class="scope" id="pkscope" title="which sample intervals the tick boxes speak about"></span></span>
+        <span class="pktitle">Peaks</span>
         <span class="pkcontrols">
           <label class="pkorder" title="Abundance is the mean per-cycle integrated Raw signal">
             order by
@@ -938,19 +923,13 @@ _TEMPLATE = r"""<!DOCTYPE html>
           <button class="ghost pkheadbtn" id="pkcheckall" type="button">Check all</button>
           <button class="ghost pkheadbtn" id="pkdetails">Details</button>
         </span></h2>
-      <!-- the interval in scope and its class belong to the tick boxes, not to one tab,
-           so they live in the always-visible Peaks sidebar -->
+      <!-- the interval in scope is what both the tick boxes and the mass spectrum
+           speak about, so it lives in the always-visible Peaks sidebar, as one
+           control; the class it counts as is a property of the interval itself and
+           is set in the Intervals table -->
       <div class="scoperow" id="scoperow">
         <label class="ctl" title="the interval the Mass spectrum averages over, and the one the tick boxes speak about">interval
           <select id="scoperange" aria-label="Interval in scope"></select></label>
-        <span class="tabs" id="scopeclass" role="group" aria-label="Interval class">
-          <button type="button" data-c="sample" title="counts as a sample">sample</button>
-          <button type="button" data-c="background" title="counts as a blank">background</button>
-        </span>
-      </div>
-      <div class="scoperow chipsrow" id="scopechipsrow">
-        <span class="mini" id="scopechipslbl" title="which samples the selected compound is ticked in">in samples</span>
-        <span class="smpsel" id="scopechips"></span>
       </div>
       <div class="scroll" id="peaksbody" style="max-height:calc(100vh - 190px);overflow-x:hidden"></div>
       <div class="hint">Click a peak to select &amp; zoom · ⌘/Ctrl-drag the mass spectrum to add · remove via ✕ in details</div>
@@ -979,8 +958,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <span class="grow"></span>
       <label class="ctl" id="xaxiswrap">x-axis
         <select id="xaxisunit" style="width:auto"></select></label>
-      <label class="ctl" id="specrangewrap">average over
-        <select id="specrange" style="width:auto"></select></label>
     </h2>
     <canvas id="plot" data-h="540"></canvas>
     <div id="specspin" hidden><span class="spin"></span><span id="specspinmsg">averaging interval…</span></div>
@@ -1197,10 +1174,10 @@ function selectedSamples(p){ const k=sampleLabels(); if(!k.length) return k;
   if(!p.use) return [];                            // off is off, whatever is recorded
   const want=(Array.isArray(p.samples)?p.samples:k).filter(l=>k.indexOf(l)>=0);
   return want.length?want:k; }
-// The Peaks sidebar follows the mass-spectrum 'average over' choice: look at one
-// sample and the boxes speak about that sample alone; look at the whole run (or at a
-// background) and they show the aggregate across all samples.
-function scopeRange(){ const sel=document.getElementById("specrange");
+// One interval is in scope, chosen in the Peaks sidebar: look at one sample and the
+// tick boxes speak about that sample alone; look at the whole run (or at a background)
+// and they show the aggregate across all samples.
+function scopeRange(){ const sel=document.getElementById("scoperange");
   const v=sel?sel.value:"all"; if(v==="all"||v===""||v==null) return null;
   const r=ranges.find(rr=>("i"+rr._id)===v);
   return r && sampleIntervals().indexOf(r)>=0 ? r : null; }
@@ -1227,9 +1204,7 @@ function bulkSel(on,r){ r=(r===undefined?scopeRange():r);
     const cur=selectedSamples(p);
     setSel(p, on?cur.concat([r.label]):cur.filter(l=>l!==r.label)); }); }
 // 'sample_07' -> '07', so a row can carry one box per sample without widening much
-function sampleShort(r,i){ const m=/(\d+)\s*$/.exec(r.label||"");
-  if(m) return m[1].length>1?m[1]:m[1].padStart(2,"0");
-  return String(i+1).padStart(2,"0"); }
+
 // a sample interval that appears, disappears or is renamed must not strand compounds.
 // These keep `use` where it was: a compound that was in cannot be edited out of the
 // analysis by touching an interval, and one that was off stays off.
@@ -2031,15 +2006,6 @@ function renderPeaks(){ const box=document.getElementById("peaksbody"); if(!box)
         `<span class="dc dmda ${dmda!=null&&Math.abs(dmda)>10?'warn':''}" title="mass error vs nearest known compound">${dmda!=null?((dmda>=0?'+':'')+dmda.toFixed(1)+' mDa'):'—'}</span>`+
         `<span class="dc kv" title="proton-transfer rate constant (~ = estimated)">${p.k?('k '+(+p.k).toFixed(2)+(p.k_estimated?'~':'')):'k —'}</span>`+
         `<span class="dc win" title="integration half-widths — drag the dashed handles in the spectrum">−${p.winL.toFixed(3)}/+${p.winR.toFixed(3)}${p.winManual?'*':''}</span>`+
-        // one row of boxes for the usual handful of samples, wrapped only past 12 so
-        // a long campaign cannot make every row a paragraph
-        `<span class="dc smpsel" style="grid-template-columns:repeat(${Math.min(sampleIntervals().length,12)},17px)"`+
-        ` title="one box per sample interval — click a box to change that sample only">`+
-        sampleIntervals().map((r,i)=>`<button class="chip${selState(p,r)==="all"?" on":""}`+
-          `${r._id===(scope&&scope._id)?" cur":""}" data-a="smp" data-smp="${r._id}" `+
-          `title="${esc(r.label)} (cycles ${r.start}–${r.end}): `+
-          `${selState(p,r)==="all"?"in this sample":"not in this sample"}">`+
-          `${esc(sampleShort(r,i))}</button>`).join("")+`</span>`+
         `<span class="dc pills">${peakPills(p)}</span>`+
         `<button class="dc del" data-a="del" title="remove peak">✕</button>`;
     } else { h+=`<span class="sp"></span>${peakValue(p,peakOrder)}<span class="go">›</span>`; }
@@ -2093,12 +2059,11 @@ function updatePeakToggle(){
   btn.disabled=peaks.length===0;
   btn.textContent=all?"Uncheck all":"Check all";
   btn.setAttribute("aria-label",btn.textContent);
-  // say which intervals the boxes mean, so a single-sample view is never mistaken
-  // for the whole-run answer
-  const sc=scopeRange(), el=document.getElementById("pkscope");
-  if(el){ el.textContent=" · "+(sc?sc.label:"all samples"); el.className="scope"+(sc?" one":""); }
+  // which intervals the boxes mean is said by the interval selector above the
+  // list, not repeated in the heading
 }
-// the per-sample boxes live inline in each row, so nothing to keep in sync here
+// a peak's per-sample state is not shown separately: it is the tick box, read under
+// whichever interval is in scope
 function renderId(){ const el=document.getElementById("idpanel"), conf=document.getElementById("idconf"), p=selPeak();
   const esc=s=>(s||'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
   const assigned=!!(p&&p.formula);
@@ -2181,13 +2146,17 @@ function renderRanges(){ const tb=document.querySelector("#rngtbl tbody"); if(!t
         if(act==="label" && ranges.some(q=>q!==r && q.label===el.value)){
           el.value=was; flashWarn(`Interval labels must be unique: "${was}" is already taken`);
           renderRanges(); return; }
-        pushUndo(); r[act]=el.value;
-        // keep the sample-specific tick state pointing at the same interval, and
-        // restate the 'average over' options so their names are never stale
-        if(act==="label") renameSampleKey(was,el.value);
-        else if(act==="class") setSampleClass(r,el.value,wasAll);
+        pushUndo();
+        // setSampleClass reads the class it is leaving to decide whether this is a
+        // sample being dropped or one coming back, so it has to move the class
+        // itself: assigning it here first made every switch look like it was already
+        // a sample, and the per-sample ticks coming back were never restored
+        if(act==="class") setSampleClass(r,el.value,wasAll);
+        else{ r[act]=el.value;
+          // interval labels key the per-sample ticks, so the rename carries them over
+          if(act==="label") renameSampleKey(was,el.value); }
         renderRanges(); redraw(); }; });
-    tb.appendChild(tr); _rngRow[r._id]=tr; }); refreshSpecRange();
+    tb.appendChild(tr); _rngRow[r._id]=tr; }); renderScope();
   // when the selection changes, scroll that row into view in the Intervals card
   if(selTr && selRange!==_lastScrolledRange){ selTr.scrollIntoView({block:"nearest",behavior:"smooth"}); }
   _lastScrolledRange=selRange; }
@@ -2329,17 +2298,7 @@ function redraw(){ updateMethods(); updateCalNote(); renderPeaks(); drawMain(); 
 
 // ---- per-interval mass spectrum (served: fetched on demand; standalone: whole run only) ----
 const specCache={};
-function refreshSpecRange(){ const sel=document.getElementById("specrange"); if(!sel) return;
-  const prev=sel.value; sel.innerHTML="";
-  const add=(v,t)=>{ const o=document.createElement("option"); o.value=v; o.textContent=t; sel.appendChild(o); };
-  add("all","whole run");
-  // keyed by interval id, not row index, so re-sorting the list keeps the selection
-  if(SERVED){ ranges.forEach(r=>add("i"+r._id, r.label+" ("+r.start+"–"+r.end+")")); }
-  else { const o=document.createElement("option"); o.value="_"; o.disabled=true;
-    o.textContent="per-interval needs live mode"; sel.appendChild(o); }
-  if([...sel.options].some(o=>o.value===prev)) sel.value=prev;
-  else sel.value="all";   // start on the whole-run average, then switch to an interval to check drift
-  renderScope(); }
+
 // spinner shown over the plot while an interval is averaged server-side
 let _specTok=0, _spinTimer=null;
 function showSpin(on,msg){ const el=document.getElementById("specspin"); if(!el) return;
@@ -2353,48 +2312,29 @@ function scopeTarget(){ const sel=document.getElementById("scoperange");
   if(!sel) return null; const m=/^i(\d+)$/.exec(sel.value||"");
   return m ? (ranges.find(r=>"i"+r._id===sel.value)||null) : null; }
 function renderScope(){ const dd=document.getElementById("scoperange"); if(!dd) return;
-  const main=document.getElementById("specrange"), want=(main&&main.value)||"all";
+  const want=dd.value||"all";
   dd.innerHTML="";
   const add=(v,t)=>{ const o=document.createElement("option"); o.value=v; o.textContent=t; dd.appendChild(o); };
   add("all","whole run");
-  ranges.forEach(r=>add("i"+r._id,r.label));
-  if(!SERVED){ dd.value="all"; dd.disabled=true; }
-  else { dd.disabled=false; dd.value=[...dd.options].some(o=>o.value===want)?want:"all"; }
-  const target=scopeTarget(), cls=document.getElementById("scopeclass");
-  cls.style.visibility=target?"":"hidden";
-  cls.querySelectorAll("button").forEach(b=>b.classList.toggle("on",!!target&&b.dataset.c===target.class));
-  const sc=scopeRange(), badge=document.getElementById("pkscope");
-  if(badge) badge.textContent=sc?(" \u00b7 "+sc.label)
-    :(scopeTarget()?" \u00b7 background":" \u00b7 all samples");
-  const ns=ranges.filter(r=>r.class==="sample").length;
-  dd.title=target?(target.label+" — cycles "+target.start+"–"+target.end+", counts as a "
+  // keyed by interval id, not row index, so re-sorting the list keeps the selection
+  if(SERVED){ ranges.forEach(r=>add("i"+r._id,r.label)); }
+  else { const o=document.createElement("option"); o.value="_"; o.disabled=true;
+    o.textContent="per-interval needs live mode"; dd.appendChild(o); }
+  const keep=[...dd.options].some(o=>o.value===want);
+  dd.value=keep?want:"all"; dd.disabled=!SERVED;
+  const target=scopeTarget(), ns=ranges.filter(r=>r.class==="sample").length;
+  dd.title=target?(target.label+" \u2014 cycles "+target.start+"\u2013"+target.end+", counts as a "
     +target.class):(ns+" sample"+(ns===1?"":"s")+" and "+(ranges.length-ns)+" background"
-    +(ranges.length-ns===1?"":"s")+" in this run — the tick boxes add up all of them");
-  // the selected compound's own sample boxes, so the state is visible without Details
-  const p=selPeak(), row=document.getElementById("scopechipsrow"), box=document.getElementById("scopechips");
-  const esc=s=>String(s==null?"":s).replace(/"/g,"&quot;");
-  const si=sampleIntervals();
-  if(!p || !si.length || !row){ if(row) row.hidden=true; }
-  else{ row.hidden=false;
-    const lbl=document.getElementById("scopechipslbl");
-    const nm=(p.label||'').trim()||("m/z "+p.mz.toFixed(3));
-    if(lbl){ lbl.textContent=nm.length>22?nm.slice(0,21)+"…":nm; lbl.title=nm; }
-    box.style.gridTemplateColumns="repeat("+Math.min(si.length,12)+",17px)";
-    const cur=scopeRange();
-    box.innerHTML=si.map((r,i)=>`<button type="button" class="chip${selState(p,r)==="all"?" on":""}`+
-      `${(cur&&r._id===cur._id)?" cur":""}" data-smp="${r._id}" `+
-      `title="${esc(r.label)} (cycles ${r.start}–${r.end}): `+
-      `${selState(p,r)==="all"?"in this sample":"not in this sample"}">`+
-      `${esc(sampleShort(r,i))}</button>`).join("");
-    box.querySelectorAll("[data-smp]").forEach(ch=>{ ch.onclick=()=>{
-      const r=ranges.find(rr=>rr._id===+ch.dataset.smp); if(!r) return;
-      pushUndo(); toggleSel(p,r); renderPeaks(); redraw(); }; }); }
-}
+    +(ranges.length-ns===1?"":"s")+" in this run \u2014 the tick boxes add up all of them");
+  // an interval deleted or reclassified out from under the choice must not leave the
+  // spectrum and the sidebar figures averaged over cycles that are no longer there
+  if(!keep && want!=="all") setSpecRange("all"); }
+
 function setSpecRange(val){
   const tok=++_specTok; if(_spinTimer){ clearTimeout(_spinTimer); _spinTimer=null; } showSpin(false);
   // a programmatic call must move the control too, or the sidebar would read its scope
   // from a dropdown that no longer says what is on screen
-  const dd=document.getElementById("specrange");
+  const dd=document.getElementById("scoperange");
   if(dd && [...dd.options].some(o=>o.value===val)) dd.value=val;
   const useWhole=()=>{ SHOWSPEC=SPEC; SPECWIN={lo:1,hi:NCYC}; refineIntervalApexes(SHOWSPEC); renderPeaks(); drawSpec(); };
   const r=(val==="all"||val===""||val==null)?null:ranges.find(rr=>("i"+rr._id)===val);
@@ -2407,22 +2347,21 @@ function setSpecRange(val){
   _spinTimer=setTimeout(()=>{ if(tok===_specTok) showSpin(true,"averaging "+(r.label||"interval")+"…"); },180);
   fetch("/spectrum?lo="+r.start+"&hi="+r.end).then(x=>x.json()).then(arr=>{
     specCache[key]=arr;
-    if(tok===_specTok && document.getElementById("specrange").value===val){
+    if(tok===_specTok && document.getElementById("scoperange").value===val){
       SHOWSPEC=arr; SPECWIN={lo:r.start,hi:r.end}; refineIntervalApexes(SHOWSPEC); renderPeaks(); drawSpec(); }
   }).catch(()=>{}).finally(()=>{ if(tok===_specTok){ if(_spinTimer){ clearTimeout(_spinTimer); _spinTimer=null; } showSpin(false); } }); }
 // (re)load the spectrum for whatever interval is selected — called when the
 // mass-spectrum tab is opened, so interval edits made on the trace tab are
 // picked up in one batch rather than recomputing on every edit
-function ensureSpecLoaded(){ const sel=document.getElementById("specrange"); if(sel) setSpecRange(sel.value); }
+function ensureSpecLoaded(){ const sel=document.getElementById("scoperange"); if(sel) setSpecRange(sel.value); }
 // an interval resize (or a delete that fell back to the whole run) must not leave the
 // shown spectrum, the sidebar values and the unit conversion averaging over old cycles
-function syncSpecRange(){ const sel=document.getElementById("specrange"); if(!sel) return;
+function syncSpecRange(){ const sel=document.getElementById("scoperange"); if(!sel) return;
   const v=sel.value, r=(v==="all"||v==="")?null:ranges.find(rr=>("i"+rr._id)===v);
   const lo=r?r.start:1, hi=r?r.end:NCYC;
   if(SPECWIN.lo!==lo || SPECWIN.hi!==hi) setSpecRange(v); }
-document.getElementById("specrange").onchange=e=>setSpecRange(e.target.value);
-// the sidebar row and the Mass spectrum dropdown are two views of one choice, so
-// either one moves the other
+// choosing the interval in the sidebar moves the spectrum, the peak values and the
+// tick boxes together, and lights up the same interval in the plot
 const scopeSel=document.getElementById("scoperange");
 if(scopeSel) scopeSel.onchange=e=>{
   setSpecRange(e.target.value);
@@ -2430,14 +2369,6 @@ if(scopeSel) scopeSel.onchange=e=>{
   if(r){ selRange=r._id; renderRanges(); }
   else renderScope();
 };
-document.querySelectorAll("#scopeclass button").forEach(b=>{ b.onclick=()=>{
-  const r=scopeTarget(); if(!r || r.class===b.dataset.c) return;
-  // reclassifying an interval changes what the per-sample boxes count, exactly as it
-  // does in the Intervals table: a new sample adopts compounds ticked everywhere,
-  // a lost sample stops counting
-  const wasAll=peaks.map(p=>selState(p,null)==="all");
-  pushUndo(); setSampleClass(r,b.dataset.c,wasAll); sortRanges();
-  selRange=r._id; renderRanges(); renderPeaks(); redraw(); }; });
 
 // ---- tab switching ----
 function setTab(t){ tab=t; anim=null; hoverRange=null; hoverPeakId=null; renderScope();
@@ -2449,7 +2380,6 @@ function setTab(t){ tab=t; anim=null; hoverRange=null; hoverPeakId=null; renderS
   document.getElementById("tracehint").style.display=spec?"none":"";
   // the unit selector drives the spectrum, the sidebar values and the trace alike
   document.getElementById("qtabs").style.display="";
-  document.getElementById("specrangewrap").style.display=spec?"":"none";
   document.getElementById("xaxiswrap").style.display=spec?"none":"";
   document.getElementById("idcard").style.display=spec?"":"none";     // ID is spectrum-only
   document.getElementById("intcard").style.display=spec?"none":"";    // intervals are trace-only
@@ -2696,8 +2626,8 @@ function tourSteps(){ const s=[];
   // the workflow runs left-to-right: first get the intervals right, then the peaks
   s.push({sel:"#maintabs",place:"bottom",tab:"trace",title:"Step 1 — the intervals",
     body:"Start here, on Signal over time. Each shaded band is a sample or background interval. Getting these right comes first, because every compound is quantified per interval."});
-  s.push({sel:"#scoperow",place:"right",tab:"trace",title:"Which interval, and what it counts as",
-    body:"This row picks the interval the tick boxes and the mass spectrum speak about, and switches it between sample and background — from either tab. The class is carried by the interval’s name, so switching it renames the interval; switching it back puts the name and the per-sample ticks as they were."});
+  s.push({sel:"#scoperow",place:"right",tab:"trace",title:"Which interval you are looking at",
+    body:"This picks the interval the tick boxes and the mass spectrum speak about — from either tab. On one sample a tick box is that sample’s own tick; on the whole run it shows all, some or none across every sample. Whether an interval counts as a sample or a background is set in the Intervals table, where it is carried by the interval’s name."});
   s.push({sel:"#intcard",place:"top",tab:"trace",title:"Adjust the intervals",
     body:"Check the sample/background split. Drag an interval’s edges to resize, ⌘/Ctrl-drag to add one, select and press Del to remove. Editing here recomputes the peak positions for that interval."});
   s.push({sel:".sidebar .card",place:"right",tab:"trace",title:"Plot a compound over time",
@@ -2705,8 +2635,8 @@ function tourSteps(){ const s=[];
   s.push({sel:"#maintabs",place:"bottom",tab:"spec",title:"Step 2 — the peaks",
     body:"Now switch to Mass spectrum to review each compound. Drag to pan, scroll to zoom."});
   s.push({sel:".sidebar .card",place:"right",tab:"spec",title:"Peaks",
-    body:"Every compound we detected. Click one to select it and zoom to its mass peak; the shaded band is the m/z window that’s integrated for it."});  s.push({sel:"#specrangewrap",place:"bottom",tab:"spec",title:"Review peaks per interval",
-    body:"“Average over” picks which spectrum you’re looking at — it starts on the whole run. Isolated peaks can move a little between intervals, so their apex line and window re-centre on the local maximum; clustered Gaussian/deconvolved components stay at fixed model centres (not measured apexes). The tick boxes follow this choice: on one sample they are that sample’s own tick, on the whole run they show all / some / none."});
+body:"Every compound we detected. Click one to select it and zoom to its mass peak; the shaded band is the m/z window that’s integrated for it."});  s.push({sel:"#scoperange",place:"right",tab:"spec",title:"Review peaks per interval",
+    body:"The interval selector above the peak list picks which spectrum you’re looking at — it starts on the whole run. Isolated peaks can move a little between intervals, so their apex line and window re-centre on the local maximum; clustered Gaussian/deconvolved components stay at fixed model centres (not measured apexes). The tick boxes follow this choice: on one sample they are that sample’s own tick, on the whole run they show all / some / none."});
   s.push({sel:"#idcard",place:"top",tab:"spec",title:"Identification",
     body:"Candidate formulas for the selected peak, ranked by exact mass and isotope pattern. Click one to assign it."});
   s.push({sel:"#cfgBtn",place:"bottom",title:"Settings",

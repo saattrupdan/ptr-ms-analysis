@@ -84,6 +84,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **The Peaks sidebar says less.** Its heading is just **Peaks** — no dot and no
+  `· sample_03` suffix; the compound name and the row of numbered boxes above the list
+  are gone, as are the numbered boxes in the Details rows and the **sample/background**
+  switch. What remains is the interval selector, which already decided what the tick
+  boxes and the mass spectrum speak about, so the **average over** dropdown has left the
+  Mass spectrum header rather than leaving a second control saying the same thing.
+  Nothing became unreachable: an interval's class is set in the **Intervals** card, and
+  which samples a compound belongs to is read by selecting those intervals. Changing the
+  class there also stops losing the per-sample ticks on the way back — the row handler
+  moved the class before asking `setSampleClass` what it was leaving, so reclassifying
+  an interval to background and back used to leave the compound out of it.
+- **Panel close buttons sit on the right.** The ✕ in the Configuration, Method and
+  Checklist panels was pushed by a spacer that only had a rule inside a `.card`, and
+  these panels are not cards.
+
 - **The macOS artifact is a `.pkg`, and `packaging/README.md` now explains both
   installers.** A disk image asked the reviewer to drag a bundle into Applications; a
   product archive installs it, records what it wrote, and installs from a command line,
