@@ -23,10 +23,26 @@ from importlib.metadata import version as distribution_version
 from PyInstaller.utils.hooks import collect_all
 
 IS_MAC = sys.platform == "darwin"
-APP_NAME = "PTR-MS Review"
-BUNDLE_ID = "dk.samsmart.ptrms"
+APP_NAME = "Sniff"
+BUNDLE_ID = "dk.samsmart.sniff"
 
 datas, binaries, hiddenimports = collect_all("ptr_ms_analysis")
+
+# The icon is drawn here rather than stored in the repo: packaging/make_icons.py holds
+# the only copy of the artwork, and this builds from it whichever container the platform
+# reads. A committed PNG would be a second drawing to keep in step.
+sys.path.insert(0, SPECPATH)
+import make_icons  # noqa: E402
+
+ICON_DIR = os.path.join(WORKPATH, "icons")
+os.makedirs(ICON_DIR, exist_ok=True)
+if IS_MAC:
+    ICON = os.path.join(ICON_DIR, "sniff.icns")
+    make_icons.icns_file(ICON)
+else:
+    ICON = os.path.join(ICON_DIR, "sniff.ico")
+    with open(ICON, "wb") as _handle:
+        _handle.write(make_icons.ico_bytes(make_icons.ICO_SIZES))
 
 # The desktop extra is optional by design: bundle it when it is installed so a
 # double-click opens a real window, and leave it out when it is not, where the very
@@ -74,6 +90,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="ptr",
+    icon=ICON,           # the Explorer and taskbar icon on Windows
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -101,7 +118,7 @@ if IS_MAC:
     app = BUNDLE(
         coll,
         name=APP_NAME + ".app",
-        icon=None,  # no .icns in the repo yet; Finder shows the generic icon
+        icon=ICON,
         bundle_identifier=BUNDLE_ID,
         info_plist={
             "CFBundleName": APP_NAME,
@@ -111,7 +128,7 @@ if IS_MAC:
             "NSHighResolutionCapable": True,
             # The app talks to no network but itself; say so where it can be read.
             "NSLocalNetworkUsageDescription": (
-                "PTR-MS Review serves its own review page on this computer only."
+                "Sniff serves its own review page on this computer only."
             ),
             "NSHumanReadableCopyright": "BSD-3-Clause",
         },

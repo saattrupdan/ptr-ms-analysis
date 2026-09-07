@@ -315,7 +315,7 @@ def test_start_screen_lists_recents_and_opens_files(server, tmp_path, monkeypatc
     h5 = tmp_path / "run.h5"
     make_h5(h5)
     status, body = api.get("/")
-    assert status == 200 and b"PTR-MS review" in body
+    assert status == 200 and b"Sniff" in body and b"PTR-MS review" in body
 
     with (
         mock.patch.object(app, "auto_peaks", return_value=[{"mz": 42.0}]),
@@ -409,7 +409,7 @@ def test_export_keeps_the_server_and_the_file_open(server, tmp_path):
     assert json.loads(st)["status"] == "done"
     assert session.path == str(h5)  # still open, still reviewable
     _, page = api.get("/")
-    assert b"PTR-MS review" in page  # and the app is still serving
+    assert b"Sniff" in page and b"PTR-MS review" in page  # and the app is still serving
 
 
 def test_a_client_that_acts_on_ready_is_never_told_busy(server, tmp_path):

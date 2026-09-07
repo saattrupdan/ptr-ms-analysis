@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 
 import h5py
 
-from . import desktop, viz
+from . import brand, desktop, viz
 from .analyze import (
     analyze_config_to_csv,
     auto_peaks,
@@ -440,10 +440,10 @@ class Session:
         }
 
 
-_START_HTML = """<!doctype html>
+_START_TEMPLATE = """<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PTR-MS review</title>
+<title>__PAGE_TITLE__</title>
 <style>
 :root{
   --bg:#f5f6f8;--card:#fff;--sunk:#f7f8fa;--fg:#131a22;--mut:#5f6b78;
@@ -460,9 +460,9 @@ body{margin:0;background:var(--bg);color:var(--fg);-webkit-font-smoothing:antial
   font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
 main{max-width:660px;margin:0 auto;padding:60px 24px 44px}
 .head{display:flex;gap:12px;align-items:center;margin-bottom:10px}
-.mark{flex:none;width:40px;height:40px;border-radius:10px;background:var(--acc);
-  color:var(--accc);display:grid;place-items:center;font-size:14px;font-weight:600;
-  letter-spacing:-.03em}
+svg.brand{flex:none;width:40px;height:40px;border-radius:10px;
+  box-shadow:0 1px 4px rgba(0,0,0,.35)}
+.tag{font-weight:400;color:var(--mut);font-size:15px;letter-spacing:0}
 h1{margin:0;font-size:20px;font-weight:600;letter-spacing:-.015em}
 .lede{margin:0 0 26px;color:var(--mut)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
@@ -529,7 +529,7 @@ footer{display:flex;gap:12px;align-items:center;justify-content:space-between;
   text-decoration:underline;cursor:pointer}
 .link:hover{color:var(--fg)}
 </style></head><body><main>
-  <div class="head"><div class="mark">&micro;g</div><h1>PTR-MS review</h1></div>
+  <div class="head">__MARK__<h1>__APP_NAME__ <span class="tag">__TAGLINE__</span></h1></div>
   <p class="lede">Open an IONICON run to review its peaks and intervals. A file you have
     reviewed before reopens with its saved config; a new one is processed first.</p>
 
@@ -691,6 +691,15 @@ $('#quit').onclick=async()=>{
 };
 recent(); tick();
 </script></body></html>"""
+
+# The brand is spelled once, in brand.py; the page is a template rather than an
+# f-string because its CSS is full of braces.
+_START_HTML = (
+    _START_TEMPLATE.replace('__MARK__', brand.MARK_SVG)
+    .replace('__APP_NAME__', brand.APP_NAME)
+    .replace('__TAGLINE__', brand.TAGLINE)
+    .replace('__PAGE_TITLE__', brand.PAGE_TITLE)
+)
 
 
 def _reveal(path) -> bool:

@@ -17,7 +17,10 @@ import uuid
 import xml.etree.ElementTree as ET
 from importlib.metadata import version as distribution_version
 
-APP_NAME = "PTR-MS Review"
+APP_NAME = "Sniff"
+# The product name changed on 2026-09-07 ("PTR-MS Review" -> "Sniff"); UPGRADE_CODE
+# below deliberately did not, so an installed copy of the old name upgrades into the
+# new one rather than sitting beside it.
 MANUFACTURER = "Dan Saattrup Smart"
 URL = "https://github.com/saattrupdan/ptr-ms-analysis"
 # Generated once, never regenerated: this is what identifies the product across versions,
@@ -29,7 +32,7 @@ NAMESPACE = "http://schemas.microsoft.com/wix/2006/wi"
 GUID_SPACE = uuid.uuid5(uuid.NAMESPACE_URL, "ptr-ms-analysis/component/")
 # Where each component keeps the key path an MSI insists on. A component may not key on
 # one of this bundle's .dll files, so it keys on a registry value instead.
-REGISTRY_KEY = r"Software\Dan Saattrup Smart\PTR-MS Review\components"
+REGISTRY_KEY = r"Software\Dan Saattrup Smart\Sniff\components"
 
 
 def msi_version() -> str:
@@ -182,7 +185,7 @@ def build_wxs(source: str, product_version: str) -> ET.ElementTree:
         {
             "Id": "StartMenuShortcut",
             "Name": APP_NAME,
-            "Description": "Open the PTR-MS review app",
+            "Description": "Open the Sniff PTR-MS review app",
             "Target": "[APPLICATIONFOLDER]ptr.exe",
             "WorkingDirectory": "APPLICATIONFOLDER",
         },

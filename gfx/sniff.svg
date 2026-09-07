@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Sniff">
+  <rect width="64" height="64" rx="14" fill="#1f6f6b"/>
+  <polyline points="6,46 18,46 23,33 28,54 33,45 38,46 58,46" fill="none" stroke="#eafaf6" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <polyline points="29.5,15 34.5,13 36.5,17.5" fill="none" stroke="#ffd9a8" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="23" cy="21" r="6.6" fill="#ffd9a8"/>
+</svg>

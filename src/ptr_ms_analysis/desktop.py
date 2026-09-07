@@ -18,7 +18,9 @@ from __future__ import annotations
 import importlib
 import threading
 
-DEFAULT_TITLE = "PTR-MS Review"
+from . import brand
+
+DEFAULT_TITLE = brand.PAGE_TITLE
 DEFAULT_WIDTH = 1280
 DEFAULT_HEIGHT = 860
 

@@ -15,8 +15,8 @@ absolute paths, no timestamps, no machine names — so two runs of the same
 checkout produce the same bytes.
 
     python packaging/make_pkg.py --out build/pkg
-    pkgbuild --component "dist/PTR-MS Review.app" --install-location /Applications \
-        --identifier dk.samsmart.ptrms --version 0.4.0 build/pkg/ptr-component.pkg
+    pkgbuild --component "dist/Sniff.app" --install-location /Applications \
+        --identifier dk.samsmart.sniff --version 0.4.0 build/pkg/ptr-component.pkg
     productbuild --distribution build/pkg/distribution.xml \
         --package-path build/pkg dist/ptr.pkg
 
@@ -37,11 +37,11 @@ import xml.etree.ElementTree as ET
 # the documented way, so the sibling import needs no bootstrap.
 from make_msi import msi_version
 
-APP_NAME = "PTR-MS Review"
+APP_NAME = "Sniff"
 # Same identifier as the bundle's CFBundleIdentifier (packaging/ptr-app.spec), so
 # the bundle and the package that carries it are one product to LaunchServices,
 # the receipts database, and a future signed build.
-IDENTIFIER = "dk.samsmart.ptrms"
+IDENTIFIER = "dk.samsmart.sniff"
 TITLE = APP_NAME
 # What pkgbuild writes into --package-path; the distribution names this file, so
 # the two have to agree. It is a name, never a path, for exactly that reason.

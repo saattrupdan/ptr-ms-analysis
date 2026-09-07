@@ -6,7 +6,7 @@ that matters — the app opening a real ``.h5`` file and serving the review page
 nothing but a synthetic file and a few seconds of patience.
 
 Usage:  python scripts/smoke_frozen.py path/to/dist/ptr/ptr.exe
-        python scripts/smoke_frozen.py "dist/PTR-MS Review.app/Contents/MacOS/ptr"
+        python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/ptr"
 """
 
 from __future__ import annotations

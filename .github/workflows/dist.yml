@@ -37,9 +37,9 @@ jobs:
           - os: macos-latest
             label: macos-arm64
             installer: pkg
-            exe: dist/PTR-MS Review.app/Contents/MacOS/ptr
+            exe: dist/Sniff.app/Contents/MacOS/ptr
             # An Intel Mac build would be a third entry: { os: macos-13,
-            # label: macos-x86_64, exe: dist/PTR-MS Review.app/Contents/MacOS/ptr }.
+            # label: macos-x86_64, exe: dist/Sniff.app/Contents/MacOS/ptr }.
 
     steps:
       - uses: actions/checkout@v4
@@ -79,7 +79,7 @@ jobs:
         run: |
           $p = Start-Process msiexec.exe -ArgumentList '/i',"$PWD\dist\ptr.msi",'/qn','/norestart' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "silent install failed with exit code $($p.ExitCode)" }
-          python scripts/smoke_frozen.py "C:\Program Files\PTR-MS Review\ptr.exe"
+          python scripts/smoke_frozen.py "C:\Program Files\Sniff\ptr.exe"
 
       - name: Build the macOS package
         if: matrix.installer == 'pkg'
@@ -89,8 +89,8 @@ jobs:
           # distribution make_pkg.py writes (title, version, minimum system, arch).
           version=$(python packaging/make_pkg.py --print-version)
           python packaging/make_pkg.py --out build/pkg --arch "$(uname -m)"
-          pkgbuild --component "dist/PTR-MS Review.app" --install-location /Applications \
-            --identifier dk.samsmart.ptrms --version "$version" build/pkg/ptr-component.pkg
+          pkgbuild --component "dist/Sniff.app" --install-location /Applications \
+            --identifier dk.samsmart.sniff --version "$version" build/pkg/ptr-component.pkg
           productbuild --distribution build/pkg/distribution.xml \
             --package-path build/pkg dist/ptr.pkg
 
@@ -105,18 +105,18 @@ jobs:
           # And the result must be read from the filesystem, because installer
           # reports success without regard to where the payload went.
           LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
-          "$LSREGISTER" -u "$PWD/dist/PTR-MS Review.app" 2>/dev/null || true
-          mv "dist/PTR-MS Review.app" "$RUNNER_TEMP/built-app"
+          "$LSREGISTER" -u "$PWD/dist/Sniff.app" 2>/dev/null || true
+          mv "dist/Sniff.app" "$RUNNER_TEMP/built-app"
           sudo installer -pkg dist/ptr.pkg -target / -verboseR
           installed=""
           for _ in $(seq 1 60); do
-            installed=$(find /Applications -maxdepth 1 -name "PTR-MS Review.app" | head -1)
+            installed=$(find /Applications -maxdepth 1 -name "Sniff.app" | head -1)
             [ -n "$installed" ] && break
             sleep 0.5
           done
           if [ -z "$installed" ]; then
             echo "installed nothing under /Applications; install.log said:"
-            sudo grep -i "ptrms\|PTR-MS" /var/log/install.log | tail -15 || true
+            sudo grep -i "sniff\|ptrms\|PTR-MS" /var/log/install.log | tail -15 || true
             exit 1
           fi
           echo "installed at: $installed"

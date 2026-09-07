@@ -533,7 +533,9 @@ under its old name.
 
 ### 5c. App mode (`ptr app`) — the reviewer works in the tool, not in chat
 
-`ptr app` keeps one review server up and lets the user open files inside it:
+`ptr app` keeps one review server up and lets the user open files inside it. Packaged
+as a desktop app it is named **Sniff** (see `ptr_ms_analysis/brand.py`; the CLI stays
+`ptr` and the distribution stays `ptr-ms-analysis`):
 
 ```bash
 ptr app                       # start screen: recent files, or type an absolute path

@@ -84,6 +84,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **The desktop app is called Sniff.** `PTR-MS Review` described an instrument and an
+  activity, which is right for a command line and bland for an icon in a Dock. The name
+  and the mark now live in `ptr_ms_analysis/brand.py` instead of being spelled four ways,
+  and the mark itself is drawn by `packaging/make_icons.py` — a teal tile, the
+  mass-spectrum trace, one warm nose above the tallest peak — which also rasterises it
+  into the `.icns` and `.ico` the installers attach, so the Dock icon is no longer the
+  generic page Finder invented. On macOS the bundle identifier changed with the name, so
+  the `.pkg` installs alongside an old copy rather than over it; `packaging/README.md`
+  gives the one command that removes it. The Windows upgrade code did not change, so
+  that one does upgrade in place. The command remains `ptr` and the distribution remains
+  `ptr-ms-analysis`.
+
 - **The Peaks sidebar says less.** Its heading is just **Peaks** — no dot and no
   `· sample_03` suffix; the compound name and the row of numbered boxes above the list
   are gone, as are the numbered boxes in the Details rows and the **sample/background**

@@ -36,7 +36,7 @@ import webbrowser
 
 import numpy as np
 
-from . import formula_id, ptrms
+from . import brand, formula_id, ptrms
 
 logger = logging.getLogger(__name__)
 
@@ -405,6 +405,8 @@ def render_html(data, config_path=None, mode="review"):
         _TEMPLATE.replace("/*__DATA__*/", payload)
         .replace("/*__CFGPATH__*/", json.dumps(config_path or ""))
         .replace("/*__APPMODE__*/", json.dumps(bool(mode == "app")))
+        .replace("/*__APP_NAME__*/", brand.APP_NAME)
+        .replace("/*__PAGE_TITLE__*/", brand.PAGE_TITLE)
     )
 
 
@@ -585,7 +587,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PTR-MS analysis review</title>
+<title>/*__PAGE_TITLE__*/</title>
 <style>
   :root, :root[data-theme="dark"]{
     --bg:#0d1117; --panel:#161b22; --panel2:#0e131a; --line:#293240; --line2:#1e2530;
@@ -620,6 +622,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
        font:13.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
   header{display:flex;align-items:baseline;gap:14px;padding:13px 22px;
          border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--headtop),var(--bg))}
+  /* the mark is drawn, not pasted: same geometry as the Dock icon */
+  header svg.brand{width:20px;height:20px;flex:none;align-self:center;border-radius:5px}
+  header h1 .h1tag{font-weight:400;color:var(--mut);font-size:12px;letter-spacing:0}
   header h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.2px}
   header .file{font-weight:550}
   header .meta{color:var(--mut);font-size:12px}
@@ -884,7 +889,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
 </head>
 <body>
 <header>
-  <h1>PTR-MS review</h1>
+  <svg class="brand" viewBox="0 0 64 64" role="img" aria-label="/*__APP_NAME__*/"><rect width="64" height="64" rx="14" fill="#1f6f6b"/><polyline points="6,46 18,46 23,33 28,54 33,45 38,46 58,46" fill="none" stroke="#eafaf6" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round"/><polyline points="29.5,15 34.5,13 36.5,17.5" fill="none" stroke="#ffd9a8" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="23" cy="21" r="6.6" fill="#ffd9a8"/></svg>
+  <h1>/*__APP_NAME__*/ <span class="h1tag">PTR-MS review</span></h1>
   <span class="file" id="file"></span>
   <span class="meta" id="meta"></span>
   <span class="grow"></span>

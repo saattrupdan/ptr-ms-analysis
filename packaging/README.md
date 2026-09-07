@@ -4,8 +4,8 @@ Two artifacts, each built on the machine it is meant for:
 
 | Platform | Artifact | Authoring tool | Lands in |
 | --- | --- | --- | --- |
-| macOS (arm64) | `ptr-review-macos-arm64.pkg` | `pkgbuild` + `productbuild` | `/Applications/PTR-MS Review.app` |
-| Windows (x86_64) | `ptr-review-windows-x86_64.msi` | WiX v3 `candle` + `light` | `C:\Program Files\PTR-MS Review` |
+| macOS (arm64) | `ptr-review-macos-arm64.pkg` | `pkgbuild` + `productbuild` | `/Applications/Sniff.app` |
+| Windows (x86_64) | `ptr-review-windows-x86_64.msi` | WiX v3 `candle` + `light` | `C:\Program Files\Sniff` |
 
 Both carry the same payload: a PyInstaller one-dir bundle — a Python interpreter,
 NumPy, h5py, this package, and the bundled reference data — so a reviewer with no
@@ -55,11 +55,11 @@ a double-click opens a real window, and leaves it out when it is not, where the
 same bundle falls back to a browser tab instead of failing. If you want the
 window in the artifact — you do — install the extra before building.
 
-That leaves `dist/PTR-MS Review.app/Contents/MacOS/ptr` on macOS and
+That leaves `dist/Sniff.app/Contents/MacOS/ptr` on macOS and
 `dist/ptr/ptr.exe` on Windows. Check it before wrapping it:
 
 ```bash
-python scripts/smoke_frozen.py "dist/PTR-MS Review.app/Contents/MacOS/ptr"   # macOS
+python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/ptr"   # macOS
 python scripts/smoke_frozen.py dist/ptr/ptr.exe                              # Windows
 ```
 
@@ -79,8 +79,8 @@ first, `productbuild` combines it with the second:
 ```bash
 version=$(python packaging/make_pkg.py --print-version)
 python packaging/make_pkg.py --out build/pkg --arch "$(uname -m)"
-pkgbuild --component "dist/PTR-MS Review.app" --install-location /Applications \
-  --identifier dk.samsmart.ptrms --version "$version" build/pkg/ptr-component.pkg
+pkgbuild --component "dist/Sniff.app" --install-location /Applications \
+  --identifier dk.samsmart.sniff --version "$version" build/pkg/ptr-component.pkg
 productbuild --distribution build/pkg/distribution.xml \
   --package-path build/pkg dist/ptr.pkg
 mv dist/ptr.pkg dist/ptr-review-macos-arm64.pkg
@@ -99,8 +99,8 @@ checkout gives the same XML twice. It declares:
 
 | Field | Value | Why |
 | --- | --- | --- |
-| identifier | `dk.samsmart.ptrms` | the same as `CFBundleIdentifier` in the spec, so bundle and package are one product to the receipts database |
-| title | `PTR-MS Review` | what Installer shows |
+| identifier | `dk.samsmart.sniff` | the same as `CFBundleIdentifier` in the spec, so bundle and package are one product to the receipts database |
+| title | `Sniff` | what Installer shows |
 | minimum system | `11.0` | Big Sur is where arm64 macOS starts, and the payload is Mach-O thin arm64 — claiming lower would promise a run that cannot start |
 | architectures | `$(uname -m)` | an arm64 bundle installed on an Intel Mac fails on the first double-click rather than at install time |
 | scripts | none | `require-scripts="false"`; there is no preinstall or postinstall |
@@ -110,7 +110,7 @@ The version comes from the installed package metadata and falls back to
 `packaging/make_msi.py` applies to the MSI, so one checkout gives one version
 string in both installers.
 
-`pkgbuild` wants a real bundle, so run it on `dist/PTR-MS Review.app`, not on
+`pkgbuild` wants a real bundle, so run it on `dist/Sniff.app`, not on
 the folder inside it. An Intel artifact would be a separate run on an Intel
 machine; `--arch x86_64` then describes it.
 
@@ -152,10 +152,10 @@ data alone. Nothing is downloaded or uploaded: the app serves its page on
 
 | | macOS | Windows |
 | --- | --- | --- |
-| payload | `dist/PTR-MS Review.app` | `dist/ptr/` |
-| installs to | `/Applications/PTR-MS Review.app` | `C:\Program Files\PTR-MS Review\` |
+| payload | `dist/Sniff.app` | `dist/ptr/` |
+| installs to | `/Applications/Sniff.app` | `C:\Program Files\Sniff\` |
 | the executable | `Contents/MacOS/ptr` | `ptr.exe` |
-| entry point | double-click, or `open -a "PTR-MS Review"` | Start Menu → PTR-MS Review |
+| entry point | double-click, or `open -a "Sniff"` | Start Menu → Sniff |
 | console window | none (a windowed bundle logs to `~/.ptr-ms/log.txt`) | yes, and it prints the URL there |
 | scope | the machine, needs administrator rights | the machine (`InstallScope: perMachine`), needs administrator rights |
 
@@ -167,6 +167,43 @@ answers that with usage text and exit code 2. A runtime hook
 launches the bundle bare for exactly that reason; without the hook the artifact
 installs cleanly and does nothing.
 
+## The icon, and what a rename costs
+
+The mark is not a file in the repo. `packaging/make_icons.py` holds the geometry
+— a rounded teal tile, the mass-spectrum trace, one warm nose over the tallest
+peak — and draws it twice: as SVG (`gfx/sniff.svg`, and the same string in
+`ptr_ms_analysis/brand.py`, which is what the pages show) and as a bitmap. The
+spec calls it during the build, so the macOS job gets a `sniff.icns` through
+`iconutil` and the Windows job gets a `sniff.ico`, both from the same run.
+
+```bash
+python packaging/make_icons.py --svg gfx/sniff.svg      # the drawing, as SVG
+python packaging/make_icons.py --ico /tmp/sniff.ico     # what the MSI attaches
+python packaging/make_icons.py --icns /tmp/sniff.icns   # what the .app attaches
+python packaging/make_icons.py --png /tmp/sniff.png --size 512
+```
+
+Nothing here needs an image library, which is the reason it is drawn rather than
+committed: the same script has to run on a macOS runner and a Windows runner
+without installing anything, and `tests/test_brand.py` fails if the page's SVG
+and the icon's primitives ever disagree.
+
+The product is now called **Sniff**. `UPGRADE_CODE` did not change, so an
+installed Windows copy upgrades into the new name in place. On macOS the
+identifier did change — `dk.samsmart.ptrms` became `dk.samsmart.sniff`, matching
+`CFBundleIdentifier` — and to the receipts database that is a different product:
+the `.pkg` installs `Sniff.app` beside the old `PTR-MS Review.app` rather than
+replacing it. Remove the old one deliberately, once:
+
+```bash
+ls -d "/Applications/PTR-MS Review.app" 2>/dev/null &&
+  sudo rm -rf "/Applications/PTR-MS Review.app" && sudo pkgutil --forget dk.samsmart.ptrms
+```
+
+Nothing in either installer deletes it on its own. Two copies would not corrupt
+anything — the newer one takes the next free port — but two icons in the Dock is
+its own kind of bug.
+
 ## Checking an artifact
 
 `ptr --help` passes on a bundle that can do nothing else, so the check is
@@ -175,8 +212,8 @@ one — the build folder proves PyInstaller worked, the installed copy proves th
 installer worked:
 
 ```bash
-python scripts/smoke_frozen.py "dist/PTR-MS Review.app/Contents/MacOS/ptr"
-python scripts/smoke_frozen.py "/Applications/PTR-MS Review.app/Contents/MacOS/ptr"
+python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/ptr"
+python scripts/smoke_frozen.py "/Applications/Sniff.app/Contents/MacOS/ptr"
 ```
 
 It runs three phases: `app <file> --no-browser --port N` must serve the review
@@ -197,9 +234,9 @@ spctl --assess --type open --context context:primary-signature -vv dist/ptr-revi
 `pkgutil --expand` wants a destination that does not exist yet. The `Bom` is also what
 `installer` records as a receipt, so `lsbom` is how you answer "what did that package
 write?" — paths are relative to the install location, which is why they read
-`./PTR-MS Review.app/…` instead of `/Applications/…`, with an AppleDouble `._` entry
+`./Sniff.app/…` instead of `/Applications/…`, with an AppleDouble `._` entry
 beside each real file. `PackageInfo` is the same story in XML, plus the
-`<bundle … id="dk.samsmart.ptrms">` line tying the payload to `CFBundleIdentifier`.
+`<bundle … id="dk.samsmart.sniff">` line tying the payload to `CFBundleIdentifier`.
 The last command is Gatekeeper's own opinion, and today it always answers
 `rejected / source=no usable signature`.
 
@@ -223,7 +260,7 @@ home and moves the installed payload onto it — `/Applications` stays empty, an
 
 ```text
 PackageKit: Applications/PTR-MS Review.app relocated to Users/you/work/…/dist/PTR-MS Review.app
-PackageKit: Touched bundle /Users/you/work/…/dist/PTR-MS Review.app
+PackageKit: Touched bundle /Users/you/work/…/dist/Sniff.app
 ```
 
 This is what the CI job hit: it smoke-tested the bundle inside `dist/` first, and the
@@ -233,29 +270,29 @@ The check is therefore to move any built copy out of the way, unregister it, and
 ask the filesystem rather than the exit status:
 
 ```bash
-mv "dist/PTR-MS Review.app" "$RUNNER_TEMP/built-app"
+mv "dist/Sniff.app" "$RUNNER_TEMP/built-app"
 sudo installer -pkg dist/ptr.pkg -target / -verboseR
 for _ in $(seq 1 60); do
-  [ -d "/Applications/PTR-MS Review.app" ] && break
+  [ -d "/Applications/Sniff.app" ] && break
   sleep 0.5
 done
-test -x "/Applications/PTR-MS Review.app/Contents/MacOS/ptr" || exit 1
+test -x "/Applications/Sniff.app/Contents/MacOS/ptr" || exit 1
 ``` `sudo installer` is what CI runs, and it is worth running once
 even if you mean to double-click, because it fails loudly and prints the
 destination. To see what a machine already has:
 
 ```bash
 pkgutil --pkgs | grep dk.samsmart      # is it installed at all
-pkgutil --pkg-info dk.samsmart.ptrms   # version and install time, from the receipt
-pkgutil --files dk.samsmart.ptrms      # every file that receipt accounts for
+pkgutil --pkg-info dk.samsmart.sniff   # version and install time, from the receipt
+pkgutil --files dk.samsmart.sniff      # every file that receipt accounts for
 ```
 
 Removing it is manual, because a `.pkg` has no uninstaller of its own — the
 receipt is a record, not a script:
 
 ```bash
-sudo rm -rf "/Applications/PTR-MS Review.app"
-sudo pkgutil --forget dk.samsmart.ptrms   # drop the receipt too
+sudo rm -rf "/Applications/Sniff.app"
+sudo pkgutil --forget dk.samsmart.sniff   # drop the receipt too
 ```
 
 To install into a scratch root instead of a real system, pass a directory:
@@ -263,7 +300,7 @@ To install into a scratch root instead of a real system, pass a directory:
 than in `/Applications`, and writes its receipts into that image rather than your
 system's. It still needs root, so it is not a way to avoid `sudo`. The Windows
 equivalent is `msiexec /i dist\ptr.msi /qn` to install and `msiexec /x dist\ptr.msi /qn`
-to remove it, with the app in `C:\Program Files\PTR-MS Review`.
+to remove it, with the app in `C:\Program Files\Sniff`.
 
 ## First run on a clean machine
 
@@ -276,7 +313,7 @@ the `.pkg` asks Gatekeeper about it; an unsigned package fails that check with
 ```bash
 sudo installer -pkg ptr-review-macos-arm64.pkg -target /    # not routed through Gatekeeper
 xattr -dr com.apple.quarantine ptr-review-macos-arm64.pkg    # or clear the flag, then double-click
-xattr -dr com.apple.quarantine "/Applications/PTR-MS Review.app"
+xattr -dr com.apple.quarantine "/Applications/Sniff.app"
 ```
 
 `installer(8)` never asks Gatekeeper, so installing from a terminal works
@@ -305,9 +342,9 @@ if a Developer ID is in the keychain of whoever runs them, but nothing does so
 today. Concretely, a build is missing:
 
 - `codesign --force --deep --options runtime --timestamp \
-     --sign "Developer ID Application: …" "PTR-MS Review.app"` — sign the bundle
+     --sign "Developer ID Application: …" "Sniff.app"` — sign the bundle
   with the hardened runtime. PyInstaller already ad-hoc signs it (`codesign -dv`
-  reports `Signature=adhoc`, `Identifier=dk.samsmart.ptrms`), which is enough for
+  reports `Signature=adhoc`, `Identifier=dk.samsmart.sniff`), which is enough for
   arm64 macOS to run it and nothing like enough for Gatekeeper.
 - `productsign --sign "Developer ID Installer: …" dist/ptr.pkg dist/ptr-signed.pkg`
   — sign the product archive itself.

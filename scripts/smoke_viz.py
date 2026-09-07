@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Browser regression test for the generated PTR-MS review page.
+"""Browser regression test for the generated PTR-MS review page (Sniff).
 
 This deliberately uses the installed ``agent-browser`` CLI rather than a browser
 framework.  The page is generated from deterministic synthetic data, served from

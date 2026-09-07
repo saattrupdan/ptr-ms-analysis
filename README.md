@@ -55,7 +55,9 @@ ptr rates     benzaldehyde                # browse proton-transfer rate constant
 
 `ptr app` is the same review UI as a program you live in rather than a command you run
 once per file: one server that stays up, files opened from its own start screen, and
-**Export** where the CLI has Done.
+**Export** where the CLI has Done. Packaged for desktop use it is called **Sniff** — the
+name is in `ptr_ms_analysis/brand.py`, and the mark next to it is drawn by
+`packaging/make_icons.py`, which also builds the `.icns` and `.ico` the installers carry.
 
 ```bash
 ptr app                        # start screen: recent files, or type a path
@@ -101,7 +103,7 @@ pyinstaller --noconfirm packaging/ptr-app.spec
 python scripts/smoke_frozen.py dist/ptr/ptr        # proves the bundle serves a review
 ```
 
-On Windows that leaves `dist/ptr/ptr.exe`; on macOS it leaves `dist/PTR-MS Review.app`.
+On Windows that leaves `dist/ptr/ptr.exe`; on macOS it leaves `dist/Sniff.app`.
 Either way the bundle is the same ~40 MB of interpreter, NumPy, HDF5 and bundled
 reference data. `scripts/smoke_frozen.py` starts it against a tiny synthetic file and
 checks it really serves the review page, because `ptr --help` would pass on a bundle
@@ -113,8 +115,8 @@ Then wrap it the way each system expects — a `.pkg` built by `pkgbuild` and
 ```bash
 version=$(python packaging/make_pkg.py --print-version)                  # macOS
 python packaging/make_pkg.py --out build/pkg --arch "$(uname -m)"
-pkgbuild --component "dist/PTR-MS Review.app" --install-location /Applications \
-  --identifier dk.samsmart.ptrms --version "$version" build/pkg/ptr-component.pkg
+pkgbuild --component "dist/Sniff.app" --install-location /Applications \
+  --identifier dk.samsmart.sniff --version "$version" build/pkg/ptr-component.pkg
 productbuild --distribution build/pkg/distribution.xml --package-path build/pkg dist/ptr.pkg
 
 python packaging/make_msi.py dist/ptr build/msi/ptr-app.wxs        # Windows
@@ -124,8 +126,8 @@ light.exe  -o dist/ptr.msi build/msi/ptr-app.wixobj
 
 `packaging/README.md` is the guide to all of it — both command pairs in full, why
 PyInstaller cannot cross-compile, why WiX v3.14 is the pinned toolchain, what each
-installer contains and where it lands (`/Applications/PTR-MS Review.app`,
-`C:\Program Files\PTR-MS Review`), how to check an artifact, and what a signed build
+installer contains and where it lands (`/Applications/Sniff.app`,
+`C:\Program Files\Sniff`), how to check an artifact, and what a signed build
 would still need.
 
 Both installers are generated from what the build produced rather than from a
@@ -148,7 +150,7 @@ Neither installer is signed, so the first run warns. To install the macOS packag
 double-click it or install it from a terminal:
 
 ```bash
-sudo installer -pkg ptr-review-macos-arm64.pkg -target /   # → /Applications/PTR-MS Review.app
+sudo installer -pkg ptr-review-macos-arm64.pkg -target /   # → /Applications/Sniff.app
 ```
 
 An unsigned `.pkg` still trips Gatekeeper when you double-click it, and `installer` is not
@@ -158,8 +160,8 @@ com.apple.quarantine ptr-review-macos-arm64.pkg`) makes double-clicking work too
 remove it, delete the bundle and forget the receipt:
 
 ```bash
-sudo rm -rf "/Applications/PTR-MS Review.app"
-sudo pkgutil --forget dk.samsmart.ptrms
+sudo rm -rf "/Applications/Sniff.app"
+sudo pkgutil --forget dk.samsmart.sniff
 ```
 
 Windows SmartScreen says "More info" → "Run anyway". Both warnings go away once the
