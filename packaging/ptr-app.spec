@@ -34,7 +34,10 @@ datas, binaries, hiddenimports = collect_all("ptr_ms_analysis")
 sys.path.insert(0, SPECPATH)
 import make_icons  # noqa: E402
 
-ICON_DIR = os.path.join(WORKPATH, "icons")
+# Under build/, which is gitignored. PyInstaller's own work-path global is spelled
+# differently across versions, and the spec is read on Windows and macOS runners, so
+# the one name that never changes is used instead.
+ICON_DIR = os.path.join(os.path.dirname(SPECPATH), "build", "icons")
 os.makedirs(ICON_DIR, exist_ok=True)
 if IS_MAC:
     ICON = os.path.join(ICON_DIR, "sniff.icns")
