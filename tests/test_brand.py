@@ -85,6 +85,23 @@ def test_both_pages_carry_the_mark_and_the_name():
     assert "__MARK__" not in app._START_HTML and "__TAGLINE__" not in app._START_HTML
 
 
+def test_the_version_is_stated_once():
+    """A second version string is a second place to be wrong.
+
+    ``__init__.__version__`` used to be a literal, and it read 0.1.0 across five
+    releases while the installers shipped 0.4.0 — the kind of wrong that only shows
+    up when someone asks what version they have installed.
+    """
+    from importlib.metadata import version
+
+    import ptr_ms_analysis
+
+    assert ptr_ms_analysis.__version__ == version("ptr_ms_analysis")
+    spec = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    declared = re.search(r'^version = "([\d.]+[^"\n]*)"$', spec, re.M).group(1)
+    assert version("ptr_ms_analysis").split("+")[0] == declared
+
+
 def test_no_page_still_calls_it_the_old_name():
     page = viz.render_html({"file": "x.h5", "peaks": [], "ranges": [], "meta": {}})
     for body in (page, app._START_HTML):

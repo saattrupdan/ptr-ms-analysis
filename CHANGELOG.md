@@ -5,23 +5,7 @@ All notable changes to `ptr-ms-analysis` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
-
-### Changed
-
-- **The start screen no longer has a Stop the app button.** Closing the window is the
-  way out of a windowed app, and the same quit remains available in a browser tab —
-  where there is no window to close — as one quiet footer link, with `POST /shutdown`
-  and Ctrl-C unchanged.
-
-### Fixed
-
-- **Exporting no longer ends on a dead end.** The results dialog used to turn its own
-  button into a disabled label reading "Opened ✓ — you can close this tab" — which does
-  nothing in an app that has no tab to close — and a failed export left an error card
-  with no way out at all. Revealing the CSV now closes the dialog and returns you to the
-  review, **Keep reviewing** closes it without revealing, and both routes leave the
-  **Export** button ready to run again. The one-shot `ptr viz` flow is unchanged.
+## [0.5.0] - 2026-09-08
 
 ### Added
 
@@ -105,23 +89,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   compound in only some samples records `samples` in the config; a compound in every
   sample needs no new field, and the summary output is unchanged either way.
 
-### Fixed
-
-- **The installed app opens its own window again.** A packaged bundle was opening a
-  browser tab and saying nothing useful about it. `desktop.py` reaches pywebview
-  through `importlib.import_module()`, which PyInstaller never follows, so although
-  pywebview itself was collected, `bottle` and `proxy_tools` — which `webview/__init__`
-  imports at module scope — were not. The first `import webview` failed with
-  `No module named 'bottle'`, and that was reported as *"the desktop extra is not
-  installed"* while the extra sat inside the bundle. The spec now bundles pywebview's
-  declared dependencies and the GUI toolkit its installed backend imports; the message
-  blames the packaging rather than the user; and `/api/state` reports `surface` as
-  `window` or `browser`, because a `console=False` bundle logs to no terminal and the
-  user had no way to tell. The frozen smoke test reads that field now — it used to
-  grep the log for the word "window", which a silent bundle satisfied by saying
-  nothing, and which the failure line also contained.
-
 ### Changed
+
+- **The start screen no longer has a Stop the app button.** Closing the window is the
+  way out of a windowed app, and the same quit remains available in a browser tab —
+  where there is no window to close — as one quiet footer link, with `POST /shutdown`
+  and Ctrl-C unchanged.
 
 - **The desktop app is called Sniff.** `PTR-MS Review` described an instrument and an
   activity, which is right for a command line and bland for an icon in a Dock. The name
@@ -218,6 +191,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Interval labels must be unique, because they key the per-sample selection.
 
 ### Fixed
+
+- **Exporting no longer ends on a dead end.** The results dialog used to turn its own
+  button into a disabled label reading "Opened ✓ — you can close this tab" — which does
+  nothing in an app that has no tab to close — and a failed export left an error card
+  with no way out at all. Revealing the CSV now closes the dialog and returns you to the
+  review, **Keep reviewing** closes it without revealing, and both routes leave the
+  **Export** button ready to run again. The one-shot `ptr viz` flow is unchanged.
+
+- **The installed app opens its own window again.** A packaged bundle was opening a
+  browser tab and saying nothing useful about it. `desktop.py` reaches pywebview
+  through `importlib.import_module()`, which PyInstaller never follows, so although
+  pywebview itself was collected, `bottle` and `proxy_tools` — which `webview/__init__`
+  imports at module scope — were not. The first `import webview` failed with
+  `No module named 'bottle'`, and that was reported as *"the desktop extra is not
+  installed"* while the extra sat inside the bundle. The spec now bundles pywebview's
+  declared dependencies and the GUI toolkit its installed backend imports; the message
+  blames the packaging rather than the user; and `/api/state` reports `surface` as
+  `window` or `browser`, because a `console=False` bundle logs to no terminal and the
+  user had no way to tell. The frozen smoke test reads that field now — it used to
+  grep the log for the word "window", which a silent bundle satisfied by saying
+  nothing, and which the failure line also contained.
 
 - **An autosave no longer invents compound names.** A peak with neither a label nor a
   formula needs something to draw on the spectrum, so the review page displays a

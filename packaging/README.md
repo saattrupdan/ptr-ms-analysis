@@ -9,8 +9,9 @@ Two artifacts, each built on the machine it is meant for:
 
 Both carry the same payload: a PyInstaller one-dir bundle — a Python interpreter,
 NumPy, h5py, this package, and the bundled reference data — so a reviewer with no
-Python installed can double-click it and review a run. At 0.4.0 that is 273 files and
-46 MB on disk, 20 MB once packaged. Neither installer is signed or notarised; see
+Python installed can double-click it and review a run. At 0.5.0 that is 306 files and
+46 MB on disk, 20 MB once packaged — the extra files over the 273 an unsigned
+browser-only bundle carried are pywebview and PyObjC, which give it a window. Neither installer is signed or notarised; see
 [What is not done yet](#what-is-not-done-yet).
 
 This guide builds both by hand. The `package` workflow
