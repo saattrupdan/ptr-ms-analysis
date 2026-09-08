@@ -581,20 +581,20 @@ class Session:
 
 
 _START_TEMPLATE = """<!doctype html>
-<html><head><meta charset="utf-8">
+<html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>__PAGE_TITLE__</title>
 <style>
 :root{
   --bg:#fbf3e8;--card:#fffdf9;--sunk:#fff8ef;--fg:#173c3b;--mut:#5b706d;
-  --line:#d8e5df;--line2:#e8eee9;--acc:#1f6f6b;--accc:#fffdf9;--ok:#24715c;
-  --peach:#ffd9a8;--cream:#fff8ef;--err:#a33b32;--errbg:#fff0e9;
+  --line:#d8e5df;--acc:#1f6f6b;--accc:#fffdf9;
+  --peach:#ffd9a8;--err:#a33b32;--errbg:#fff0e9;
   --ring:rgba(31,111,107,.34);--scrim:rgba(251,243,232,.88);
 }
 @media(prefers-color-scheme:dark){:root{
   --bg:#102322;--card:#173331;--sunk:#132b29;--fg:#effaf3;--mut:#a9c0b9;
-  --line:#31514d;--line2:#24423f;--acc:#71c3ad;--accc:#102322;--ok:#8bd3af;
-  --peach:#ffd9a8;--cream:#203c39;--err:#ff9c8f;--errbg:#3b211e;
+  --line:#31514d;--acc:#71c3ad;--accc:#102322;
+  --peach:#ffd9a8;--err:#ff9c8f;--errbg:#3b211e;
   --ring:rgba(113,195,173,.45);--scrim:rgba(16,35,34,.9);
 }}
 *{box-sizing:border-box}
@@ -635,6 +635,8 @@ h1{margin:0;font-size:20px;font-weight:650;letter-spacing:-.015em}
   white-space:nowrap}
 .now .sub{display:block;color:var(--mut);font-size:12px;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
+.now .meta{min-width:0;overflow:hidden}
+.now .meta em{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pick{padding:28px 30px;text-align:left}
 .pick h2{margin:0 2px 4px;font-size:18px;font-weight:650;letter-spacing:-.02em}
 .pick p{margin:0 0 18px;color:var(--mut);font-size:13px}
@@ -708,7 +710,11 @@ html.lock,html.lock body{overflow:hidden}
   .pbar i{transition:none}}
 @media(max-width:620px){main{padding-top:28px}.hero{grid-template-columns:1fr;gap:20px}
   .spectrum{min-height:125px}.spectrum svg{height:100px}.pick{padding:23px 20px}.row{flex-direction:column}
-  .row .btn{width:100%}.quick{margin-top:16px}}
+  .row .btn{width:100%}.quick{margin-top:16px}
+  .now{align-items:flex-start;row-gap:10px;flex-wrap:wrap}
+  .now .txt,.now .meta{flex:1 1 100%}
+  .now b,.now .sub{white-space:normal;overflow-wrap:anywhere;text-overflow:clip}
+}
 </style></head><body><main>
   <div class="head">__MARK__<h1>__APP_NAME__ <span class="tag">__TAGLINE__</span></h1></div>
 

@@ -21,7 +21,7 @@ import threading
 from pathlib import Path
 from typing import Any, ClassVar
 
-from sniff import viz
+from sniff import app, viz
 
 SESSION = "sniff-ms-viz-regression"
 
@@ -671,6 +671,58 @@ def _standalone_browser_pass(data: dict[str, Any]) -> None:
                 _assert(
                     json.loads(download_path.read_text(encoding="utf-8")) == payload,
                     "downloaded config differs from buildConfig()",
+                )
+        finally:
+            _browser(session, "close")
+
+
+def _start_screen_browser_pass() -> None:
+    """Check the current-file card at the narrow widths users commonly have."""
+    session = f"{SESSION}-start-{threading.get_ident()}"
+    with tempfile.TemporaryDirectory(prefix="sniff-ms-start-") as directory:
+        html_path = Path(directory) / "start.html"
+        html_path.write_text(app._START_HTML, encoding="utf-8")
+        try:
+            _open(session, html_path.as_uri())
+            _browser(session, "wait", "--load", "networkidle")
+            _freeze_animations(session)
+            _browser(
+                session,
+                "eval",
+                "current({file:'/runs/2026/September/very-long-ionicon-run-name.h5'})",
+            )
+            for width in (320, 375):
+                _browser(session, "set", "viewport", str(width), "700")
+                layout = _eval(
+                    session,
+                    "(() => { const card=document.querySelector('#now .now'); "
+                    "const txt=card.querySelector('.txt'), name=txt.querySelector('b'), "
+                    "sub=txt.querySelector('.sub'); "
+                    "const buttons=[...card.querySelectorAll('button')]; "
+                    "const cr=card.getBoundingClientRect(); "
+                    "return {width:window.innerWidth, name:name.textContent, "
+                    "sub:sub.textContent, nameHeight:name.getBoundingClientRect().height, "
+                    "subHeight:sub.getBoundingClientRect().height, "
+                    "nameFits:name.scrollWidth<=name.clientWidth, "
+                    "subFits:sub.scrollWidth<=sub.clientWidth, "
+                    "actionsVisible:buttons.every(e=>{const r=e.getBoundingClientRect(); "
+                    "return r.width>0&&r.height>0&&r.left>=cr.left&&r.right<=cr.right}), "
+                    "noPageOverflow:document.documentElement.scrollWidth<=window.innerWidth}; })()",
+                )
+                _assert_eq(layout["width"], width, "start screen viewport did not apply")
+                _assert(
+                    layout["name"] == "very-long-ionicon-run-name.h5"
+                    and layout["sub"].endswith("/September"),
+                    "current file identity is not rendered at narrow width",
+                )
+                _assert(
+                    layout["nameHeight"] > 0
+                    and layout["subHeight"] > 0
+                    and layout["nameFits"]
+                    and layout["subFits"]
+                    and layout["actionsVisible"]
+                    and layout["noPageOverflow"],
+                    f"current-file card does not fit at {width}px: {layout}",
                 )
         finally:
             _browser(session, "close")
@@ -2180,6 +2232,7 @@ def main() -> int:
         )
         _standalone_browser_pass(data)
         _provenance_browser_pass()
+        _start_screen_browser_pass()
         print("viz browser identification/configuration regression: OK")
         return 0
     finally:
