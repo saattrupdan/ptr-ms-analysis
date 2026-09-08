@@ -21,7 +21,7 @@ APP_NAME = "Sniff"
 # below deliberately did not, so an installed copy of the old name upgrades into the
 # new one rather than sitting beside it.
 MANUFACTURER = "Dan Saattrup Smart"
-URL = "https://github.com/saattrupdan/ptr-ms-analysis"
+URL = "https://github.com/saattrupdan/sniff"
 # Generated once, never regenerated: this is what identifies the product across versions,
 # so it must survive a version bump and a re-clone of the repository.
 UPGRADE_CODE = "8f0c2f4c-6e1b-5a0d-9e2f-4b7c1a3d6e85"
@@ -126,7 +126,11 @@ def _tree(parent, source: str, relative: str, feature) -> None:
 
 
 def build_wxs(source: str, product_version: str) -> ET.ElementTree:
-    """WiX v3 authoring: a Product, one Feature, and the built folder mirrored."""
+    """WiX v3 authoring: a Product, one Feature, and the built folder mirrored.
+
+    The PyInstaller executable is at the source root; its ``_internal`` one-dir
+    contents folder is mirrored beneath it as ordinary application data.
+    """
     wix = ET.Element("Wix", {"xmlns": NAMESPACE})
     product = ET.SubElement(
         wix,

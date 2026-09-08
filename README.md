@@ -113,13 +113,19 @@ sheet for a file that is already open.
 
 ```bash
 uv sync --extra desktop
+# Remove stale one-dir output: PyInstaller cannot repair an old executable/data collision.
+uv run python -c "import shutil; [shutil.rmtree(path, ignore_errors=True) for path in ('dist', 'build')]"
 uv run --with pyinstaller pyinstaller --noconfirm packaging/sniff-app.spec
-uv run python scripts/smoke_frozen.py dist/sniff/sniff        # proves the bundle serves a review
+uv run python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/sniff"  # macOS
+uv run python scripts/smoke_frozen.py dist/sniff/sniff.exe                    # Windows
 ```
 
 On Windows that leaves `dist/sniff/sniff.exe`; on macOS it leaves `dist/Sniff.app`.
-Either way the bundle is the same ~40 MB of interpreter, NumPy, HDF5 and bundled
-reference data. `scripts/smoke_frozen.py` starts it against a tiny synthetic file and
+The visible executable stays at that path while PyInstaller keeps package data,
+Python modules and shared libraries separate from it: under `_internal/` on Windows,
+and under the app bundle's `Contents/Resources/` on macOS. Either way the bundle is
+the same ~40 MB of interpreter, NumPy, HDF5 and bundled reference data.
+`scripts/smoke_frozen.py` starts it against a tiny synthetic file and
 checks it really serves the review page, because `sniff --help` would pass on a bundle
 that cannot do anything else.
 

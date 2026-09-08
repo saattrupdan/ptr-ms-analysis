@@ -186,7 +186,11 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_name=None,
-    contents_directory=".",
+    # Keep the visible executable at the bundle root while placing Python modules,
+    # data, and shared libraries in PyInstaller's private one-dir contents folder.
+    # Using "." makes the collected ``sniff`` package collide with the executable
+    # of the same name during COLLECT.
+    contents_directory="_internal",
 )
 
 coll = COLLECT(

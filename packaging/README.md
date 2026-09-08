@@ -46,6 +46,8 @@ version of Python you want to ship:
 
 ```bash
 uv sync --extra desktop
+# A stale one-dir tree can contain the old executable/package collision.
+uv run python -c "import shutil; [shutil.rmtree(path, ignore_errors=True) for path in ('dist', 'build')]"
 uv run --with pyinstaller pyinstaller --noconfirm packaging/sniff-app.spec
 ```
 
@@ -93,7 +95,11 @@ registered with the window server — a bundle that only opened a tab never appe
 there at all.
 
 That leaves `dist/Sniff.app/Contents/MacOS/sniff` on macOS and
-`dist/sniff/sniff.exe` on Windows. Check it before wrapping it:
+`dist/sniff/sniff.exe` on Windows. The executable remains visible at the bundle root;
+PyInstaller keeps the package data, Python modules and shared libraries in the app's
+`Contents/Resources/` on macOS and its private `_internal/` directory on Windows.
+This avoids the executable colliding with the collected `sniff/` package. Check it
+before wrapping it:
 
 ```bash
 uv run python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/sniff"   # macOS
@@ -163,11 +169,12 @@ Move-Item dist/sniff.msi dist/sniff-review-windows-x86_64.msi
 ```
 
 `make_msi.py` mirrors `dist/sniff` into WiX source: one component per directory,
-one file id and one GUID derived from each path, so the folder layout — not a
-hand-maintained list — is what gets installed, an upgrade replaces exactly the
-files that changed, and an uninstall removes exactly the ones it put there. The
-GUIDs are derived rather than random, so they survive a rebuild, which is what
-lets a later version upgrade clean up after an earlier one.
+including PyInstaller's `_internal` directory, and one file id and one GUID derived
+from each path. The folder layout — not a hand-maintained list — is what gets
+installed, an upgrade replaces exactly the files that changed, and an uninstall
+removes exactly the ones it put there. The GUIDs are derived rather than random, so
+they survive a rebuild, which is what lets a later version upgrade clean up after an
+earlier one.
 
 ### Why WiX v3, and why not v6
 
@@ -192,6 +199,7 @@ data alone. Nothing is downloaded or uploaded: the app serves its page on
 | payload | `dist/Sniff.app` | `dist/sniff/` |
 | installs to | `/Applications/Sniff.app` | `C:\Program Files\Sniff\` |
 | the executable | `Contents/MacOS/sniff` | `sniff.exe` |
+| private contents | `Contents/Resources/` | `_internal/` |
 | entry point | double-click, or `open -a "Sniff"` | Start Menu → Sniff |
 | console window | none (a windowed bundle logs to `~/.sniff/log.txt`) | yes, and it prints the URL there |
 | scope | the machine, needs administrator rights | the machine (`InstallScope: perMachine`), needs administrator rights |

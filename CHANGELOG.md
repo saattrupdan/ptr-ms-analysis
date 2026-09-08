@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **The Sniff opening screen is now a focused local signal desk.** It keeps path entry,
   Browse and the open-review affordance, but leaves recent-file history to its API and
   storage layer rather than displaying it in the UI.
+- **Frozen one-dir bundles keep the launcher separate from package contents.** Windows
+  stores the Python payload under `_internal/`, while the macOS app uses its standard
+  `Contents/Resources/` area; both retain the visible `sniff` executable path.
 
 ## [0.5.0] - 2026-09-08
 

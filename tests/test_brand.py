@@ -32,6 +32,7 @@ def test_the_installers_call_it_the_same_thing():
     # The MSI keys its components from a namespace string; changing it would look
     # like every file being replaced on the next upgrade.
     assert msi.UPGRADE_CODE == "8f0c2f4c-6e1b-5a0d-9e2f-4b7c1a3d6e85"
+    assert msi.URL == "https://github.com/saattrupdan/sniff"
     assert pkg.IDENTIFIER == brand.BUNDLE_ID
 
 
@@ -42,6 +43,7 @@ def test_the_bundle_and_the_package_share_one_identifier():
         " question, and LaunchServices will believe the second one"
     )
     assert re.search(r'^APP_NAME = "%s"$' % re.escape(brand.APP_NAME), spec, re.M)
+    assert 'contents_directory="_internal"' in spec
 
 
 def test_the_page_mark_and_the_icon_are_the_same_drawing():
