@@ -206,7 +206,9 @@ def main(argv) -> int:
                 print("\n".join(bare_lines), file=sys.stderr)
                 return 1
             status, start = get(bare_url.rstrip("/") + "/")
-            if status != 200 or b"Stop the app" not in start:
+            # The start screen itself, not a control on it: what a file is opened
+            # from is the thing this launch has to have got right.
+            if status != 200 or b"Open an IONICON run" not in start:
                 print(
                     f"frozen app smoke: FAIL — the bare launch served {status} "
                     "without the start screen",

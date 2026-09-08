@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.request
 import webbrowser
@@ -30,7 +31,7 @@ from urllib.parse import parse_qs, urlparse
 
 import h5py
 
-from . import brand, desktop, viz
+from . import brand, desktop, ptrms, viz
 from .analyze import (
     analyze_config_to_csv,
     auto_peaks,
@@ -52,6 +53,19 @@ def _recent_path() -> Path:
 
 RECENT_PATH = _recent_path()
 RECENT_LIMIT = 20
+
+# Where an open's phases sit on its progress axis, measured on the real 2 GB /
+# 20,725-cycle fixture rather than guessed: opening the h5 file and reading its
+# header costs no measurable time, the deterministic pipeline about a second
+# (auto_peaks 0.1 s, auto_ranges 0.8 s), and everything that is not the extraction
+# pass in viz.build_viz_data another three and a half. The extraction is the rest,
+# and it is 89 % of the 33 s an open takes — which is why it gets the bar's whole
+# remaining span and reports cycles read, not anything smoother. It reads the run
+# twice on a curated file (14.6 s streaming, 13.9 s re-centring the intervals), and
+# both belong on the axis.
+P_META = 0.03
+P_DETECT = 0.08
+P_BUILD = viz.PREP_FRACTION  # 0.11: where the streaming starts, here and in viz
 
 
 def _valid_config(value) -> bool:
@@ -144,18 +158,34 @@ def _instrument(f) -> str:
     return value.decode(errors="replace") if isinstance(value, bytes) else str(value)
 
 
-def bootstrap_config(h5_path: str, f=None) -> dict:
+def bootstrap_config(h5_path: str, f=None, *, progress=None, should_stop=None) -> dict:
     """Build a config from the file alone, with no agent and no judgement calls.
 
     Peaks and intervals come from the deterministic pipeline; the checklist says
     plainly what was decided automatically and what still needs a human. ``f`` may be
     an already-open file, since opening a 2 GB run costs tens of seconds.
+    ``progress`` and ``should_stop`` are the same pair :func:`ptrms.extract_traces`
+    takes: detection is one call each for peaks and intervals, so it reports at the
+    boundaries between them (auto_peaks 0.1 s, auto_ranges 0.8 s on the 2 GB run).
     """
+
+    def _say(frac):
+        if progress is not None:
+            progress(max(0.0, min(1.0, float(frac))))
+
+    def _halt():
+        if should_stop is not None and should_stop():
+            raise ptrms.AnalysisCancelled("the analysis was cancelled")
+
     own = f is None
     source = h5py.File(h5_path, "r") if own else f
     try:
+        _say(0.0)
         peaks = auto_peaks(source)
+        _say(0.1)
+        _halt()  # detection is the only cancellable gap before the review data
         ranges = auto_ranges(source)
+        _say(1.0)
         ncyc = int(source["SPECdata/Intensities"].shape[0])
         instrument = _instrument(source)
     finally:
@@ -239,27 +269,88 @@ class Session:
         self.status = "empty"  # empty | loading | ready | error
         self.stage = ""
         self.error = None
+        self.progress = None  # 0..1 while an open runs, None at every other time
+        self.started_at = None  # monotonic clock, for the page's ETA
         self.export_result = None
         self.export_error = None
         self.agent_status = None
         self._file = None
         self._lock = threading.Lock()
         self._opening = False
+        self._cancel = threading.Event()
         # A double-clicked bundle has no terminal to press Ctrl-C in, so stopping the
         # server is something the page has to be able to ask for.
         self.stop = threading.Event()
 
     # ---- opening -------------------------------------------------------------
+    def _say(self, value):
+        """Publish an open's progress. The axis may only ever move forward: one
+        phase running after another must not make the bar go backwards."""
+        value = max(0.0, min(1.0, float(value)))
+        if self.progress is None or value > self.progress:
+            self.progress = value
+
+    def _halt(self):
+        if self._cancel.is_set():
+            raise ptrms.AnalysisCancelled("the open was cancelled")
+
+    def _band(self, lo, hi):
+        """A sink that puts one phase's own 0..1 fraction onto the open's axis."""
+
+        def report(frac):
+            self._say(lo + max(0.0, min(1.0, float(frac))) * (hi - lo))
+
+        return report
+
+    def _build_sink(self, prep_start):
+        """A sink for build_viz_data's fractions, which are already an axis of their
+        own: its phases take its first ``viz.PREP_FRACTION`` and the streaming pass
+        the rest. From that fraction on the two axes agree — the streaming pass is
+        89 % of the work in both — so only what precedes it is re-scaled, into
+        whatever the open has not already spent."""
+
+        def report(frac):
+            frac = max(0.0, min(1.0, float(frac)))
+            if frac <= viz.PREP_FRACTION:
+                self._say(
+                    prep_start
+                    + (frac / viz.PREP_FRACTION) * (P_BUILD - prep_start)
+                )
+            else:
+                self._say(frac)
+
+        return report
+
+    def cancel(self):
+        """Ask an in-flight open to stop, and report whether there was one to stop.
+
+        The flag is read by the ``should_stop`` callbacks the phases poll, so the
+        open ends on its own thread at the next block boundary and leaves the
+        session exactly as an open that never started.
+        """
+        with self._lock:
+            opening = self._opening
+        if opening:
+            self._cancel.set()
+        return opening
+
     def open(self, path, agent_url=None, agent_timeout=300.0):
         """Load ``path``, making a config first if the file has never been reviewed.
 
         The h5 file is opened once and reused for detection and for the review data:
         reopening a large file costs the user another 30-90 s for nothing.
+
+        Every phase is given the same progress sink and the same cancel flag, so the
+        page can show a bar that reflects the work and get out of the way of a user
+        who changed their mind. A cancelled open is not a failure: it leaves the
+        session empty, with no error, and ready to open the same file again.
         """
         with self._lock:
             if self._opening:
                 raise RuntimeError("a file is already opening")
             self._opening = True
+            self._cancel.clear()
+        self.progress, self.started_at = 0.0, time.monotonic()
         try:
             self.close()
             self.status, self.stage, self.error = "loading", "Opening the file", None
@@ -268,23 +359,34 @@ class Session:
             path = str(Path(path).expanduser().resolve())
             config_path = config_path_for(path)
             self._file = h5py.File(path, "r")
-            try:
-                config = _read_json(config_path) if config_path.exists() else None
-                if config is not None and not _valid_config(config):
-                    raise ValueError(f"{config_path} is not a ptr config")
-                if config is None:
-                    self.stage = "Detecting peaks and intervals"
-                    config = bootstrap_config(path, f=self._file)
-                    _write_json(config_path, config)
-                    if agent_url:
-                        config = self._ask_agent(
-                            config, path, config_path, agent_url, agent_timeout
-                        )
-                self.stage = "Computing the review data"
-                self.payload = self._payload(path, config)
-            except Exception:
-                self.close()
-                raise
+            self._say(P_META)
+            config = _read_json(config_path) if config_path.exists() else None
+            if config is not None and not _valid_config(config):
+                raise ValueError(f"{config_path} is not a ptr config")
+            prep_start = P_META
+            if config is None:
+                self.stage = "Detecting peaks and intervals"
+                config = bootstrap_config(
+                    path,
+                    f=self._file,
+                    progress=self._band(P_META, P_DETECT),
+                    should_stop=self._cancel.is_set,
+                )
+                self._halt()  # a cancel must not leave a half-made config on disk
+                _write_json(config_path, config)
+                if agent_url:
+                    config = self._ask_agent(
+                        config, path, config_path, agent_url, agent_timeout
+                    )
+                    self._halt()
+                prep_start = P_DETECT
+            self.stage = "Computing the review data"
+            self.payload = self._payload(
+                path,
+                config,
+                progress=self._build_sink(prep_start),
+                should_stop=self._cancel.is_set,
+            )
             self.path, self.config_path, self.config = path, config_path, config
             # Clear the flag before announcing readiness: the page polls the state and
             # offers its buttons the moment it sees "ready", so "ready" has to mean it
@@ -298,6 +400,11 @@ class Session:
                 # Bookkeeping. It must never cost the user a file that opened fine.
                 pass
             return self.payload
+        except ptrms.AnalysisCancelled:
+            # Nothing was decided and nothing was half-written: the file closes and
+            # the session is as though the open had never been asked for.
+            self.close()
+            return None
         except Exception as exc:
             self.close()
             self.status, self.error, self.stage = "error", str(exc), "Failed to open"
@@ -305,6 +412,7 @@ class Session:
         finally:
             with self._lock:
                 self._opening = False
+            self.progress = None
 
     def _ask_agent(self, config, path, config_path, agent_url, agent_timeout):
         """Let an attached agent post-process the automatic config. Its answer is a
@@ -345,7 +453,7 @@ class Session:
         _write_json(config_path, answer)
         return answer
 
-    def _payload(self, path, config):
+    def _payload(self, path, config, progress=None, should_stop=None):
         settings = resolve_analysis_settings(config)
         return viz.build_viz_data(
             self._file,
@@ -356,6 +464,8 @@ class Session:
             checklist=config.get("checklist"),
             x_axis_unit=resolve_x_axis_unit(config),
             merge_note=config.get("merge_note") or "",
+            progress=progress,
+            should_stop=should_stop,
         )
 
     def close(self):
@@ -369,6 +479,7 @@ class Session:
         self.config_path = None
         self.config = None
         self.payload = None
+        self.progress = None
         # A closed file has no last export: a tab left open must not be told a run
         # finished when it belongs to a file that is no longer loaded.
         self.export_result = None
@@ -429,6 +540,7 @@ class Session:
         return {"status": "idle"}
 
     def state(self) -> dict:
+        loading = self.status == "loading"
         return {
             "status": self.status,
             "stage": self.stage,
@@ -437,6 +549,15 @@ class Session:
             "config": str(self.config_path) if self.config_path else None,
             "agent_status": self.agent_status,
             "export": self.export_result,
+            # The open's own bar: how far it has got — a float only while it runs,
+            # since nothing else on this page has a fraction to report — and whether a
+            # Cancel button would do anything at all right now.
+            "progress": (
+                float(self.progress)
+                if loading and self.progress is not None
+                else None
+            ),
+            "cancellable": bool(loading and self._opening),
             # "window" or "browser": how the user is looking at this app right
             # now. A bundle that meant to open a window and did not has to be able to say
             # so — otherwise the only evidence is a tab the user has to notice.
@@ -453,11 +574,13 @@ _START_TEMPLATE = """<!doctype html>
   --bg:#f5f6f8;--card:#fff;--sunk:#f7f8fa;--fg:#131a22;--mut:#5f6b78;
   --line:#e2e6ec;--line2:#eef1f5;--acc:#2f6feb;--accc:#fff;--ok:#0f7b4f;
   --err:#b3261e;--errbg:#fdf0ef;--ring:rgba(47,111,235,.30);
+  --scrim:rgba(245,246,248,.86);
 }
 @media(prefers-color-scheme:dark){:root{
   --bg:#0d1117;--card:#151b23;--sunk:#111721;--fg:#e6edf3;--mut:#8b98a6;
   --line:#28313c;--line2:#1e252e;--acc:#4d8dff;--accc:#0b1220;--ok:#41b883;
   --err:#ff6b60;--errbg:#2a1613;--ring:rgba(77,141,255,.40);
+  --scrim:rgba(13,17,23,.86);
 }}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);-webkit-font-smoothing:antialiased;
@@ -532,6 +655,39 @@ footer{display:flex;gap:12px;align-items:center;justify-content:space-between;
 .link{background:none;border:0;padding:0;color:var(--mut);font:inherit;
   text-decoration:underline;cursor:pointer}
 .link:hover{color:var(--fg)}
+.link[hidden]{display:none}
+/* An open blocks the whole screen. It is the one thing on this page that takes
+   long enough to be worth leaving, so the page has to make leaving possible
+   rather than let a second click start a second open behind the first. */
+html.lock,html.lock body{overflow:hidden}
+#ov{position:fixed;inset:0;z-index:9;display:grid;place-items:center;padding:24px;
+  background:var(--scrim);overscroll-behavior:contain;
+  -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+#ov[hidden]{display:none}
+.ovcard{width:min(460px,100%);background:var(--card);border:1px solid var(--line);
+  border-radius:14px;padding:20px;box-shadow:0 1px 1px rgba(16,24,40,.04),
+  0 24px 60px -28px rgba(16,24,40,.45)}
+.ovhead{display:flex;gap:12px;align-items:flex-start}
+.ovhead .txt{min-width:0;flex:1}
+.ovhead b{display:block;font-weight:600;font-size:15px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.ovhead .sub{display:block;color:var(--mut);font-size:12px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.ovmark{flex:none;width:16px;height:16px;margin-top:3px;border-radius:50%;
+  border:2px solid var(--line);border-top-color:var(--acc);animation:spin .9s linear infinite}
+.ovmark.stop{border-color:var(--err);border-top-color:transparent;animation:none;
+  border-radius:0;background:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ovstage{margin:14px 0 6px;color:var(--mut);font-size:13px;min-height:20px}
+.pbar{height:6px;border-radius:4px;background:var(--line);overflow:hidden}
+.pbar i{display:block;height:100%;width:0;background:var(--acc);border-radius:4px;
+  transition:width .35s ease}
+.ovmeta{display:flex;gap:10px;justify-content:space-between;margin-top:7px;
+  color:var(--mut);font-size:12px;font-variant-numeric:tabular-nums}
+.ovrow{display:flex;justify-content:flex-end;margin-top:16px}
+#overr .msg{margin:10px 0 0;color:var(--err);font-size:13px;white-space:pre-wrap}
+@media(prefers-reduced-motion:reduce){.ovmark{animation:none;border-top-color:var(--line)}
+  .pbar i{transition:none}}
 </style></head><body><main>
   <div class="head">__MARK__<h1>__APP_NAME__ <span class="tag">__TAGLINE__</span></h1></div>
   <p class="lede">Open an IONICON run to review its peaks and intervals. A file you have
@@ -560,9 +716,38 @@ footer{display:flex;gap:12px;align-items:center;justify-content:space-between;
 
   <footer>
     <span>Served from 127.0.0.1 &mdash; nothing leaves this computer.</span>
-    <button class="link" id="quit" type="button">Stop the app</button>
+    <a class="link" id="quit" href="#" hidden>Stop the app</a>
   </footer>
-</main><script>
+</main>
+
+<div id="ov" role="dialog" aria-modal="true" aria-labelledby="ovname" hidden>
+  <div class="ovcard">
+    <div id="ovload">
+      <div class="ovhead">
+        <span class="ovmark" aria-hidden="true"></span>
+        <div class="txt"><b id="ovname">Opening a file</b>
+          <span class="sub" id="ovdir"></span></div>
+      </div>
+      <p class="ovstage" id="ovstage" role="status" aria-live="polite"></p>
+      <div class="pbar" role="progressbar" id="ovbar"
+           aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="ovfill"></i></div>
+      <div class="ovmeta"><span id="ovpct">0%</span><span id="oveta"></span></div>
+      <div class="ovrow"><button class="btn sec" id="cancel" type="button">Cancel</button>
+      </div>
+    </div>
+    <div id="overr" hidden>
+      <div class="ovhead">
+        <span class="ovmark stop" aria-hidden="true"></span>
+        <div class="txt"><b>That did not open</b></div>
+      </div>
+      <p class="msg" id="overrmsg"></p>
+      <div class="ovrow">
+        <button class="btn" id="ovback" type="button">Back to the start screen</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
 const $=s=>document.querySelector(s);
 let shown=null;                                  // the file the recents list was built for
 
@@ -619,7 +804,75 @@ async function openFile(path){
     const b=await r.json().catch(()=>({}));
     return note(b.error||'Could not open that file.',true,false,true);
   }
-  $('#path').value=''; note('Opening '+path+' …',false,true); tick();
+  // Ask and start watching in the same breath: the server sets "loading" on its own
+  // thread, so a poll that arrives first would otherwise show the old screen and
+  // wait two and a half seconds before the sheet went up.
+  $('#path').value=''; ask=path; watching=true; resetEta(); showSheet(); tick();
+}
+
+// ---- the sheet an open runs behind -----------------------------------------
+// Reading a 2 GB run takes about half a minute, which is long enough to be worth
+// leaving, so the open is shown full screen with a real bar and a Cancel button
+// rather than as a line of text the user has to trust.
+let watching=false;                    // an open is in flight, from this page
+let failed=false;                      // the sheet is showing an error, not a bar
+let ask=null;                          // the path this page asked to open
+let t0=0;                              // when this page started watching
+
+function resetEta(){t0=0;}
+function lock(on){
+  document.documentElement.classList.toggle('lock',on);
+  const m=document.querySelector('main'); if(m)m.inert=on;
+}
+function showSheet(){
+  $('#ovload').hidden=false; $('#overr').hidden=true;
+  $('#cancel').disabled=false; $('#cancel').hidden=false;
+  setBar(0); $('#oveta').textContent='';
+  $('#ov').hidden=false; lock(true); $('#cancel').focus();
+}
+function closeSheet(){
+  $('#ov').hidden=true; $('#ovload').hidden=false; $('#overr').hidden=true;
+  lock(false); resetEta(); ask=null; watching=false; failed=false;
+}
+function failSheet(msg){
+  failed=true;
+  note(msg,true,false,true);           // so it is still there once the sheet is gone
+  $('#ovload').hidden=true; $('#overr').hidden=false;
+  $('#overrmsg').textContent=msg;
+  $('#ovback').focus();
+}
+function setBar(p){
+  const pct=Math.round(p*100);
+  $('#ovfill').style.width=pct+'%';
+  $('#ovbar').setAttribute('aria-valuenow',String(pct));
+  $('#ovpct').textContent=pct+'%';
+}
+function left(sec){
+  if(sec<10)return'a few seconds left';
+  if(sec<55)return'~'+Math.round(sec/5)*5+' s left';
+  const m=Math.round(sec/60);
+  return m<=1?'about a minute left':'about '+m+' minutes left';
+}
+function paint(s){
+  const q=parts(s.file||ask||'');
+  $('#ovname').textContent=q.name||'Opening a file';
+  $('#ovname').title=s.file||ask||'';
+  $('#ovdir').textContent=q.dir;
+  $('#ovstage').textContent=(s.stage||'Working')+((s.agent_status||'')?' — '+s.agent_status:'');
+  const now=Date.now(), p=(typeof s.progress==='number')?s.progress:0;
+  if(!t0)t0=now;
+  // Elapsed time and the fraction it bought, which is the only estimate that needs
+  // no guess about how the phases are weighted. It is rough by nature: the first
+  // 11 % of the bar is the quick phases, so say "~" and leave it at that.
+  const secs=(now-t0)/1000;
+  let eta='';
+  if(p>=0.04&&secs>=2){
+    const rest=secs*(1-p)/p;
+    if(isFinite(rest)&&rest>=0&&rest<1800)eta=left(rest);
+  }
+  $('#oveta').textContent=eta;
+  setBar(p);
+  $('#cancel').hidden=(s.cancellable===false);   // nothing to cancel, no button
 }
 
 let sticky=0;                                // until when the poller must leave this alone
@@ -659,17 +912,34 @@ function current(s){
 async function tick(){
   let s=null;
   try{s=await (await fetch('/api/state')).json();}catch(e){return;}
-  const busy=s.status==='loading'||s.status==='exporting';
-  if(busy){
-    note((s.stage||'Working')+((s.agent_status||'')?' — '+s.agent_status:''),false,true);
-  }else if(s.status==='error'){
-    note(s.error||'Could not open that file.',true,false,true);
-  }else{
-    if(Date.now()>sticky)note('');
-    if(s.status==='ready') current(s); else $('#now').innerHTML='';
+  $('#quit').hidden=(s.surface!=='browser');   // a tab has no window to close
+  if(s.status==='loading'){
+    if(!watching){watching=true; resetEta(); showSheet();}
+    paint(s);
+    note('');
+  }else if(watching){
+    watching=false;
+    if(s.status==='ready'){
+      // replace, not assign: Back must not land on a sheet for a file that is
+      // already open behind it.
+      location.replace('/review');
+      return;
+    }
+    if(s.status==='error')failSheet(s.error||'Could not open that file.');
+    else{closeSheet(); note('Opening cancelled.',false,false,true); $('#path').focus();}
+  }
+  if(!watching&&!failed){
+    if(s.status==='exporting'){
+      note((s.stage||'Working')+((s.agent_status||'')?' — '+s.agent_status:''),false,true);
+    }else if(s.status==='error'){
+      note(s.error||'Could not open that file.',true,false,true);
+    }else{
+      if(Date.now()>sticky)note('');
+      if(s.status==='ready') current(s); else $('#now').innerHTML='';
+    }
   }
   if(shown!==s.file){shown=s.file||null; recent();}
-  setTimeout(tick,busy?900:2500);
+  setTimeout(tick, watching||s.status==='exporting'?900:2500);
 }
 
 $('#go').onclick=()=>{const p=$('#path').value.trim(); if(p)openFile(p);};
@@ -688,7 +958,16 @@ $('#browse').onclick=async()=>{
   if(body.cancelled)return note('');
   $('#path').value=body.path; openFile(body.path);
 };
-$('#quit').onclick=async()=>{
+$('#cancel').onclick=async()=>{
+  // Disable it here rather than wait for the poll to say the open is over: a second
+  // click has nothing to cancel, and a button that answers twice looks like it lied.
+  $('#cancel').disabled=true;
+  $('#ovstage').textContent='Cancelling';
+  try{await fetch('/cancel',{method:'POST'});}catch(e){}
+};
+$('#ovback').onclick=()=>{closeSheet(); note(''); $('#path').focus(); recent();};
+$('#quit').onclick=async ev=>{
+  ev.preventDefault();
   const ok=await fetch('/shutdown',{method:'POST'}).then(r=>r.ok).catch(()=>false);
   note(ok?'The app has stopped. You can close this tab.':'Could not stop the app.',!ok,false,
        !ok?true:false);
@@ -940,6 +1219,12 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                     session.config = body
                 _background(session.export)
                 self._send(202, {"ok": True})
+            elif self.path == "/cancel":
+                # Cancelling an open that is not running is not an event: the page's
+                # Cancel button and a poll can cross, and the answer must not depend
+                # on which one arrived first.
+                session.cancel()
+                self._send(200, {"ok": True})
             elif self.path == "/close":
                 if session.busy:
                     self._send(409, {"error": "wait for the current work to finish"})

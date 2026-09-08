@@ -843,3 +843,224 @@ def test_browse_says_so_when_the_system_has_no_file_dialog(server, monkeypatch):
     code, body = api.post("/browse", {})
     assert code == 501
     assert "type the path" in body["error"]
+
+
+# --------------------------------------------------------------------------
+# an open the reviewer can walk out of
+# --------------------------------------------------------------------------
+def stalled_payload(f, peaks, ranges, *, progress=None, should_stop=None, **kwargs):
+    """A build that runs until it is asked to stop, reporting a fraction meanwhile.
+
+    Cancellation is only real if the work in flight honours ``should_stop``, so the
+    stub has to be the thing that raises, exactly like the streaming pass does.
+    """
+    for _ in range(300):
+        if should_stop is not None and should_stop():
+            raise app.ptrms.AnalysisCancelled("the analysis was cancelled")
+        if progress is not None:
+            progress(0.5)
+        threading.Event().wait(0.01)
+    return payload_stub(f, peaks, ranges)
+
+
+def _wait_state(api, done, timeout=20):
+    spent = 0.0
+    while spent < timeout:
+        _, state = api.get("/api/state")
+        state = json.loads(state)
+        if done(state):
+            return state
+        threading.Event().wait(0.02)
+        spent += 0.02
+    raise AssertionError("the app never reached the state the test was waiting for")
+
+
+def _wait_status(api, wanted, timeout=20):
+    return _wait_state(api, lambda s: s["status"] in wanted, timeout)
+
+
+def test_cancelling_an_open_returns_the_session_to_empty(server, tmp_path):
+    """A cancel is a user changing their mind, not a failure: the session comes back
+    to exactly the state it was in before the open, with nothing to apologise for."""
+    api, session = server
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", stalled_payload),
+    ):
+        assert api.post("/open", {"path": str(h5)})[0] == 202
+        opening = _wait_status(api, ("loading",))
+        assert opening["cancellable"] is True
+        assert api.post("/cancel", {})[0] == 200
+        after = _wait_status(api, ("empty", "error"))
+    assert after["status"] == "empty", after
+    assert after["stage"] == "" and after["error"] is None
+    assert session.busy is False
+
+
+def test_a_cancelled_session_opens_the_file_afterwards(server, tmp_path):
+    api, _ = server
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", stalled_payload),
+    ):
+        api.post("/open", {"path": str(h5)})
+        _wait_status(api, ("loading",))
+        api.post("/cancel", {})
+        _wait_status(api, ("empty",))
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", payload_stub),
+    ):
+        assert api.post("/open", {"path": str(h5)})[0] == 202
+        assert _wait_status(api, ("ready", "error"))["status"] == "ready"
+
+
+def test_cancelling_nothing_is_opening_answers_ok_anyway(server):
+    """The Cancel button and the poll can cross, so the answer cannot depend on
+    which of them arrived first."""
+    api, session = server
+    code, body = api.post("/cancel", {})
+    assert code == 200 and body == {"ok": True}
+    assert session.status == "empty"
+
+
+def test_an_open_reports_progress_and_says_whether_it_can_be_left(server, tmp_path):
+    api, _ = server
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    _, before = api.get("/api/state")
+    before = json.loads(before)
+    assert before["progress"] is None and before["cancellable"] is False
+
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", stalled_payload),
+    ):
+        api.post("/open", {"path": str(h5)})
+        opening = _wait_state(api, lambda s: (s["progress"] or 0) > 0.4)
+        assert opening["status"] == "loading"
+        assert opening["progress"] == pytest.approx(0.5)
+        assert opening["cancellable"] is True
+        api.post("/cancel", {})
+        _wait_status(api, ("empty",))
+    _, after = api.get("/api/state")
+    after = json.loads(after)
+    # Nothing outside an open has a fraction to report, and a float the page cannot
+    # put on a bar is worse than the null it would have replaced.
+    assert after["progress"] is None and after["cancellable"] is False
+
+
+def test_progress_never_runs_backwards_across_the_phases(server, tmp_path):
+    """One phase reporting a smaller fraction than the one before it would make the
+    bar jump backwards on screen, which no amount of smoothing explains away."""
+    api, _ = server
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    look, go = threading.Event(), threading.Event()
+
+    def out_of_order(f, peaks, ranges, *, progress=None, should_stop=None, **kwargs):
+        for frac in (0.9, 0.2):  # the second believes it is further back than one
+            if progress is not None:
+                progress(frac)
+            look.set()
+            go.wait(10)
+            go.clear()
+            look.clear()
+        return payload_stub(f, peaks, ranges)
+
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", out_of_order),
+    ):
+        api.post("/open", {"path": str(h5)})
+        seen = []
+        for _ in (0, 1):
+            assert look.wait(10), "the build never reported a fraction"
+            seen.append(json.loads(api.get("/api/state")[1])["progress"])
+            go.set()
+        status = _wait_status(api, ("ready", "error"))
+    assert seen[0] == pytest.approx(0.9)
+    assert all(v is None or v >= seen[0] for v in seen), "the bar moved backwards"
+    assert status["status"] == "ready"
+
+
+def test_a_cancel_during_detection_writes_no_half_made_config(tmp_path):
+    """Detection is the one phase whose output is a file. Leaving a config behind
+    would tell the next open that a human had already been here."""
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    session = app.Session()
+
+    def detect_and_cancel(_f):
+        session._cancel.set()
+        return []
+
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", side_effect=detect_and_cancel),
+    ):
+        assert session.open(str(h5)) is None
+    assert not (tmp_path / "run.json").exists()
+    assert session.status == "empty" and session.stage == "" and session.error is None
+
+
+def test_the_deterministic_pipeline_says_where_detection_is(tmp_path):
+    """auto_peaks is 0.1 s of the roughly 1 s band and auto_ranges the other 0.8 s,
+    so the bar has to move at the boundary between them rather than at the end."""
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    seen, order = [], []
+    with (
+        mock.patch.object(
+            app, "auto_peaks", side_effect=lambda _f: order.append("peaks") or []
+        ),
+        mock.patch.object(
+            app, "auto_ranges", side_effect=lambda _f: order.append("ranges") or []
+        ),
+    ):
+        app.bootstrap_config(str(h5), progress=seen.append)
+    assert order == ["peaks", "ranges"]
+    assert seen == [0.0, pytest.approx(0.1), 1.0]
+
+
+def test_the_start_screen_holds_an_open_behind_a_modal_sheet():
+    """An open is the one thing on this page that takes long enough to be worth
+    leaving, so it gets a real bar and a Cancel button instead of a line of text."""
+    html = app._START_HTML
+    assert 'role="dialog"' in html and 'aria-modal="true"' in html
+    assert "#ov{position:fixed;inset:0" in html, "the sheet is not full screen"
+    assert 'role="progressbar"' in html, "the bar is not announced as a bar"
+    assert 'id="cancel"' in html and "fetch('/cancel'" in html
+    assert "s.progress" in html and "s.cancellable" in html
+    assert 'left(rest)' in html, "no ETA is derived from the fraction"
+    assert "minutes left" in html and "s left" in html, "the ETA is a raw number"
+
+
+def test_a_finished_open_navigates_and_offers_no_button_about_it():
+    """The sheet must not stay standing on a page the user has already left, and
+    Back must not return to it."""
+    js = re.findall(r"<script>(.*?)</script>", app._START_HTML, re.S)[0]
+    ready = js[js.index("}else if(watching){") :]
+    ready = ready[: ready.index("if(s.status==='error')")]
+    assert "location.replace('/review')" in ready, "a finished open does not navigate"
+    assert "return;" in ready, "the poll keeps running into a page that is going away"
+    assert "Open the review" not in ready
+
+
+def test_the_start_screen_no_longer_stops_the_app_from_its_main_panel():
+    """A browser tab has no window to close, so the quit route survives as one quiet
+    footer link on that surface only; it is no longer a button on the start screen."""
+    html = app._START_HTML
+    assert '>Stop the app</button>' not in html
+    assert '<a class="link" id="quit" href="#" hidden>Stop the app</a>' in html
+    assert "s.surface!=='browser'" in html, "the link is not tied to the surface"
+    assert "'/shutdown'" in html, "the route lost its only page caller"

@@ -568,9 +568,29 @@ ptr app --window              # desktop window instead of a browser tab
   serves until Ctrl-C — so background it the way you would background `ptr viz` and hand
   the user the URL. It also cannot review a file on read-only media, since the config must
   be written beside the `.h5`.
-- One file is open at a time (opening another closes the first, since a 2 GB run holds
-  its traces in memory), recents live in `~/.ptr-ms/recent.json`, and the server binds to
-  127.0.0.1 — nothing is uploaded anywhere.
+- **Opening a file runs behind a full-screen sheet, and can be left.** While the open
+  runs the page is a modal dialog — the file, the stage, a determinate bar, a rough ETA
+  and **Cancel** — because an open takes half a minute on a 2 GB run and the reviewer is
+  entitled to change their mind. `GET /api/state` carries `progress` (a float only while
+  an open runs) and `cancellable`, and `POST /cancel` stops the open in flight and is a
+  no-op otherwise. A cancel is not a failure: the file is closed, the session returns to
+  `empty` with no error string, and nothing half-written is left behind — a config that
+  detection had not finished writing is simply never written. When an open reaches
+  `ready` the start screen navigates to `/review` itself (with `location.replace`, so
+  Back does not return to the sheet). A file that was already open when the page loaded
+  is still offered as **Open the review** rather than being pushed into it.
+  The bar tracks where the time actually goes, measured on the 2 GB / 20,725-cycle
+  fixture: opening and reading the header about 0 s, the deterministic pipeline about
+  1 s, the primary ion, humidity, K and the discriminator about 3.5 s, and the two
+  extraction passes 28.6 s (14.6 s reading every cycle once, 13.9 s re-reading the
+  intervals to re-centre peaks on them). Extraction therefore owns 89 % of the bar and
+  reports cycles read, not a smoothed guess.
+- **One file is open at a time** (opening another closes the first, since a 2 GB run
+  holds its traces in memory), recents live in `~/.ptr-ms/recent.json`, and the server
+  binds to 127.0.0.1 — nothing is uploaded anywhere. Closing the desktop window stops
+  the server; `POST /shutdown` does the same from a browser tab, where the start screen
+  keeps one quiet footer link for it. There is no Stop button on the start screen
+  itself.
 
 App mode does not replace the agent-driven flow. When you are the one curating, keep
 using `peaks` + `segments` → your config → `ptr viz`, where the review's Done ends the

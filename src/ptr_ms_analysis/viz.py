@@ -40,6 +40,15 @@ from . import brand, formula_id, ptrms
 
 logger = logging.getLogger(__name__)
 
+# Progress accounting, measured on the real 2 GB / 20,725-cycle fixture rather
+# than guessed: everything build_viz_data does before the extraction pass takes
+# 3.5 s of a ~33 s build (extract_primary 0.6 s, water_cluster_ratio 1.1 s,
+# build_discriminator 0.7 s, derive_K 1.1 s), and ptrms.extract_traces then takes
+# 28.6 s — 89 % of the total. So the bar's first PREP_FRACTION covers the phases
+# below and the rest is the extraction, whose own two passes share its span.
+PREP_FRACTION = 0.11
+_PREP_CUM_S = (0.6, 1.7, 2.4, 3.5)  # cumulative, in the order the phases run
+
 
 def _normalise_checklist(items):
     """Coerce the config's checklist into [{text, detail?}] for the UI.
@@ -93,6 +102,9 @@ def build_viz_data(
     config_base=None,
     x_axis_unit="cycle",
     merge_note="",
+    *,
+    progress=None,
+    should_stop=None,
 ):
     """Assemble everything the HTML app needs into one JSON-able dict.
 
@@ -102,6 +114,12 @@ def build_viz_data(
     merge_note : one line on what the automatic interval detection joined up, said
                  on the Intervals card because a merge the reviewer cannot see is a
                  merge they cannot check. Empty for a curated config.
+    progress   : optional callback with a 0..1 fraction. This call's own phases take
+                 the first PREP_FRACTION of it and the streaming pass the rest, so
+                 the axis is the whole build's, not this function's share of a
+                 larger one — a caller with work of its own scales it.
+    should_stop: optional callback polled between phases and, through
+                 extract_traces, every block; true raises ptrms.AnalysisCancelled.
     """
     analysis_settings = analysis_settings or {
         "R": R,
@@ -122,6 +140,24 @@ def build_viz_data(
     primary_mz = analysis_settings["primary_mz"]
     K = analysis_settings["K"]
     molar_volume = analysis_settings["molar_volume"]
+
+    def _say(frac):
+        if progress is not None:
+            progress(max(0.0, min(1.0, float(frac))))
+
+    def _phase(index):
+        _say(PREP_FRACTION * _PREP_CUM_S[index] / _PREP_CUM_S[-1])
+
+    def _halt():
+        if should_stop is not None and should_stop():
+            raise ptrms.AnalysisCancelled("the analysis was cancelled")
+
+    def _stream(done):
+        # extract_traces reports cycles consumed; those cycles are 89 % of the
+        # build, so they get the bar's remaining span rather than their own.
+        _say(PREP_FRACTION + (1.0 - PREP_FRACTION) * done)
+
+    _say(0.0)
     a, b = ptrms.load_mass_cal(f)
     tm, tf = ptrms.load_transmission(f)
     inten = f["SPECdata/Intensities"]
@@ -136,8 +172,14 @@ def build_viz_data(
         x_axis_unit = "cycle"
 
     primary = ptrms.extract_primary(f, primary_mz=primary_mz, R=R)
+    _phase(0)
+    _halt()
     humidity = ptrms.water_cluster_ratio(f, primary_mz=primary_mz, R=R)
+    _phase(1)
+    _halt()
     discriminator = ptrms.build_discriminator(f)
+    _phase(2)
+    _halt()
     file_molar_volume, file_molar_volume_source = ptrms.derive_molar_volume_info(f)
     if molar_volume is None:
         molar_volume = file_molar_volume
@@ -147,6 +189,7 @@ def build_viz_data(
             "molar_volume", "configured"
         )
     file_K = ptrms.derive_K(f, primary)
+    _phase(3)
     if K is None:
         K = file_K
         K_source = "file acquisition calibration"
@@ -195,7 +238,14 @@ def build_viz_data(
             else None
         )
         traces, (a, b) = ptrms.extract_traces(
-            f, masses, R=R, R_phys=R_phys, windows=windows or None, per_range=per_range
+            f,
+            masses,
+            R=R,
+            R_phys=R_phys,
+            windows=windows or None,
+            per_range=per_range,
+            progress=_stream,
+            should_stop=should_stop,
         )
         apexes = {m: ap for m, (_, ap) in traces.items()}
         raw_traces = {m: raw for m, (raw, _) in traces.items()}
@@ -306,6 +356,7 @@ def build_viz_data(
                 "trace": [round(float(x), 1) for x in raw_traces[m]],
             }
         )
+    _say(1.0)
 
     def _clean(arr):
         if arr is None:

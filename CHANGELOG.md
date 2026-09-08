@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **The start screen no longer has a Stop the app button.** Closing the window is the
+  way out of a windowed app, and the same quit remains available in a browser tab —
+  where there is no window to close — as one quiet footer link, with `POST /shutdown`
+  and Ctrl-C unchanged.
+
 ### Fixed
 
 - **Exporting no longer ends on a dead end.** The results dialog used to turn its own
@@ -18,12 +25,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Opening a file runs behind a progress you can watch and cancel.** The start screen
+  now puts a half-minute open into a full-screen sheet — the file's name, the stage, a
+  determinate bar, a rough ETA and **Cancel** — instead of a line of text and a spinner
+  while the reviewer wonders whether the app is wedged. The bar is driven by the work:
+  reading the run is 28.6 s of the ~33 s an open takes on the 2 GB / 20,725-cycle
+  fixture (14.6 s reading every cycle once and 13.9 s re-reading the intervals to
+  re-centre peaks on them), so it gets 89 % of the bar and reports cycles read rather
+  than a smoothed guess, and the quick phases in front of it are what the other 11 % is
+  made of. Cancelling stops the analysis at the next block, closes the file and returns
+  you to a usable start screen: the session goes back to empty with no error string and
+  nothing half-written, and the same file can be opened again immediately. When an open
+  finishes, the page goes to the review by itself — so **Open the review** is no longer
+  a button you wait beside, and Back does not land on a sheet for a file that is already
+  open. `GET /api/state` gained `progress` and `cancellable`, and `POST /cancel` stops
+  an open in flight (and is a no-op when there is none). Analysis is untouched: with no
+  callbacks attached, `extract_traces` produces numerically identical traces.
 - **The app can open in its own desktop window.** `ptr app --window` runs the review in
   a single window with no address bar, `pywebview` being an extra
   (`pip install 'ptr-ms-analysis[desktop]'`) rather than a dependency, and a packaged
   bundle uses the window by default because a double-clicked app has no terminal to read
-  an address out of. Closing the window stops the server, **Stop the app** closes the
-  window, and **Browse this computer…** uses the window's own dialog when there is one; a
+  an address out of. Closing the window stops the server and **Browse this computer…**
+  uses the window's own dialog when there is one; a
   machine without the extra, or without a display, says so once and serves a browser tab
   exactly as before. The `package` workflow installs `.[desktop]` and the PyInstaller
   spec bundles `webview` when it is present, so the `.pkg` and `.msi` ship the window;

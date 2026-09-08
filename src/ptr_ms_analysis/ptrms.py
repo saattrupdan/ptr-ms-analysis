@@ -23,6 +23,15 @@ _JS_NORMAL_YEAR_0000_START_S = -62167219200.0
 _JS_NORMAL_YEAR_10000_START_S = 253402300800.0
 
 K_ANCHOR_DEFAULT = 2.0  # 1e-9 cm3/s: the single k a non-kinetic calibration assumes
+
+
+class AnalysisCancelled(Exception):
+    """Raised when a caller's ``should_stop`` callback asks for a pass to stop.
+
+    It is a user action, not a failure: an open that raises it leaves nothing
+    behind and says nothing about the file."""
+
+
 # 100 ppm: a deliberately generous corruption/model-consistency ceiling, not an
 # accuracy claim; the real Data_10_26_33 fixture is about 8 ppm.
 MAPPING_MAX_RELATIVE_MASS_ERROR = 100e-6
@@ -521,6 +530,9 @@ def extract_traces(
     windows=None,
     per_range=None,
     range_refine_tol=0.035,
+    *,
+    progress=None,
+    should_stop=None,
 ):
     """Return dict m -> (raw_trace[ncycles], apex_m). One streaming pass.
 
@@ -537,7 +549,16 @@ def extract_traces(
     RE-CENTRED on that interval's own average spectrum (peaks drift between
     intervals). apex_m in the return stays the whole-run value (transmission moves
     <0.1% over the drift); only the per-cycle window changes. Clustered peaks keep
-    their whole-run deconvolved trace."""
+    their whole-run deconvolved trace.
+
+    progress: optional callback with cycles consumed / cycles this pass reads, after
+    each block of either pass. Reads are the honest axis: on the 2 GB / 20,725-cycle
+    run the streaming pass takes 14.6 s and the interval re-centring 13.9 s of the
+    28.6 s they share, so a bar driven by the first pass alone would sit at 100 %
+    through the second. It is 89 % of the ~33 s an open costs in total.
+    should_stop: optional callback polled once per block in both passes; when it
+    returns true the pass raises AnalysisCancelled. Both default to None, which
+    changes nothing — no arithmetic and no ordering depends on them."""
     a, b = load_mass_cal(f)
     inten = f["SPECdata/Intensities"]
     ncyc = inten.shape[0]
@@ -604,7 +625,17 @@ def extract_traces(
         )
     cluster_buf = [np.empty((ncyc, len(g))) for g in clusters]
 
+    # Cycles the two passes read between them: every cycle once here, plus every
+    # cycle the interval re-centring below reads again. On the 2 GB fixture with its
+    # 23 intervals that is 20,725 + 19,523 = 40,248, and the two passes take 14.6 s
+    # and 13.9 s — so reporting only this pass would leave the bar sitting at 100 %
+    # for the whole of the second one. The pass is one axis, not two. With no
+    # intervals to re-centre the span is just ncyc, which is the plain axis.
+    span = ncyc + sum(hi - lo + 1 for lo, hi in want_ranges.values())
+
     for i in range(0, ncyc, block):
+        if should_stop is not None and should_stop():
+            raise AnalysisCancelled("the analysis was cancelled")
         j = min(i + block, ncyc)
         chunk = np.asarray(inten[i:j, :], dtype=np.float64)
         chunk[~np.isfinite(chunk)] = 0.0
@@ -620,6 +651,8 @@ def extract_traces(
             if c1 > c0:
                 rsum[lbl] += chunk[c0 - i : c1 - i, :].sum(axis=0)
                 rcnt[lbl] += c1 - c0
+        if progress is not None:
+            progress(min(j, span) / span)
 
     traces = {}
     for m in isolated:
@@ -631,6 +664,7 @@ def extract_traces(
     # second pass over ONLY each interval's cycles: re-centre each isolated peak on
     # that interval's average spectrum and overwrite those cycles (clustered peaks
     # keep their whole-run deconvolved trace)
+    read = ncyc  # cycles consumed over both passes: the one progress axis
     for lbl, (lo, hi) in want_ranges.items():
         if not rcnt[lbl]:
             continue
@@ -646,11 +680,21 @@ def extract_traces(
         if not rwin:
             continue
         for i in range(lo - 1, hi, block):
+            if should_stop is not None and should_stop():
+                raise AnalysisCancelled("the analysis was cancelled")
             j = min(i + block, hi)
             chunk = np.asarray(inten[i:j, :], dtype=np.float64)
             chunk[~np.isfinite(chunk)] = 0.0
             for m, (wl, wr) in rwin.items():
                 traces[m][i:j] = chunk[:, wl:wr].sum(axis=1)
+            if progress is not None:
+                read += j - i
+                progress(min(read, span) / span)
+
+    # An interval with nothing to re-centre was never re-read, so the count can stop
+    # short of the span it planned. The pass has still ended here.
+    if progress is not None and read < span:
+        progress(1.0)
 
     return {m: (traces[m], apexes[m]) for m in target_masses}, (a, b)
 
