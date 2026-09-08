@@ -377,6 +377,8 @@ def test_start_screen_opens_files_without_rendering_recents(server, tmp_path, mo
     make_h5(h5)
     status, body = api.get("/")
     assert status == 200 and b"Sniff" in body and b"PTR-MS review" in body
+    assert b'<html lang="en">' in body
+    assert b"--line2:" not in body and b"--ok:" not in body and b"--cream:" not in body
     assert b"/api/recent" not in body and b'id="recent"' not in body
     assert b"Find the story in your spectrum." in body
 
