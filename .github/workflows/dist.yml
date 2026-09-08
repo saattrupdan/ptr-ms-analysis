@@ -154,4 +154,8 @@ jobs:
             echo "no installers were produced" >&2
             exit 1
           fi
-          gh release create "$GITHUB_REF_NAME" --generate-notes "${files[@]}"
+          # --repo because this job never checks the repository out: without a .git
+          # to read, gh cannot work out which repository the tag belongs to and dies
+          # with "failed to run git: fatal: not a git repository".
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --generate-notes --latest "${files[@]}"
