@@ -15,7 +15,7 @@ import urllib.request
 
 import pytest
 
-from ptr_ms_analysis import analyze, app, desktop
+from sniff import analyze, app, desktop
 
 TIMEOUT = 10  # seconds for anything that has to hand over to a thread
 
@@ -224,7 +224,7 @@ def test_the_package_imports_without_the_extra():
     """The core install is numpy + h5py + stdlib, so a clean interpreter must not
     have pywebview in it just because the app module was imported."""
     probe = (
-        "import sys; import ptr_ms_analysis.app, ptr_ms_analysis.analyze;"
+        "import sys; import sniff.app, sniff.analyze;"
         "print('webview' in sys.modules)"
     )
     done = subprocess.run(
@@ -299,8 +299,8 @@ def test_a_window_that_cannot_be_created_is_reported_as_unavailable(monkeypatch)
 def test_pick_file_returns_the_choice_or_none(monkeypatch):
     _fake, window = _install_window(monkeypatch)
 
-    window.dialog_result = ("/data/ptr.h5",)
-    assert desktop.pick_file(window) == "/data/ptr.h5"
+    window.dialog_result = ("/data/sniff.h5",)
+    assert desktop.pick_file(window) == "/data/sniff.h5"
     assert window.dialogs[0]["file_types"] == desktop.H5_FILE_TYPES
     assert any("*.h5" in f for f in window.dialogs[0]["file_types"])
 
@@ -449,13 +449,13 @@ def test_closing_the_window_stops_the_session_without_touching_the_shutdown_rout
 def test_browse_uses_the_window_dialog_when_there_is_a_window(server, monkeypatch):
     api, _session = server
     _fake, window = _install_window(monkeypatch)
-    window.dialog_result = ("/data/ptr.h5",)
+    window.dialog_result = ("/data/sniff.h5",)
 
     def no_subprocess_dialog():
         raise AssertionError("a windowed app owns its own dialog")
 
     monkeypatch.setattr(app, "_pick_file", no_subprocess_dialog)
-    assert api.post("/browse", {}) == (200, {"path": "/data/ptr.h5"})
+    assert api.post("/browse", {}) == (200, {"path": "/data/sniff.h5"})
 
     window.dialog_result = None
     assert api.post("/browse", {}) == (200, {"cancelled": True})
@@ -493,7 +493,7 @@ def test_a_broken_window_dialog_falls_back_to_the_machine(server, monkeypatch):
 # the command line, which is where the window is asked for
 # --------------------------------------------------------------------------
 def _app_args(**overrides):
-    """What argparse would have made of ``ptr app``, with the defaults it uses."""
+    """What argparse would have made of ``sniff app``, with the defaults it uses."""
     argv = {
         "h5": None,
         "port": 8765,

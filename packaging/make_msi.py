@@ -6,8 +6,8 @@ must not change between builds or an upgrade leaves files behind — so the spli
 written out here instead: one component per directory, one stable GUID per directory,
 so the same tree always produces the same XML.
 
-    python packaging/make_msi.py dist/ptr build/msi/ptr-app.wxs
-    wix build build/msi/ptr-app.wxs -arch x64 -o dist/ptr.msi
+    python packaging/make_msi.py dist/sniff build/msi/sniff-app.wxs
+    wix build build/msi/sniff-app.wxs -arch x64 -o dist/sniff.msi
 """
 
 import os
@@ -15,7 +15,6 @@ import re
 import sys
 import uuid
 import xml.etree.ElementTree as ET
-from importlib.metadata import version as distribution_version
 
 APP_NAME = "Sniff"
 # The product name changed on 2026-09-07 ("PTR-MS Review" -> "Sniff"); UPGRADE_CODE
@@ -29,33 +28,31 @@ UPGRADE_CODE = "8f0c2f4c-6e1b-5a0d-9e2f-4b7c1a3d6e85"
 # MIT-licensed, and the last version without the Open Source Maintenance Fee EULA
 # that WiX v6+ insists on accepting. The authoring below is v3-shaped for that reason.
 NAMESPACE = "http://schemas.microsoft.com/wix/2006/wi"
+# Keep the original namespace so existing component GUIDs remain valid after the
+# product rename.
 GUID_SPACE = uuid.uuid5(uuid.NAMESPACE_URL, "ptr-ms-analysis/component/")
 # Where each component keeps the key path an MSI insists on. A component may not key on
 # one of this bundle's .dll files, so it keys on a registry value instead.
 REGISTRY_KEY = r"Software\Dan Saattrup Smart\Sniff\components"
 
 
-def msi_version() -> str:
-    """A three-part version, because that is all an MSI product version can hold."""
-    raw = ""
+def project_version() -> str:
+    """Read the project version from the checkout's pyproject metadata."""
+    here = os.path.dirname(os.path.abspath(__file__))
     try:
-        raw = distribution_version("ptr_ms_analysis")
-    except Exception:
+        with open(os.path.join(here, "..", "pyproject.toml"), encoding="utf-8") as handle:
+            for line in handle:
+                found = re.match(r'\s*version\s*=\s*["\']([^"\']+)', line)
+                if found:
+                    return found.group(1)
+    except OSError:
         pass
-    if not raw:
-        # Not installed into this interpreter: read it off the checkout instead. A
-        # version that quietly fell back to 0.0.0 would make every upgrade a downgrade.
-        here = os.path.dirname(os.path.abspath(__file__))
-        try:
-            with open(os.path.join(here, "..", "pyproject.toml"), encoding="utf-8") as handle:
-                for line in handle:
-                    found = re.match(r'\s*version\s*=\s*["\']([^"\']+)', line)
-                    if found:
-                        raw = found.group(1)
-                        break
-        except OSError:
-            pass
-    raw = (raw or "0.0.0").split("+")[0]
+    return "0.0.0"
+
+
+def msi_version() -> str:
+    """Return a three-part version for the MSI from repository metadata."""
+    raw = project_version().split("+")[0]
     parts = []
     for chunk in raw.replace("-", ".").split("."):
         digits = ""
@@ -186,7 +183,7 @@ def build_wxs(source: str, product_version: str) -> ET.ElementTree:
             "Id": "StartMenuShortcut",
             "Name": APP_NAME,
             "Description": "Open the Sniff PTR-MS review app",
-            "Target": "[APPLICATIONFOLDER]ptr.exe",
+            "Target": "[APPLICATIONFOLDER]sniff.exe",
             "WorkingDirectory": "APPLICATIONFOLDER",
         },
     )

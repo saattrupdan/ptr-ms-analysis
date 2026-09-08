@@ -13,7 +13,7 @@ from unittest import mock
 import h5py
 import numpy as np
 
-from ptr_ms_analysis import ptrms, viz
+from sniff import ptrms, viz
 
 # timebin = a*sqrt(m) + b, anchored at m/z 20 -> 1000 and m/z 200 -> 5000, which
 # spreads a peak over enough bins for a local apex search to have something to do.

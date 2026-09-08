@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build / serve an interactive HTML review app for a PTR-MS analysis.
 
-`ptr viz FILE.h5 ...` renders a browser app (from an EXISTING peak list + time
+`sniff viz FILE.h5 ...` renders a browser app (from an EXISTING peak list + time
 ranges — it does not detect anything) where an expert can:
   - pan/zoom the average mass spectrum, see the assigned peaks and their
     integration windows, and re-centre / add / remove / relabel peaks;
@@ -17,7 +17,7 @@ live-saves every edit into the --config file and the CLI blocks until the expert
 clicks "Done"; with `--html` it writes a standalone, portable HTML file instead.
 Most preview values are embedded and recompute offline. Live values use a
 window-sum integration (exact for isolated peaks); overlapping peaks are flagged
-— their authoritative values come from the deconvolution in `ptr analyze` when
+— their authoritative values come from the deconvolution in `sniff analyze` when
 Done is clicked. Changes to primary m/z, physical resolution, or whole-run window
 mode require re-extraction and are marked stale until that authoritative rerun.
 """
@@ -601,9 +601,9 @@ def serve(
     httpd.daemon_threads = True
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{port}/"
-    print(f"ptr: review app running at {url}", file=sys.stderr)
+    print(f"sniff: review app running at {url}", file=sys.stderr)
     print(
-        "ptr: open it, adjust the analysis, then click 'Done' (changes auto-save "
+        "sniff: open it, adjust the analysis, then click 'Done' (changes auto-save "
         f"to {config_path}).",
         file=sys.stderr,
     )
@@ -2507,10 +2507,10 @@ function staleRows(stale){ const rows=[];
   return rows; }
 function exportAction(){ return SERVED
   ? "Click <b>Done</b> to re-extract at the final settings and write the CSV."
-  : "Click <b>Download config</b> to export the final settings, then hand the file to <code>ptr analyze</code> for re-extraction."; }
+  : "Click <b>Download config</b> to export the final settings, then hand the file to <code>sniff analyze</code> for re-extraction."; }
 function staleHtml(stale){ const rows=staleRows(stale); if(!rows.length) return "";
-  const action=SERVED ? "The edited values apply in the authoritative Done rerun (or <code>ptr analyze</code>)."
-    : "The edited values are included when you click <b>Download config</b>; hand that file to <code>ptr analyze</code>.";
+  const action=SERVED ? "The edited values apply in the authoritative Done rerun (or <code>sniff analyze</code>)."
+    : "The edited values are included when you click <b>Download config</b>; hand that file to <code>sniff analyze</code>.";
   return `<div class="stale"><b>PREVIEW STALE — ${SERVED?"Done-only re-extraction":"export and re-extraction"} required.</b>
     Embedded plot data still represents the preview extraction. ${rows.join("; ")}.<br>
     ${action} They are not numerically recomputed in this page.</div>`; }
@@ -2520,7 +2520,7 @@ function updateStaleness(){ const stale=staleSettings(), rows=staleRows(stale);
   banner.innerHTML=rows.length
     ? `<b>PREVIEW STALE — ${SERVED?"authoritative Done rerun":"export and re-extraction"} required.</b> ${rows.join("; ")}. `+
       (SERVED ? `Plots retain the embedded preview extraction; final values apply only after Done.`
-        : `Plots retain the embedded preview extraction; export with Download config, then re-run ptr analyze.`)
+        : `Plots retain the embedded preview extraction; export with Download config, then re-run sniff analyze.`)
     : ""; }
 function updateMethods(){
   const live=document.getElementById("methodlive"); if(!live) return;
@@ -2762,8 +2762,8 @@ document.querySelectorAll("#qtabs button").forEach(b=>b.classList.toggle("on",b.
 document.getElementById("tracelbl").textContent=QSHORT[quant];
 const delivery=document.getElementById("previewdelivery");
 if(delivery) delivery.innerHTML=SERVED
-  ? "Click <b>Done</b> (or hand the saved config to <code>ptr analyze</code>) to re-extract at the final settings. The resulting CSV is always authoritative."
-  : "Click <b>Download config</b> to export the final settings, then hand the file to <code>ptr analyze</code> for authoritative re-extraction. The resulting CSV is always authoritative.";
+  ? "Click <b>Done</b> (or hand the saved config to <code>sniff analyze</code>) to re-extract at the final settings. The resulting CSV is always authoritative."
+  : "Click <b>Download config</b> to export the final settings, then hand the file to <code>sniff analyze</code> for authoritative re-extraction. The resulting CSV is always authoritative.";
 const cfghelp=document.getElementById("cfghelp");
 if(cfghelp) cfghelp.innerHTML=SERVED
   ? "Values that can't be set by interacting with the plot. R, K, molar volume, and correction controls update the preview; primary m/z, R<sub>phys</sub>, and window mode are applied to the raw file on Done."

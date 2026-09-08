@@ -4,7 +4,7 @@ import unittest
 from argparse import Namespace
 from unittest import mock
 
-from ptr_ms_analysis import analyze
+from sniff import analyze
 
 _KEYS = {
     "R": None,

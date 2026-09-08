@@ -10,7 +10,7 @@ from unittest import mock
 import h5py
 import numpy as np
 
-from ptr_ms_analysis import analyze
+from sniff import analyze
 
 
 class AutoPeakSettingsTest(unittest.TestCase):

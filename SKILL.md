@@ -1,5 +1,5 @@
 ---
-name: ptr-ms-analysis
+name: sniff
 description: >
   Analyse PTR-MS / PTR-TOF data from IONICON IoniTOF HDF5 (.h5) files — an open-source
   replacement for the proprietary PTR-MS Viewer. Use when the user has IONICON PTR-MS
@@ -38,9 +38,9 @@ it yourself fabricates a review that never happened and ships the CSV as "review
 nobody looked at it. The same goes for ticking checklist items and for editing peaks,
 segments or settings in the app: if something needs changing, change the **config** before
 launching `viz`, or raise it in the config's `checklist` — never by clicking in the app.
-You do not need the browser to check your own work: `ptr analyze --config` prints every
+You do not need the browser to check your own work: `sniff analyze --config` prints every
 diagnostic the app displays. If a run genuinely should have no human in the loop, use
-`ptr analyze` (step 5) and say plainly that no review took place.
+`sniff analyze` (step 5) and say plainly that no review took place.
 
 Final range labels are deterministic: use `sample_01`, `sample_02`, … for high plateaus
 and `background_01`, `background_02`, … for low plateaus, each numbered chronologically
@@ -58,49 +58,26 @@ offer a standards calibration; do not suggest the Viewer as the answer.
 
 ## How to run it — read this first
 
-- **Everything is one CLI: `ptr <subcommand> …`.** Install it once (below); then call plain
-  `ptr` from any directory — no path prefix, no env var.
-- **The user may prefer to drive the review themselves** with `ptr app` (§5c): one
+- **Everything is one CLI: `sniff <subcommand> …`.** Install it once (below); then call plain
+  `sniff` from any directory — no path prefix, no env var.
+- **The user may prefer to drive the review themselves** with `sniff app` (§5c): one
   long-lived localhost app that opens files from its own start screen, keeps each file's
   config beside the `.h5`, and exports without exiting. Use it when the user wants the
-  tool rather than the chat; keep `ptr viz` for the agent-driven flow below, where you
+  tool rather than the chat; keep `sniff viz` for the agent-driven flow below, where you
   curate a config and hand over a URL.
-- **Install once, first thing.** If `ptr` is not already on PATH (`command -v ptr`; on
-  Windows PowerShell `Get-Command ptr`), run:
+- **Install once, first thing.** For normal use, install Sniff from the macOS `.pkg` or
+  Windows `.msi` on the project GitHub Release page. The installer includes the runtime,
+  dependencies and desktop window. After installation, run `sniff <subcommand>` from a
+  terminal.
 
-  ```bash
-  pipx install --editable <SKILL_DIR>     # <SKILL_DIR> = the directory of this file
-  ```
-
-  `--editable` means `ptr` tracks the skill's live code — you never reinstall when it's
-  updated. `pipx` gives it an isolated env (h5py+numpy) so its dependencies can't
-  collide. First install ~20-30 s; then it's instant. **Do NOT** hand-build a venv or write
-  your own HDF5 code — the install is the only setup.
-
-- **If `pipx` itself is missing** (`command -v pipx` fails), install it first — then re-run
-  the command above:
-
-  ```bash
-  # macOS (Homebrew):
-  brew install pipx && pipx ensurepath
-  # any OS with Python (Linux / macOS without brew):
-  python3 -m pip install --user pipx && python3 -m pipx ensurepath
-  # Windows (PowerShell; python may be `py` or `python`):
-  py -m pip install --user pipx;  py -m pipx ensurepath
-  ```
-
-  `pipx ensurepath` adds pipx's bin dir to PATH — **open a new shell afterwards** so `ptr`
-  resolves. No-pipx alternatives that need no bootstrap: `uv tool install --editable
-  <SKILL_DIR>` (if `uv` is present), or `pip install --editable <SKILL_DIR>` into a venv.
-
-- **Cross-platform:** identical on macOS, Linux, and **Windows** — pipx creates a real
-  `ptr.exe` on PATH. Everything after install is the same `ptr <cmd>` on every OS (in
-  PowerShell use `where ptr` / `Get-Command ptr` instead of `command -v ptr`).
-- **Never read `src/ptr_ms_analysis/*.py`, and never write your own HDF5/parsing/quantification
+- **Cross-platform:** identical on macOS, Linux, and **Windows**. The Windows installer
+  creates `sniff.exe`; everything after install is the same `sniff <cmd>` on every OS (in
+  PowerShell use `where sniff` / `Get-Command sniff` instead of `command -v sniff`).
+- **Never read `src/sniff/*.py`, and never write your own HDF5/parsing/quantification
   code.** Every operation is a subcommand and every value you need is in its JSON output
   — `peaks` already returns candidate compound assignments, the run's mass-drift, and
   artifact flags; `analyze` reports apex checks, humidity, and the params used. If
-  something seems missing it is a flag: run `ptr <cmd> --help`, don't reimplement it.
+  something seems missing it is a flag: run `sniff <cmd> --help`, don't reimplement it.
 - Discovery commands print JSON to stdout (logs go to stderr). Files are large (~1 GB);
   a full `analyze` streams in ~60 s.
 
@@ -111,12 +88,12 @@ mechanical top-candidate guess. **`viz` is the default final step** for "analyse
 file": launch it once you have a config unless the user has said they don't want a review.
 
 ```bash
-# (one-time) pipx install --editable <SKILL_DIR>   # then `ptr` is on PATH everywhere
+# After installing the Sniff installer, use the `sniff` command from any directory.
 
 # 1. Detect (deterministic; gives you candidates + flags to reason over):
-ptr inspect  FILE.h5                   # confirm IoniTOF; calibration, transmission, K, Vm
-ptr peaks    FILE.h5                   # peaks + candidate compounds + artifact flags
-ptr segments FILE.h5                   # stable plateaus to label
+sniff inspect  FILE.h5                   # confirm IoniTOF; calibration, transmission, K, Vm
+sniff peaks    FILE.h5                   # peaks + candidate compounds + artifact flags
+sniff segments FILE.h5                   # stable plateaus to label
 
 # 2. YOU write analysis-config.json: curated peaks (assignments picked from `candidates`,
 #    honest `unknown` where unsure, artifacts judged) + ranges (sample_/background_ labels).
@@ -124,19 +101,19 @@ ptr segments FILE.h5                   # stable plateaus to label
 # 3. DEFAULT: browser review of YOUR config -> the USER clicks Done -> analyze -> CSV.
 #    BLOCKS on the browser, so run it backgrounded, give the user the URL, and stop —
 #    never drive this app yourself and never click 'Done' for them:
-ptr viz FILE.h5 --config analysis-config.json --out results.csv
+sniff viz FILE.h5 --config analysis-config.json --out results.csv
 #    localhost app; waits indefinitely for 'Done'
 
 # 3-alt. No review — ONLY when the user explicitly wants headless/no-browser output, or a
 #        portable file to hand off. Same curated config, straight to CSV:
-ptr analyze FILE.h5 --config analysis-config.json --include-cycle-rows --out results.csv
+sniff analyze FILE.h5 --config analysis-config.json --include-cycle-rows --out results.csv
 
 # Fully-automatic fallback (no hand-curation). --auto-peaks now annotates, DROPS noise
 # artifacts (ringing/low-prominence combs) and applies confident labels; --auto-segments
 # consolidates fragmented backgrounds. Use when you won't curate — a clean labelled panel,
 # but curating a --config still gives better chemistry + segment judgment. Do NOT run
 # `peaks`/`segments` and then also pass --auto-* (that recomputes and discards your curation):
-ptr analyze FILE.h5 --auto-peaks --auto-segments --include-cycle-rows --out results.csv
+sniff analyze FILE.h5 --auto-peaks --auto-segments --include-cycle-rows --out results.csv
 ```
 
 **`viz` is long-running and interactive** (it waits indefinitely by default for a human
@@ -151,34 +128,35 @@ app, or click *Done* yourself (see the callout above), and do not poll for the C
 afterwards — the user tells you when they are finished.
 
 **Startup takes ~30-90 s on a large file** — `viz` loads the whole file and pre-computes
-traces *before* the server accepts connections. It prints `ptr: preparing the review …` to
-stderr immediately, then `ptr: review app running at http://127.0.0.1:PORT/` once it is
+traces *before* the server accepts connections. It prints `sniff: preparing the review …` to
+stderr immediately, then `sniff: review app running at http://127.0.0.1:PORT/` once it is
 ready. **Wait for that second line** (poll the backgrounded command's stderr/log for
 `review app running`); do not curl/poll the port to test readiness — it refuses the
 connection until loading finishes, which looks like a failure but isn't.
 
 ## Installation
 
-The CLI is a proper installable package (`pyproject.toml`) that ships its own dependencies
-(h5py+numpy) and reference data. Install it **once** and `ptr` is on PATH everywhere:
+Normal users should install the platform installer from the project's GitHub Release
+page. The macOS `.pkg` installs `Sniff.app`; the Windows `.msi` installs Sniff and its
+`sniff.exe` command. No separate Python environment is required.
+
+For a checkout or development environment, use the project environment and the live
+command explicitly:
 
 ```bash
-pipx install --editable <SKILL_DIR>     # <SKILL_DIR> = this skill's directory
+uv sync
+uv run sniff --help
+uv run sniff rates water
 ```
 
-Use **`--editable`** so `ptr` runs the skill's live code — when the skill is updated you do
-**not** reinstall. `pipx` isolates it (the CLI dependencies can't collide with anything
-else). Alternatives: `uv tool install --editable <SKILL_DIR>`; or `pip install --editable
-<SKILL_DIR>` into a venv. If `pipx` itself is missing: `brew install pipx` or `python3 -m
-pip install --user pipx` (then `pipx ensurepath`). Not yet on PyPI — install from this
-directory (a git checkout works too). Verify with `command -v ptr && ptr rates water`.
+Do not install an indexed copy or build a separate virtual environment for this skill.
 
 ## Workflow
 
 ### 1. Inspect
 
 ```bash
-ptr inspect FILE.h5
+sniff inspect FILE.h5
 ```
 
 Confirms it is an IoniTOF file and returns cycle count, duration, cycle length, mass
@@ -208,7 +186,7 @@ common-VOC table is an assignment aid, not a whitelist.
 ### 3. Detect peaks, preserve breadth, then assign chemistry
 
 ```bash
-ptr peaks FILE.h5 --min-height 0.001
+sniff peaks FILE.h5 --min-height 0.001
 ```
 
 Each peak comes annotated (compact by default):
@@ -273,7 +251,7 @@ project, so exact project reproduction is impossible without that metadata.
 ### 4. Detect, merge, and curate time ranges
 
 ```bash
-ptr segments FILE.h5
+sniff segments FILE.h5
 ```
 
 The command returns stable plateaus as
@@ -354,7 +332,7 @@ viz's initial controls, live-save, and the Done rerun. Unknown config fields are
 by the browser. The summary `params` records effective values, window mode, and sources.
 
 ```bash
-ptr analyze FILE.h5 \
+sniff analyze FILE.h5 \
   --config analysis-config.json \
   --include-cycle-rows \
   --out results.csv
@@ -406,7 +384,7 @@ yourself through a browser tool is the worst of both paths — it costs the user
 they never got, and produces a CSV you could have written headlessly with `analyze`.
 
 ```bash
-ptr viz FILE.h5 --config analysis-config.json --out results.csv    # serve; Done -> writes results.csv
+sniff viz FILE.h5 --config analysis-config.json --out results.csv    # serve; Done -> writes results.csv
 ```
 
 Browser review provides an x-axis unit selector. Its default is cycle. The accepted
@@ -418,7 +396,7 @@ lab-PC local time, and is unavailable when they are missing, invalid, or outside
 four-digit ISO year range (0000–9999).
 
 The config shape is `viz.x_axis_unit`, with a matching `--x-axis-unit` option for
-`ptr viz`; precedence is CLI override > config value > cycle default. The selector is
+`sniff viz`; precedence is CLI override > config value > cycle default. The selector is
 shown only on the **Signal over time** tab and updates that plot and the **Intervals**
 card only. It does not change saved ranges or CSV `Cycle` rows: those remain integer,
 1-based, inclusive cycle boundaries. The Intervals card is kept in chronological order
@@ -475,7 +453,7 @@ and the per-compound membership, so a misclassified sample that was corrected is
 exactly as it was.
 
 The faint curve behind the **Signal over time** plot is the composite VOC signal used
-by `ptr segments`: the strong m/z 40–200 traces, each divided by its own median,
+by `sniff segments`: the strong m/z 40–200 traces, each divided by its own median,
 averaged per cycle (about 1 over a background, higher over a sample). It is drawn
 against its own maximum, not the plotted axis, and says so in the corner; the legend
 entry toggles it, remembered as `viz.show_disc`.
@@ -487,7 +465,7 @@ for *Done* by default, so run it backgrounded. After a laptop sleep/wake cycle, 
 served review remains available once the laptop is awake; stop it with Ctrl-C. Use
 `--timeout SECONDS` only when an opt-in upper bound is wanted. For a portable file to email
 to someone offline, use `--html review.html` instead (no server, no CSV; the expert tweaks
-and clicks **Download config.json** to hand back for a later `ptr analyze`).
+and clicks **Download config.json** to hand back for a later `sniff analyze`).
 
 **Put your review points in the config's `checklist`, not in a wall of chat text.** The
 long message you would otherwise write *after* launching `viz` is bad UX — it lands after
@@ -531,23 +509,23 @@ presented as an identification, and the Mass spectrum's "Average over" list trac
 interval renames, colour changes and resizes, so a renamed interval is never offered
 under its old name.
 
-### 5c. App mode (`ptr app`) — the reviewer works in the tool, not in chat
+### 5c. App mode (`sniff app`) — the reviewer works in the tool, not in chat
 
-`ptr app` keeps one review server up and lets the user open files inside it. Packaged
-as a desktop app it is named **Sniff** (see `ptr_ms_analysis/brand.py`; the CLI stays
-`ptr` and the distribution stays `ptr-ms-analysis`):
+`sniff app` keeps one review server up and lets the user open files inside it. Packaged
+as a desktop app it is named **Sniff** (see `sniff/brand.py`; the CLI stays
+`sniff` and the distribution stays `sniff`):
 
 ```bash
-ptr app                       # start screen: type an absolute path or browse
-ptr app FILE.h5 --no-browser  # open one file immediately (background it: ~30-90 s for 2 GB)
-ptr app --agent URL           # have an agent curate a newly detected config
-ptr app --window              # desktop window instead of a browser tab
+sniff app                       # start screen: type an absolute path or browse
+sniff app FILE.h5 --no-browser  # open one file immediately (background it: ~30-90 s for 2 GB)
+sniff app --agent URL           # have an agent curate a newly detected config
+sniff app --window              # desktop window instead of a browser tab
 ```
 
-- **The config lives beside the h5 file, same stem**: `ptr.h5` → `ptr.json`. An existing
+- **The config lives beside the h5 file, same stem**: `sniff.h5` → `sniff.json`. An existing
   `<stem>-analysis-config.json` is used when there is no `<stem>.json`, so a file
   reviewed through the CLI reopens exactly as it was left. A same-stem JSON that is not a
-  ptr config is never overwritten — the app writes `<stem>.ptr.json` instead.
+  sniff config is never overwritten — the app writes `<stem>.sniff.json` instead.
 - **Opening a never-reviewed file runs the deterministic pipeline** (the same detection
   as `--auto-peaks`/`--auto-segments`) and writes that config before loading it. The
   checklist it carries states that nothing has been curated yet, what was detected, and
@@ -555,7 +533,7 @@ ptr app --window              # desktop window instead of a browser tab
   one line on the Intervals card (config `merge_note`), because a reviewer who never saw
   a command line otherwise has no way to learn a merge happened. A file with no beam is
   labelled as one rather than presented as an empty panel.
-- **The optional agent endpoint** (`--agent URL`, or the `PTR_AGENT_URL` environment
+- **The optional agent endpoint** (`--agent URL`, or the `SNIFF_AGENT_URL` environment
   variable) is posted the generated config as
   `{"file": …, "config": …, "diagnostics": {n_peaks, n_ranges, ncyc, instrument}}` and
   may answer with a bare config or `{"config": …}`. Any failure — unreachable, timeout,
@@ -563,9 +541,9 @@ ptr app --window              # desktop window instead of a browser tab
   UI, so an offline agent never costs the user a file.
 - **Export replaces Done**: it runs the full-precision analysis to `<stem>.csv` beside
   the file and leaves the app open, so the reviewer can keep working and export again.
-  If something that is not a ptr summary already sits at that name (a Viewer export, say)
-  the app writes `<stem>-ptr.csv` instead of overwriting it. `ptr app` never returns — it
-  serves until Ctrl-C — so background it the way you would background `ptr viz` and hand
+  If something that is not a sniff summary already sits at that name (a Viewer export, say)
+  the app writes `<stem>-sniff.csv` instead of overwriting it. `sniff app` never returns — it
+  serves until Ctrl-C — so background it the way you would background `sniff viz` and hand
   the user the URL. It also cannot review a file on read-only media, since the config must
   be written beside the `.h5`.
 - **Opening a file runs behind a full-screen sheet, and can be left.** While the open
@@ -586,7 +564,7 @@ ptr app --window              # desktop window instead of a browser tab
   intervals to re-centre peaks on them). Extraction therefore owns 89 % of the bar and
   reports cycles read, not a smoothed guess.
 - **One file is open at a time** (opening another closes the first, since a 2 GB run
-  holds its traces in memory). Opened files are retained in `~/.ptr-ms/recent.json` for
+  holds its traces in memory). Opened files are retained in `~/.sniff/recent.json` for
   the local API and diagnostics, but are not shown on the opening screen. The server
   binds to 127.0.0.1 — nothing is uploaded anywhere. Closing the desktop window stops
   the server; `POST /shutdown` does the same from a browser tab, where the start screen
@@ -594,7 +572,7 @@ ptr app --window              # desktop window instead of a browser tab
   itself.
 
 App mode does not replace the agent-driven flow. When you are the one curating, keep
-using `peaks` + `segments` → your config → `ptr viz`, where the review's Done ends the
+using `peaks` + `segments` → your config → `sniff viz`, where the review's Done ends the
 run and writes the CSV that was asked for.
 
 ### 6. Calibrate concentration when accurate ppb/µg matters
@@ -606,8 +584,8 @@ export or a colleague's) or a known standard, pin K to it — never ask them to 
 one in PTR-MS Viewer:
 
 ```bash
-ptr calibrate FILE.h5 reference.csv
-ptr analyze FILE.h5 --config analysis-config.json --K 16.26 \
+sniff calibrate FILE.h5 reference.csv
+sniff analyze FILE.h5 --config analysis-config.json --K 16.26 \
   --include-cycle-rows --out results.csv
 ```
 
@@ -619,7 +597,7 @@ they want tighter absolute numbers, offer a standards calibration — not the Vi
 ### 7. Compare when a reference exists
 
 ```bash
-ptr compare results.csv viewer.csv --per-mass
+sniff compare results.csv viewer.csv --per-mass
 ```
 
 Comparison requires matching mass and range labels. First align the target panel and
@@ -656,7 +634,7 @@ Concentration uses the standard **primary-ion-normalised** model: dividing by th
 per-cycle reagent-ion signal (the configured primary-ion m/z, 21.022 by default) tracks
 reagent-ion drift over the run, and **K** is a single calibration constant. Isolated peaks use apex-centred
 (auto-corrected) windows; closely-spaced clustered peaks are Gaussian/deconvolved fitted
-components at fixed model centres. Full derivation: `src/ptr_ms_analysis/reference/ionicon-h5-format.md`.
+components at fixed model centres. Full derivation: `src/sniff/reference/ionicon-h5-format.md`.
 
 **Per-compound sensitivity (`--kinetic`).** Sensitivity scales with each compound's
 proton-transfer rate constant k (`Conc ∝ 1/k`). By default one k is assumed for all
@@ -664,9 +642,9 @@ compounds (matches a single-sensitivity reference). Passing `--kinetic` scales e
 compound by its own k — physically more accurate but it _diverges from_ a single-k
 reference (e.g. benzaldehyde, k≈3.9, drops to ~half a k=2 reference). k comes from a
 peak's explicit `"k"`, its `"formula"`, or its m/z, looked up in
-`src/ptr_ms_analysis/reference/rate_constants.json` (218 compounds from the PTR Library — Pagonis,
+`src/sniff/reference/rate_constants.json` (218 compounds from the PTR Library — Pagonis,
 Sekimoto & de Gouw 2019; browse with the `rates` command). See
-`src/ptr_ms_analysis/reference/ptr-ms-chemistry.md`.
+`src/sniff/reference/ptr-ms-chemistry.md`.
 
 **Humidity handling (low-proton-affinity compounds).** HCN, formaldehyde, H₂S, formic
 acid and ammonia have proton affinity near water's, so proton transfer is partly
@@ -683,7 +661,7 @@ uncalibrated, the correction only puts _relative_ comparisons on equal-humidity 
 and its magnitude is approximate. HCN is the canonical case — flag it to the user and,
 without an HCN standard, treat its absolute concentration as indicative only. The
 wet-lab calibration that pins HCN (and how to recognise existing calibration data) is
-described in `src/ptr_ms_analysis/reference/hcn-calibration.md`.
+described in `src/sniff/reference/hcn-calibration.md`.
 
 ## Accuracy & concentration calibration
 

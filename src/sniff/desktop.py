@@ -1,12 +1,12 @@
 """A real desktop window for the review app — optional, and invisible without it.
 
-``ptr app`` normally hands its URL to the user's browser, which is fine from a terminal
+``sniff app`` normally hands its URL to the user's browser, which is fine from a terminal
 and awkward from a double-clicked bundle: a tab is one window among many, and it
 outlives the server it points at. pywebview gives the app a window of its own instead,
 with no address bar and no back button, and its file dialog is the desktop's own dialog
 rather than a subprocess called on the user's behalf.
 
-pywebview is an extra (``pip install 'ptr-ms-analysis[desktop]'``), never a core
+pywebview is an extra (``uv sync --extra desktop``), never a core
 dependency, so it is imported inside functions only: importing this module — or the app
 — must not need it. Everything a GUI can fail to do arrives as
 :func:`DesktopUnavailable`, so a caller's decision is always "window or browser" and
@@ -49,7 +49,7 @@ def _import_webview():
     if importlib.util.find_spec("webview") is None:
         raise DesktopUnavailable(
             "the desktop extra is not installed "
-            "(pip install 'ptr-ms-analysis[desktop]')"
+            "(uv sync --extra desktop)"
         )
     try:
         return importlib.import_module("webview")

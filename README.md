@@ -1,4 +1,4 @@
-# ptr-ms-analysis
+# Sniff
 
 Open-source reprocessor for IONICON IoniTOF PTR-MS / PTR-TOF `.h5` files — a
 replacement for the proprietary PTR-MS Viewer. Extracts product-ion peaks from the
@@ -12,77 +12,81 @@ CLI. The commands below describe the complete package interface.
 
 ## Install / run
 
-It's a proper package that ships its own dependencies (h5py + numpy) and reference
-data. Install it **once** and `ptr` is on PATH everywhere. Recommended via `pipx`
-(isolated environment for the CLI and its dependencies):
+For normal use, download the Sniff installer for your platform from the repository's
+GitHub Release page. The macOS `.pkg` installs **Sniff.app** in `/Applications`; the
+Windows `.msi` installs Sniff in `Program Files`. The installers include Python,
+NumPy, h5py and the PTR reference data — no separate Python installation is needed.
+
+After installation, launch Sniff from the Applications folder or Start Menu. The
+command-line executable is also available as `sniff`:
 
 ```bash
-pipx install ptr-ms-analysis
-ptr inspect FILE.h5
+sniff --help
+sniff inspect FILE.h5
 ```
 
-**If `pipx` isn't installed yet**, install it first, then re-run the command above:
+For development from this checkout, use the project environment rather than an index
+installation:
 
 ```bash
-brew install pipx && pipx ensurepath                              # macOS (Homebrew)
-python3 -m pip install --user pipx && python3 -m pipx ensurepath  # Linux / macOS (no brew)
-py -m pip install --user pipx; py -m pipx ensurepath              # Windows (PowerShell)
+uv sync
+uv run sniff --help
+uv run sniff rates water
 ```
 
-`pipx ensurepath` puts pipx's bin dir on PATH — open a new shell afterwards. Alternatives
-that skip pipx entirely are `uv tool install ptr-ms-analysis` and
-`python3 -m pip install ptr-ms-analysis` in a virtual environment. Works identically on
-macOS, Linux, and Windows (pipx makes a real `ptr.exe`). Requires Python ≥ 3.9.
+Sniff requires Python 3.9 or newer when run from a checkout. It works on macOS,
+Linux and Windows; packaged desktop installers are currently produced for macOS and
+Windows.
 
 ## Commands (all discovery output is JSON)
 
 ```bash
-ptr inspect  FILE.h5                       # metadata, calibration, concentration-K, Vm
-ptr peaks    FILE.h5                       # peaks + a ready-to-use suggested_label + top formula (--full for all candidates)
-ptr segments FILE.h5                       # stable plateaus (high=sample / low=bg)
+sniff inspect  FILE.h5                       # metadata, calibration, concentration-K, Vm
+sniff peaks    FILE.h5                       # peaks + a ready-to-use suggested_label + top formula (--full for all candidates)
+sniff segments FILE.h5                       # stable plateaus (high=sample / low=bg)
 # agent curates peaks + ranges into cfg.json, then:
-ptr viz      FILE.h5 --config cfg.json --out results.csv   # serve review; 'Done' -> writes CSV
-ptr viz      FILE.h5 --config cfg.json --html review.html   # portable standalone HTML instead
-ptr analyze  FILE.h5 \                     # no review: curated config -> Viewer-style CSV
+sniff viz      FILE.h5 --config cfg.json --out results.csv   # serve review; 'Done' -> writes CSV
+sniff viz      FILE.h5 --config cfg.json --html review.html   # portable standalone HTML instead
+sniff analyze  FILE.h5 \                     # no review: curated config -> Viewer-style CSV
     --config cfg.json --include-cycle-rows --out results.csv
-ptr analyze  FILE.h5 --auto-peaks --auto-segments --out results.csv   # zero-curation fallback (auto-labels, drops noise)
-ptr calibrate FILE.h5 viewer.csv          # fit concentration constant K -> pass via --K
-ptr compare   results.csv viewer.csv --per-mass   # accuracy vs a Viewer export
-ptr rates     benzaldehyde                # browse proton-transfer rate constants (k)
+sniff analyze  FILE.h5 --auto-peaks --auto-segments --out results.csv   # zero-curation fallback (auto-labels, drops noise)
+sniff calibrate FILE.h5 viewer.csv          # fit concentration constant K -> pass via --K
+sniff compare   results.csv viewer.csv --per-mass   # accuracy vs a Viewer export
+sniff rates     benzaldehyde                # browse proton-transfer rate constants (k)
 ```
 
-### App mode — `ptr app`
+### App mode — `sniff app`
 
-`ptr app` is the same review UI as a program you live in rather than a command you run
+`sniff app` is the same review UI as a program you live in rather than a command you run
 once per file: one server that stays up, files opened from its own start screen, and
 **Export** where the CLI has Done. Packaged for desktop use it is called **Sniff** — the
-name is in `ptr_ms_analysis/brand.py`, and the mark next to it is drawn by
+name is in `sniff/brand.py`, and the mark next to it is drawn by
 `packaging/make_icons.py`, which also builds the `.icns` and `.ico` the installers carry.
 
 ```bash
-ptr app                        # start screen: type a path or browse for a run
-ptr app FILE.h5 --no-browser   # open one file immediately, in a browser tab
-ptr app --window               # force the desktop window
-ptr app --port 8791            # fixed port (it probes upward if the port is taken)
-ptr app --agent URL            # let an agent curate a newly detected config
+sniff app                        # start screen: type a path or browse for a run
+sniff app FILE.h5 --no-browser   # open one file immediately, in a browser tab
+sniff app --window               # force the desktop window
+sniff app --port 8791            # fixed port (it probes upward if the port is taken)
+sniff app --agent URL            # let an agent curate a newly detected config
 ```
 
-Installed as an app bundle, `ptr app` opens a **desktop window** — its own window,
+Installed as an app bundle, `sniff app` opens a **desktop window** — its own window,
 menus and file dialog rather than a tab in whatever browser you happen to use. From a
 source checkout it opens a browser tab unless you ask for `--window`, because there the
-terminal is right beside you. The window comes from an optional extra
-(`pip install 'ptr-ms-analysis[desktop]'`, which pulls in pywebview); a checkout without
-it logs one line and opens the tab, so nothing is ever lost — the same page, the same
-localhost server, the same Export.
+terminal is right beside you. The packaged installer includes the desktop window. A checkout can use the optional
+`pywebview` dependency with `uv sync --extra desktop`; without it, Sniff logs one line
+and opens a browser tab, so nothing is ever lost — the same page, the same localhost
+server, the same Export.
 
-Each file's config sits beside it under the same name: `ptr.h5` → `ptr.json`. A
-`ptr-analysis-config.json` left by the CLI flow is found automatically, so a file that
+Each file's config sits beside it under the same name: `sniff.h5` → `sniff.json`. A
+`sniff-analysis-config.json` left by the CLI flow is found automatically, so a file that
 has been reviewed before reopens exactly as it was saved. A file that has never been
 reviewed gets the deterministic pipeline — detected peaks, detected intervals, honest
 checklist — written to that path and then loaded, so the panel starts as a starting
 point rather than an empty table. **Export** runs the full-precision analysis to
-`<name>.csv` beside the file and leaves everything open; if a table that is not a ptr
-summary already sits at that name — a Viewer export, say — it writes `<name>-ptr.csv`
+`<name>.csv` beside the file and leaves everything open; if a table that is not a sniff
+summary already sits at that name — a Viewer export, say — it writes `<name>-sniff.csv`
 instead of overwriting it. Opening another file closes the current one, since a large
 run holds its data in memory.
 
@@ -105,33 +109,33 @@ sheet for a file that is already open.
 
 ### Packaging the app
 
-`ptr app` freezes into something a reviewer can run with no Python installed:
+`sniff app` freezes into something a reviewer can run with no Python installed:
 
 ```bash
-pip install . pyinstaller
-pyinstaller --noconfirm packaging/ptr-app.spec
-python scripts/smoke_frozen.py dist/ptr/ptr        # proves the bundle serves a review
+uv sync --extra desktop
+uv run --with pyinstaller pyinstaller --noconfirm packaging/sniff-app.spec
+uv run python scripts/smoke_frozen.py dist/sniff/sniff        # proves the bundle serves a review
 ```
 
-On Windows that leaves `dist/ptr/ptr.exe`; on macOS it leaves `dist/Sniff.app`.
+On Windows that leaves `dist/sniff/sniff.exe`; on macOS it leaves `dist/Sniff.app`.
 Either way the bundle is the same ~40 MB of interpreter, NumPy, HDF5 and bundled
 reference data. `scripts/smoke_frozen.py` starts it against a tiny synthetic file and
-checks it really serves the review page, because `ptr --help` would pass on a bundle
+checks it really serves the review page, because `sniff --help` would pass on a bundle
 that cannot do anything else.
 
 Then wrap it the way each system expects — a `.pkg` built by `pkgbuild` and
 `productbuild` on macOS, an `.msi` built by WiX on Windows:
 
 ```bash
-version=$(python packaging/make_pkg.py --print-version)                  # macOS
-python packaging/make_pkg.py --out build/pkg --arch "$(uname -m)"
+version=$(uv run python packaging/make_pkg.py --print-version)                  # macOS
+uv run python packaging/make_pkg.py --out build/pkg --arch "$(uname -m)"
 pkgbuild --component "dist/Sniff.app" --install-location /Applications \
-  --identifier dk.samsmart.sniff --version "$version" build/pkg/ptr-component.pkg
-productbuild --distribution build/pkg/distribution.xml --package-path build/pkg dist/ptr.pkg
+  --identifier dk.samsmart.sniff --version "$version" build/pkg/sniff-component.pkg
+productbuild --distribution build/pkg/distribution.xml --package-path build/pkg dist/sniff.pkg
 
-python packaging/make_msi.py dist/ptr build/msi/ptr-app.wxs        # Windows
-candle.exe -arch x64 -out build/msi/ptr-app.wixobj build/msi/ptr-app.wxs
-light.exe  -o dist/ptr.msi build/msi/ptr-app.wixobj
+uv run python packaging/make_msi.py dist/sniff build/msi/sniff-app.wxs        # Windows
+candle.exe -arch x64 -out build/msi/sniff-app.wixobj build/msi/sniff-app.wxs
+light.exe  -o dist/sniff.msi build/msi/sniff-app.wixobj
 ```
 
 `packaging/README.md` is the guide to all of it — both command pairs in full, why
@@ -160,13 +164,13 @@ Neither installer is signed, so the first run warns. To install the macOS packag
 double-click it or install it from a terminal:
 
 ```bash
-sudo installer -pkg ptr-review-macos-arm64.pkg -target /   # → /Applications/Sniff.app
+sudo installer -pkg sniff-review-macos-arm64.pkg -target /   # → /Applications/Sniff.app
 ```
 
 An unsigned `.pkg` still trips Gatekeeper when you double-click it, and `installer` is not
 routed through Gatekeeper at all, so the terminal command works whatever the download
 flag says; clearing the flag off the downloaded package first (`xattr -dr
-com.apple.quarantine ptr-review-macos-arm64.pkg`) makes double-clicking work too. To
+com.apple.quarantine sniff-review-macos-arm64.pkg`) makes double-clicking work too. To
 remove it, delete the bundle and forget the receipt:
 
 ```bash
@@ -179,7 +183,7 @@ bundle is signed and notarised with a Developer ID or code-signing certificate, 
 spec and both installer sources are ready for without other changes.
 
 A double-clicked app opens its review page in the browser and prints nothing, since
-there is no terminal; its URL and any errors go to `~/.ptr-ms/log.txt`. A window stops
+there is no terminal; its URL and any errors go to `~/.sniff/log.txt`. A window stops
 the server when you close it; in a browser tab, where there is no window to close, the
 *Stop the app* link in the footer does it — from a terminal, Ctrl-C does the same.
 
@@ -217,7 +221,7 @@ for lab-PC local time, and is unavailable when they are missing, invalid, or out
 four-digit ISO year range (0000–9999).
 
 Set `viz.x_axis_unit` in the config, or use the matching `--x-axis-unit` option on
-`ptr viz`:
+`sniff viz`:
 
 ```json
 {
@@ -283,7 +287,7 @@ previous per-compound membership.
 The faint curve behind the Signal over time trace is the **composite VOC signal**: the
 mean of the strong m/z 40–200 traces, each divided by its own median so no single ion
 dominates. It sits near 1 while the instrument sees background and rises over a sample,
-and `ptr segments` places the intervals from it. It is a detector for *when* signal is
+and `sniff segments` places the intervals from it. It is a detector for *when* signal is
 present, not a concentration, and it is drawn against its own maximum rather than the
 axis it sits on. Its legend entry says so and doubles as a switch, remembered as
 `viz.show_disc`.
@@ -300,7 +304,7 @@ merges at 1 s/cycle and at 5 s/cycle alike, and each gap is judged against the p
 it abuts, so nothing depends on which plateau came first. An opposite-class plateau in
 between is always a boundary. `--merge-high-gap N` overrides
 the ~60 s cap with a fixed cycle count (`0` never joins high plateaus), and every join
-says what it did: per gap in `ptr segments` JSON, and as one line on the Intervals card
+says what it did: per gap in `sniff segments` JSON, and as one line on the Intervals card
 of the review app.
 
 An analysis config may include an `analyze` object with `R`, `R_phys`, `K`,
@@ -361,7 +365,7 @@ compiled from the **PTR Library** (Pagonis, Sekimoto & de Gouw, *J. Am. Soc. Mas
 Spectrom.* 2019, doi.org/10.1007/s13361-019-02209-3; tinyurl.com/PTRLibrary), with
 measured k where available (else Su-Chesnavich capture-theory k, flagged
 `k_estimated`), plus proton affinity, isomer names, and fragmentation flags. Use
-`ptr rates` to browse the bundled values. The installed package also includes the
+`sniff rates` to browse the bundled values. The installed package also includes the
 ionisation, compound-assignment, and HCN/humidity reference documents.
 
 ## Accuracy

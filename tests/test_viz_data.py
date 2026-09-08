@@ -7,7 +7,7 @@ from unittest import mock
 import h5py
 import numpy as np
 
-from ptr_ms_analysis import ptrms, viz
+from sniff import ptrms, viz
 
 
 class VizDataTest(unittest.TestCase):

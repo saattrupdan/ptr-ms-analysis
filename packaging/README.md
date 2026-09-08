@@ -4,8 +4,8 @@ Two artifacts, each built on the machine it is meant for:
 
 | Platform | Artifact | Authoring tool | Lands in |
 | --- | --- | --- | --- |
-| macOS (arm64) | `ptr-review-macos-arm64.pkg` | `pkgbuild` + `productbuild` | `/Applications/Sniff.app` |
-| Windows (x86_64) | `ptr-review-windows-x86_64.msi` | WiX v3 `candle` + `light` | `C:\Program Files\Sniff` |
+| macOS (arm64) | `sniff-review-macos-arm64.pkg` | `pkgbuild` + `productbuild` | `/Applications/Sniff.app` |
+| Windows (x86_64) | `sniff-review-windows-x86_64.msi` | WiX v3 `candle` + `light` | `C:\Program Files\Sniff` |
 
 Both carry the same payload: a PyInstaller one-dir bundle — a Python interpreter,
 NumPy, h5py, this package, and the bundled reference data — so a reviewer with no
@@ -34,7 +34,7 @@ bill of materials and a distribution script, written by `pkgbuild` and
 runs usefully on the other platform. So there is one build per platform, which
 is also what the CI matrix encodes.
 
-What *is* shared is the authoring: `packaging/ptr-app.spec` describes the bundle
+What *is* shared is the authoring: `packaging/sniff-app.spec` describes the bundle
 identically on both, and `packaging/make_msi.py` and `packaging/make_pkg.py`
 generate their installer sources from what the build produced rather than from a
 hand-maintained file list.
@@ -45,9 +45,8 @@ In an isolated environment — a virtualenv you activate, or `uv run` — with t
 version of Python you want to ship:
 
 ```bash
-pip install --upgrade pip
-pip install ".[desktop]" pyinstaller
-pyinstaller --noconfirm packaging/ptr-app.spec
+uv sync --extra desktop
+uv run --with pyinstaller pyinstaller --noconfirm packaging/sniff-app.spec
 ```
 
 `pyinstaller` is a build tool, never a runtime dependency. The `desktop` extra
@@ -58,7 +57,7 @@ window in the artifact — you do — install the extra before building, and che
 the build log says so:
 
 ```
-ptr-app.spec: bundling the desktop window (pywebview + its dependencies)
+sniff-app.spec: bundling the desktop window (pywebview + its dependencies)
 ```
 
 Installing the extra is necessary and, on its own, not enough. `desktop.py`
@@ -80,12 +79,12 @@ the WebView2 bridge on Windows are not the same list.
 Ask the running app rather than watching for a window:
 
 ```bash
-curl -s http://127.0.0.1:8765/api/state | python3 -c "import json,sys; print(json.load(sys.stdin)['surface'])"
+curl -s http://127.0.0.1:8765/api/state | uv run python -c "import json,sys; print(json.load(sys.stdin)['surface'])"
 ```
 
 `window` or `browser`. For a macOS bundle this is the only reliable signal: it is
 built `console=False`, so it writes to no terminal, and the line explaining a
-fallback never reaches anyone who is not already reading `~/.ptr-ms/log.txt`.
+fallback never reaches anyone who is not already reading `~/.sniff/log.txt`.
 `scripts/smoke_frozen.py` reads this field for that reason. On a desktop machine
 `--window` must report `window`; a CI runner with no window server may report
 `browser`, and neither counts as a crash. To see the same fact from outside,
@@ -93,12 +92,12 @@ fallback never reaches anyone who is not already reading `~/.ptr-ms/log.txt`.
 registered with the window server — a bundle that only opened a tab never appears
 there at all.
 
-That leaves `dist/Sniff.app/Contents/MacOS/ptr` on macOS and
-`dist/ptr/ptr.exe` on Windows. Check it before wrapping it:
+That leaves `dist/Sniff.app/Contents/MacOS/sniff` on macOS and
+`dist/sniff/sniff.exe` on Windows. Check it before wrapping it:
 
 ```bash
-python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/ptr"   # macOS
-python scripts/smoke_frozen.py dist/ptr/ptr.exe                              # Windows
+uv run python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/sniff"   # macOS
+uv run python scripts/smoke_frozen.py dist/sniff/sniff.exe                              # Windows
 ```
 
 The smoke script writes a tiny synthetic `.h5` file, starts the bundle against
@@ -115,13 +114,13 @@ minimum system, the architectures that may install it. `pkgbuild` writes the
 first, `productbuild` combines it with the second:
 
 ```bash
-version=$(python packaging/make_pkg.py --print-version)
-python packaging/make_pkg.py --out build/pkg --arch "$(uname -m)"
+version=$(uv run python packaging/make_pkg.py --print-version)
+uv run python packaging/make_pkg.py --out build/pkg --arch "$(uname -m)"
 pkgbuild --component "dist/Sniff.app" --install-location /Applications \
-  --identifier dk.samsmart.sniff --version "$version" build/pkg/ptr-component.pkg
+  --identifier dk.samsmart.sniff --version "$version" build/pkg/sniff-component.pkg
 productbuild --distribution build/pkg/distribution.xml \
-  --package-path build/pkg dist/ptr.pkg
-mv dist/ptr.pkg dist/ptr-review-macos-arm64.pkg
+  --package-path build/pkg dist/sniff.pkg
+mv dist/sniff.pkg dist/sniff-review-macos-arm64.pkg
 ```
 
 `--package-path` is how `productbuild` finds the payload: `distribution.xml`
@@ -157,13 +156,13 @@ machine; `--arch x86_64` then describes it.
 ```powershell
 curl.exe -sSL -o wix3.zip https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip
 Expand-Archive -Path wix3.zip -DestinationPath wix3 -Force
-python packaging/make_msi.py dist/ptr build/msi/ptr-app.wxs
-wix3/candle.exe -arch x64 -out build/msi/ptr-app.wixobj build/msi/ptr-app.wxs
-wix3/light.exe -o dist/ptr.msi build/msi/ptr-app.wixobj
-Move-Item dist/ptr.msi dist/ptr-review-windows-x86_64.msi
+uv run python packaging/make_msi.py dist/sniff build/msi/sniff-app.wxs
+wix3/candle.exe -arch x64 -out build/msi/sniff-app.wixobj build/msi/sniff-app.wxs
+wix3/light.exe -o dist/sniff.msi build/msi/sniff-app.wixobj
+Move-Item dist/sniff.msi dist/sniff-review-windows-x86_64.msi
 ```
 
-`make_msi.py` mirrors `dist/ptr` into WiX source: one component per directory,
+`make_msi.py` mirrors `dist/sniff` into WiX source: one component per directory,
 one file id and one GUID derived from each path, so the folder layout — not a
 hand-maintained list — is what gets installed, an upgrade replaces exactly the
 files that changed, and an uninstall removes exactly the ones it put there. The
@@ -190,18 +189,18 @@ data alone. Nothing is downloaded or uploaded: the app serves its page on
 
 | | macOS | Windows |
 | --- | --- | --- |
-| payload | `dist/Sniff.app` | `dist/ptr/` |
+| payload | `dist/Sniff.app` | `dist/sniff/` |
 | installs to | `/Applications/Sniff.app` | `C:\Program Files\Sniff\` |
-| the executable | `Contents/MacOS/ptr` | `ptr.exe` |
+| the executable | `Contents/MacOS/sniff` | `sniff.exe` |
 | entry point | double-click, or `open -a "Sniff"` | Start Menu → Sniff |
-| console window | none (a windowed bundle logs to `~/.ptr-ms/log.txt`) | yes, and it prints the URL there |
+| console window | none (a windowed bundle logs to `~/.sniff/log.txt`) | yes, and it prints the URL there |
 | scope | the machine, needs administrator rights | the machine (`InstallScope: perMachine`), needs administrator rights |
 
 A double-clicked bundle arrives **with no arguments at all** — that is how
-Finder and the Start Menu shortcut launch it, and the plain `ptr` command line
+Finder and the Start Menu shortcut launch it, and the plain `sniff` command line
 answers that with usage text and exit code 2. A runtime hook
 (`packaging/runtime_hook.py`) turns a bare launch inside a frozen bundle into
-`ptr app`, so a double-click opens the review app. `scripts/smoke_frozen.py`
+`sniff app`, so a double-click opens the review app. `scripts/smoke_frozen.py`
 launches the bundle bare for exactly that reason; without the hook the artifact
 installs cleanly and does nothing.
 
@@ -210,15 +209,15 @@ installs cleanly and does nothing.
 The mark is not a file in the repo. `packaging/make_icons.py` holds the geometry
 — a rounded teal tile, the mass-spectrum trace, one warm nose over the tallest
 peak — and draws it twice: as SVG (`gfx/sniff.svg`, and the same string in
-`ptr_ms_analysis/brand.py`, which is what the pages show) and as a bitmap. The
+`sniff/brand.py`, which is what the pages show) and as a bitmap. The
 spec calls it during the build, so the macOS job gets a `sniff.icns` through
 `iconutil` and the Windows job gets a `sniff.ico`, both from the same run.
 
 ```bash
-python packaging/make_icons.py --svg gfx/sniff.svg      # the drawing, as SVG
-python packaging/make_icons.py --ico /tmp/sniff.ico     # what the MSI attaches
-python packaging/make_icons.py --icns /tmp/sniff.icns   # what the .app attaches
-python packaging/make_icons.py --png /tmp/sniff.png --size 512
+uv run python packaging/make_icons.py --svg gfx/sniff.svg      # the drawing, as SVG
+uv run python packaging/make_icons.py --ico /tmp/sniff.ico     # what the MSI attaches
+uv run python packaging/make_icons.py --icns /tmp/sniff.icns   # what the .app attaches
+uv run python packaging/make_icons.py --png /tmp/sniff.png --size 512
 ```
 
 Nothing here needs an image library, which is the reason it is drawn rather than
@@ -244,14 +243,14 @@ its own kind of bug.
 
 ## Checking an artifact
 
-`ptr --help` passes on a bundle that can do nothing else, so the check is
+`sniff --help` passes on a bundle that can do nothing else, so the check is
 `scripts/smoke_frozen.py`, against **both** the built copy and the installed
 one — the build folder proves PyInstaller worked, the installed copy proves the
 installer worked:
 
 ```bash
-python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/ptr"
-python scripts/smoke_frozen.py "/Applications/Sniff.app/Contents/MacOS/ptr"
+uv run python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/sniff"
+uv run python scripts/smoke_frozen.py "/Applications/Sniff.app/Contents/MacOS/sniff"
 ```
 
 It runs three phases: `app <file> --no-browser --port N` must serve the review
@@ -268,11 +267,11 @@ contained the word as well. That is how a browser-only artifact passed for green
 To look inside a package without installing it — what it will write, and where:
 
 ```bash
-pkgutil --expand dist/ptr-review-macos-arm64.pkg /tmp/ptrpkg
-lsbom /tmp/ptrpkg/ptr-component.pkg/Bom | head     # every path, relative to /Applications
-head -3 /tmp/ptrpkg/ptr-component.pkg/PackageInfo   # identifier, version, install-location
-pkgutil --check-signature dist/ptr-review-macos-arm64.pkg   # "Status: no signature"
-spctl --assess --type open --context context:primary-signature -vv dist/ptr-review-macos-arm64.pkg
+pkgutil --expand dist/sniff-review-macos-arm64.pkg /tmp/sniffpkg
+lsbom /tmp/sniffpkg/sniff-component.pkg/Bom | head     # every path, relative to /Applications
+head -3 /tmp/sniffpkg/sniff-component.pkg/PackageInfo   # identifier, version, install-location
+pkgutil --check-signature dist/sniff-review-macos-arm64.pkg   # "Status: no signature"
+spctl --assess --type open --context context:primary-signature -vv dist/sniff-review-macos-arm64.pkg
 ```
 
 `pkgutil --expand` wants a destination that does not exist yet. The `Bom` is also what
@@ -287,8 +286,8 @@ The last command is Gatekeeper's own opinion, and today it always answers
 ## Installing and removing a `.pkg` from the command line
 
 ```bash
-installer -pkginfo -pkg dist/ptr-review-macos-arm64.pkg   # the product title in there
-sudo installer -pkg dist/ptr-review-macos-arm64.pkg -target /
+installer -pkginfo -pkg dist/sniff-review-macos-arm64.pkg   # the product title in there
+sudo installer -pkg dist/sniff-review-macos-arm64.pkg -target /
 ```
 
 That is the whole install; there is no drag-to-Applications step, and the path
@@ -303,7 +302,7 @@ home and moves the installed payload onto it — `/Applications` stays empty, an
 `install.log` says so in plain sight:
 
 ```text
-PackageKit: Applications/PTR-MS Review.app relocated to Users/you/work/…/dist/PTR-MS Review.app
+PackageKit: Applications/Sniff.app relocated to Users/you/work/…/dist/PTR-MS Review.app
 PackageKit: Touched bundle /Users/you/work/…/dist/Sniff.app
 ```
 
@@ -315,12 +314,12 @@ ask the filesystem rather than the exit status:
 
 ```bash
 mv "dist/Sniff.app" "$RUNNER_TEMP/built-app"
-sudo installer -pkg dist/ptr.pkg -target / -verboseR
+sudo installer -pkg dist/sniff.pkg -target / -verboseR
 for _ in $(seq 1 60); do
   [ -d "/Applications/Sniff.app" ] && break
   sleep 0.5
 done
-test -x "/Applications/Sniff.app/Contents/MacOS/ptr" || exit 1
+test -x "/Applications/Sniff.app/Contents/MacOS/sniff" || exit 1
 ``` `sudo installer` is what CI runs, and it is worth running once
 even if you mean to double-click, because it fails loudly and prints the
 destination. To see what a machine already has:
@@ -340,10 +339,10 @@ sudo pkgutil --forget dk.samsmart.sniff   # drop the receipt too
 ```
 
 To install into a scratch root instead of a real system, pass a directory:
-`sudo installer -pkg dist/ptr.pkg -target /tmp/ptrroot` builds the tree there rather
+`sudo installer -pkg dist/sniff.pkg -target /tmp/sniffroot` builds the tree there rather
 than in `/Applications`, and writes its receipts into that image rather than your
 system's. It still needs root, so it is not a way to avoid `sudo`. The Windows
-equivalent is `msiexec /i dist\ptr.msi /qn` to install and `msiexec /x dist\ptr.msi /qn`
+equivalent is `msiexec /i dist\sniff.msi /qn` to install and `msiexec /x dist\sniff.msi /qn`
 to remove it, with the app in `C:\Program Files\Sniff`.
 
 ## First run on a clean machine
@@ -355,8 +354,8 @@ the `.pkg` asks Gatekeeper about it; an unsigned package fails that check with
 "cannot be verified" or "unidentified developer". Two ways through:
 
 ```bash
-sudo installer -pkg ptr-review-macos-arm64.pkg -target /    # not routed through Gatekeeper
-xattr -dr com.apple.quarantine ptr-review-macos-arm64.pkg    # or clear the flag, then double-click
+sudo installer -pkg sniff-review-macos-arm64.pkg -target /    # not routed through Gatekeeper
+xattr -dr com.apple.quarantine sniff-review-macos-arm64.pkg    # or clear the flag, then double-click
 xattr -dr com.apple.quarantine "/Applications/Sniff.app"
 ```
 
@@ -390,10 +389,10 @@ today. Concretely, a build is missing:
   with the hardened runtime. PyInstaller already ad-hoc signs it (`codesign -dv`
   reports `Signature=adhoc`, `Identifier=dk.samsmart.sniff`), which is enough for
   arm64 macOS to run it and nothing like enough for Gatekeeper.
-- `productsign --sign "Developer ID Installer: …" dist/ptr.pkg dist/ptr-signed.pkg`
+- `productsign --sign "Developer ID Installer: …" dist/sniff.pkg dist/sniff-signed.pkg`
   — sign the product archive itself.
-- `xcrun notarytool submit dist/ptr-signed.pkg --keychain-profile … --wait` and
-  then `xcrun stapler staple dist/ptr-signed.pkg` — notarize it, so the warning
+- `xcrun notarytool submit dist/sniff-signed.pkg --keychain-profile … --wait` and
+  then `xcrun stapler staple dist/sniff-signed.pkg` — notarize it, so the warning
   is gone on a machine with no network view of your certificate.
 - Authenticode on the `.msi`, and `signtool`/`msiexec`-friendly timestamps.
 

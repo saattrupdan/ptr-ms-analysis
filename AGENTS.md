@@ -12,36 +12,28 @@ CLI reference.
 
 - Python 3.9 or newer, packaged with setuptools through `pyproject.toml`.
 - Runtime dependencies: NumPy and h5py.
-- The `ptr` console entry point resolves to `ptr_ms_analysis.analyze:main`.
+- The `sniff` console entry point resolves to `sniff.analyze:main`.
 - The review UI is generated and served by Python; there is no separate frontend build.
 
 ## Layout
 
 | Path | Purpose |
 | --- | --- |
-| `src/ptr_ms_analysis/analyze.py` | CLI parsing, command handlers, CSV output, and orchestration. |
-| `src/ptr_ms_analysis/ptrms.py` | HDF5 loading, extraction, segmentation, and quantification. |
-| `src/ptr_ms_analysis/formula_id.py` | Formula enumeration and candidate scoring. |
-| `src/ptr_ms_analysis/viz.py` | Self-contained browser review UI and localhost server. |
-| `src/ptr_ms_analysis/gen_rate_constants.py` | Rebuilds the bundled rate-constant JSON. |
-| `src/ptr_ms_analysis/reference/` | Scientific references and package data shipped with the CLI. |
+| `src/sniff/analyze.py` | CLI parsing, command handlers, CSV output, and orchestration. |
+| `src/sniff/ptrms.py` | HDF5 loading, extraction, segmentation, and quantification. |
+| `src/sniff/formula_id.py` | Formula enumeration and candidate scoring. |
+| `src/sniff/viz.py` | Self-contained browser review UI and localhost server. |
+| `src/sniff/gen_rate_constants.py` | Rebuilds the bundled rate-constant JSON. |
+| `src/sniff/reference/` | Scientific references and package data shipped with the CLI. |
 | `packaging/` | PyInstaller spec and frozen-entry point; the `package` workflow builds a folder bundle per OS. |
 
 ## Running it
 
-Install the checkout in an isolated environment so its CLI and dependencies stay
- isolated from other packages:
+For development, use the checkout's project environment:
 ```bash
-pipx install --editable .
-ptr --help
-ptr rates water
-```
-
-For development without a persistent installation, run commands from this directory:
-
-```bash
-uvx --from . ptr --help
-uvx --from . ptr rates water
+uv sync
+uv run sniff --help
+uv run sniff rates water
 ```
 
 Use real IoniTOF data only when exercising file-dependent commands. `.h5` files can be
@@ -58,29 +50,26 @@ in addition to the package's normal Python dependencies:
 uv run pytest
 uv run ruff check --select F,I src tests scripts
 uv run python scripts/smoke_viz.py
-uv run ptr --help
-uv run ptr inspect --help
-uv run ptr peaks --help
-uv run ptr segments --help
-uv run ptr analyze --help
-uv run ptr viz --help
-uv run ptr app --help
-uv run ptr calibrate --help
-uv run ptr compare --help
-uv run ptr rates h2o    # the bundled library has no water entry; h2o returns matches
+uv run sniff --help
+uv run sniff inspect --help
+uv run sniff peaks --help
+uv run sniff segments --help
+uv run sniff analyze --help
+uv run sniff viz --help
+uv run sniff app --help
+uv run sniff calibrate --help
+uv run sniff compare --help
+uv run sniff rates h2o    # the bundled library has no water entry; h2o returns matches
 uv build
 ```
-
-Use `uv run`, not `uvx --from .`: uv caches a wheel built from a directory per version,
-so `uvx --from . ptr <cmd>` can report that a subcommand added this week does not exist.
 
 For scientific or HDF5-processing changes, also run the affected command on a suitable
 local fixture and inspect its JSON diagnostics or CSV output. Do not commit measurement
 files, generated review HTML, configs, or result CSVs.
 
 Packaging is checked separately because it is slow and pulls its own toolchain:
-`uv run --with pyinstaller pyinstaller --noconfirm packaging/ptr-app.spec` then
-`uv run python scripts/smoke_frozen.py dist/ptr/ptr`, which starts the frozen bundle and
+`uv run --with pyinstaller pyinstaller --noconfirm packaging/sniff-app.spec` then
+`uv run python scripts/smoke_frozen.py dist/sniff/sniff`, which starts the frozen bundle and
 asserts it serves the review page. Run it when `packaging/`, dependencies, or the app
 server change; the Windows half of it can only be verified on a Windows runner.
 
@@ -100,16 +89,16 @@ server change; the Windows half of it can only be verified on a Windows runner.
 
 ## Gotchas
 
-- `src/ptr_ms_analysis/` is the installable package. Keep package-internal imports
+- `src/sniff/` is the installable package. Keep package-internal imports
   relative and use `importlib.resources` for bundled data; do not reintroduce flat
   top-level modules.
-- Install with `pipx --editable` or another isolated environment. The public command is
-  `ptr`; package modules are imported as `ptr_ms_analysis.*`.
-- `src/ptr_ms_analysis/reference/rate_constants.json` is generated from
-  `src/ptr_ms_analysis/reference/ptrlibrary.csv` by
-  `uv run python -m ptr_ms_analysis.gen_rate_constants`. Change the source or generator,
+- Run checkout commands with `uv run sniff`; package modules are imported as
+  `sniff.*`.
+- `src/sniff/reference/rate_constants.json` is generated from
+  `src/sniff/reference/ptrlibrary.csv` by
+  `uv run python -m sniff.gen_rate_constants`. Change the source or generator,
   regenerate the JSON, and review both files together rather than hand-editing entries.
-- Reference Markdown, CSV, and JSON files under `src/ptr_ms_analysis/reference/` are
+- Reference Markdown, CSV, and JSON files under `src/sniff/reference/` are
   package data. Keep `pyproject.toml` in sync when adding a new bundled file type.
 - `viz` reviews an already curated config; it must not silently perform peak or segment
   detection. The delivered CSV is always produced by the analysis path.

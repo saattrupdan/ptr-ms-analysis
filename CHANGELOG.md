@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `ptr-ms-analysis` are documented here.
+All notable changes to `sniff` are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **The product is now Sniff.** The installable package and source directory are
+  `sniff`, and the command is `sniff`. Desktop state lives under `~/.sniff`; existing
+  `~/.ptr-ms/recent.json` and beside-file `.ptr.json` data remain readable and are never
+  deleted. Installer payloads and generated artefacts use the Sniff names while the
+  stable macOS bundle identifier, MSI upgrade code and component identities remain
+  unchanged.
 - **The Sniff opening screen is now a focused local signal desk.** It keeps path entry,
   Browse and the open-review affordance, but leaves recent-file history to its API and
   storage layer rather than displaying it in the UI.
@@ -33,9 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   open. `GET /api/state` gained `progress` and `cancellable`, and `POST /cancel` stops
   an open in flight (and is a no-op when there is none). Analysis is untouched: with no
   callbacks attached, `extract_traces` produces numerically identical traces.
-- **The app can open in its own desktop window.** `ptr app --window` runs the review in
+- **The app can open in its own desktop window.** `sniff app --window` runs the review in
   a single window with no address bar, `pywebview` being an extra
-  (`pip install 'ptr-ms-analysis[desktop]'`) rather than a dependency, and a packaged
+  (`uv sync --extra desktop`) rather than a dependency, and a packaged
   bundle uses the window by default because a double-clicked app has no terminal to read
   an address out of. Closing the window stops the server and **Browse this computer…**
   uses the window's own dialog when there is one; a
@@ -51,11 +57,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   a single-column layout with proper type, focus rings, a dark scheme and a progress bar
   while a run loads.
 - **Double-clicking the bundled app opens it.** Finder starts the bundle with no
-  arguments, and the plain `ptr` command line answers that with usage text and exit code
+  arguments, and the plain `sniff` command line answers that with usage text and exit code
   2 — invisibly, in a windowed bundle. A runtime hook turns a bare launch inside a bundle
-  into `ptr app`, and when no browser opens the address is written to
-  `~/.ptr-ms/log.txt` rather than vanishing.
-- **Packaging: `packaging/ptr-app.spec`, `packaging/make_msi.py`, `scripts/smoke_frozen.py`,
+  into `sniff app`, and when no browser opens the address is written to
+  `~/.sniff/log.txt` rather than vanishing.
+- **Packaging: `packaging/sniff-app.spec`, `packaging/make_msi.py`, `scripts/smoke_frozen.py`,
   and a `package` workflow.** PyInstaller builds a bundle a reviewer can run with no
   Python installed (one-dir by choice — one-file unpacks into `%TEMP%` on every start and
   is what antivirus tools object to), wrapped as a `.app` that a `.pkg` installs on
@@ -67,22 +73,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   PyInstaller cannot cross-compile, so the workflow builds on native macOS and Windows
   runners and uploads one installer per platform, with a `v*` tag publishing them as a
   GitHub Release. The smoke script starts the finished bundle against a tiny synthetic
-  file and fails unless it serves the review page, since `ptr --help` would pass on a
+  file and fails unless it serves the review page, since `sniff --help` would pass on a
   bundle that can do nothing else.
 - **"Stop the app" on the start screen, and a log file for bundle runs.** A double-clicked
   app has no terminal to press Ctrl-C in, so the page can shut the server down itself
   (`POST /shutdown`, and `SIGTERM` now quits the same way); with no console, its URL and
-  errors are appended to `~/.ptr-ms/log.txt`.
-- **App mode: `ptr app`.** A persistent local review app for people who want the tool
+  errors are appended to `~/.sniff/log.txt`.
+- **App mode: `sniff app`.** A persistent local review app for people who want the tool
   rather than the chat. It opens on a start screen of recent files, takes a file from
   there, and stays up between files. Each file's config lives beside it under the same
-  stem (`ptr.h5` → `ptr.json`, with an existing `<stem>-analysis-config.json` honoured),
+  stem (`sniff.h5` → `sniff.json`, with an existing `<stem>-analysis-config.json` honoured),
   so reopening a reviewed file returns exactly what was saved; a file that has never been
   reviewed gets the deterministic peak and interval pipeline written to that path, with a
   checklist that says plainly that nothing has been curated yet and which calls are still
   a human's. The primary button is **Export** instead of Done: it writes `<stem>.csv`
   beside the file and leaves the app open for more work. With `--agent URL` (or
-  `PTR_AGENT_URL`) a newly generated config is offered to an agent for curation first,
+  `SNIFF_AGENT_URL`) a newly generated config is offered to an agent for curation first,
   and the deterministic config is kept — visibly — whenever that endpoint is missing,
   slow or unhelpful. The server binds to 127.0.0.1 and the only outbound request is to
   the endpoint the user named.
@@ -106,15 +112,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - **The desktop app is called Sniff.** `PTR-MS Review` described an instrument and an
   activity, which is right for a command line and bland for an icon in a Dock. The name
-  and the mark now live in `ptr_ms_analysis/brand.py` instead of being spelled four ways,
+  and the mark now live in `sniff/brand.py` instead of being spelled four ways,
   and the mark itself is drawn by `packaging/make_icons.py` — a teal tile, the
   mass-spectrum trace, one warm nose above the tallest peak — which also rasterises it
   into the `.icns` and `.ico` the installers attach, so the Dock icon is no longer the
   generic page Finder invented. On macOS the bundle identifier changed with the name, so
   the `.pkg` installs alongside an old copy rather than over it; `packaging/README.md`
   gives the one command that removes it. The Windows upgrade code did not change, so
-  that one does upgrade in place. The command remains `ptr` and the distribution remains
-  `ptr-ms-analysis`.
+  that one does upgrade in place. The command remains `sniff` and the distribution remains
+  `sniff`.
 
 - **The Peaks sidebar says less.** Its heading is just **Peaks** — no dot and no
   `· sample_03` suffix; the compound name and the row of numbered boxes above the list
@@ -140,8 +146,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   checkout gives the same XML twice — and the `package` workflow pairs it with
   `pkgbuild --component … --install-location /Applications`, then installs the result
   with `sudo installer -pkg` and smokes
-  `/Applications/PTR-MS Review.app/Contents/MacOS/ptr`, exactly as the Windows job smokes
-  both `dist/ptr` and `C:\Program Files\PTR-MS Review`. The guide has both command pairs,
+  `/Applications/Sniff.app/Contents/MacOS/sniff`, exactly as the Windows job smokes
+  both `dist/sniff` and `C:\Program Files\Sniff`. The guide has both command pairs,
   the reason WiX v3.14 is pinned (v6 and later are gated behind the Open Source
   Maintenance Fee), how to inspect a `.pkg` (`lsbom`, `pkgutil`) and remove one (there is
   no uninstaller), what a double-clicked bundle gets, and what is still missing: no
@@ -164,13 +170,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   background intervals where a reviewer curated 12 and 10 by hand, and where the length
   rule at 30 cycles gave 17 and 7 — it joined two samples whenever the gap between them
   happened to be short. `--merge-high-gap N` survives as a cap override and
-  `0` still means never join high plateaus; `ptr segments --merge-high-gap` and
-  `ptr analyze --merge-high-gap` now default to the automatic test instead of off.
+  `0` still means never join high plateaus; `sniff segments --merge-high-gap` and
+  `sniff analyze --merge-high-gap` now default to the automatic test instead of off.
 - **Every merge explains itself.** `merged_gaps` now carries, per gap, its length, the
   gap's minimum and maximum level and a reason (`level held`, `fell to baseline`,
   `adjacent`, or `length only` on the legacy path), and the review app says the same in
   one line on the Intervals card — `joined 2 wobbles, level held (≤ 28 cycles)` — via
-  the config's `merge_note`. The reviewer in `ptr app` never sees a command line, so a
+  the config's `merge_note`. The reviewer in `sniff app` never sees a command line, so a
   silent join of their intervals would have been unfalsifiable. A merged interval's
   level is the mean of its plateaus weighted by plateau cycles, so the cycles between
   them cannot drag the reported level toward the baseline.
@@ -205,7 +211,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   nothing in an app that has no tab to close — and a failed export left an error card
   with no way out at all. Revealing the CSV now closes the dialog and returns you to the
   review, **Keep reviewing** closes it without revealing, and both routes leave the
-  **Export** button ready to run again. The one-shot `ptr viz` flow is unchanged.
+  **Export** button ready to run again. The one-shot `sniff viz` flow is unchanged.
 
 - **The installed app opens its own window again.** A packaged bundle was opening a
   browser tab and saying nothing useful about it. `desktop.py` reaches pywebview
@@ -319,7 +325,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Initial standalone Python package for processing IONICON IoniTOF PTR-MS and
   PTR-TOF `.h5` files.
-- `ptr` command-line interface with commands for inspection, peak detection,
+- `sniff` command-line interface with commands for inspection, peak detection,
   segmentation, analysis, visual review, calibration, comparison, and rate
   constants.
 - Browser-based review workflow for curating detected peaks and time segments.

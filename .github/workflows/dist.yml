@@ -33,13 +33,13 @@ jobs:
             label: windows-x86_64
             # WiX needs the .NET SDK, which the Windows runner image already has.
             installer: msi
-            exe: dist/ptr/ptr.exe
+            exe: dist/sniff/sniff.exe
           - os: macos-latest
             label: macos-arm64
             installer: pkg
-            exe: dist/Sniff.app/Contents/MacOS/ptr
+            exe: dist/Sniff.app/Contents/MacOS/sniff
             # An Intel Mac build would be a third entry: { os: macos-13,
-            # label: macos-x86_64, exe: dist/Sniff.app/Contents/MacOS/ptr }.
+            # label: macos-x86_64, exe: dist/Sniff.app/Contents/MacOS/sniff }.
 
     steps:
       - uses: actions/checkout@v4
@@ -56,7 +56,7 @@ jobs:
           pip install ".[desktop]" pyinstaller
 
       - name: Build the bundle
-        run: pyinstaller --noconfirm packaging/ptr-app.spec
+        run: pyinstaller --noconfirm packaging/sniff-app.spec
 
       - name: Check the bundle actually serves a review
         run: python scripts/smoke_frozen.py "${{ matrix.exe }}"
@@ -70,16 +70,16 @@ jobs:
           # condition on this project's builds.
           curl.exe -sSL -o wix3.zip https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip
           Expand-Archive -Path wix3.zip -DestinationPath wix3 -Force
-          python packaging/make_msi.py dist/ptr build/msi/ptr-app.wxs
-          wix3/candle.exe -arch x64 -out build/msi/ptr-app.wixobj build/msi/ptr-app.wxs
-          wix3/light.exe -o dist/ptr.msi build/msi/ptr-app.wixobj
+          python packaging/make_msi.py dist/sniff build/msi/sniff-app.wxs
+          wix3/candle.exe -arch x64 -out build/msi/sniff-app.wixobj build/msi/sniff-app.wxs
+          wix3/light.exe -o dist/sniff.msi build/msi/sniff-app.wixobj
 
       - name: Check the installed app, not just the built one
         if: matrix.installer == 'msi'
         run: |
-          $p = Start-Process msiexec.exe -ArgumentList '/i',"$PWD\dist\ptr.msi",'/qn','/norestart' -Wait -PassThru
+          $p = Start-Process msiexec.exe -ArgumentList '/i',"$PWD\dist\sniff.msi",'/qn','/norestart' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "silent install failed with exit code $($p.ExitCode)" }
-          python scripts/smoke_frozen.py "C:\Program Files\Sniff\ptr.exe"
+          python scripts/smoke_frozen.py "C:\Program Files\Sniff\sniff.exe"
 
       - name: Build the macOS package
         if: matrix.installer == 'pkg'
@@ -90,14 +90,14 @@ jobs:
           version=$(python packaging/make_pkg.py --print-version)
           python packaging/make_pkg.py --out build/pkg --arch "$(uname -m)"
           pkgbuild --component "dist/Sniff.app" --install-location /Applications \
-            --identifier dk.samsmart.sniff --version "$version" build/pkg/ptr-component.pkg
+            --identifier dk.samsmart.sniff --version "$version" build/pkg/sniff-component.pkg
           productbuild --distribution build/pkg/distribution.xml \
-            --package-path build/pkg dist/ptr.pkg
+            --package-path build/pkg dist/sniff.pkg
 
       - name: Check the installed app, not just the built one
         if: matrix.installer == 'pkg'
         run: |
-          installer -pkginfo -pkg dist/ptr.pkg
+          installer -pkginfo -pkg dist/sniff.pkg
           # Two things have to be true before this proves anything. The built
           # bundle must be out of the way: the smoke above ran it, so LaunchServices
           # knows that bundle id at that path, and installd will then 'relocate' the
@@ -107,7 +107,7 @@ jobs:
           LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
           "$LSREGISTER" -u "$PWD/dist/Sniff.app" 2>/dev/null || true
           mv "dist/Sniff.app" "$RUNNER_TEMP/built-app"
-          sudo installer -pkg dist/ptr.pkg -target / -verboseR
+          sudo installer -pkg dist/sniff.pkg -target / -verboseR
           installed=""
           for _ in $(seq 1 60); do
             installed=$(find /Applications -maxdepth 1 -name "Sniff.app" | head -1)
@@ -120,17 +120,17 @@ jobs:
             exit 1
           fi
           echo "installed at: $installed"
-          python scripts/smoke_frozen.py "$installed/Contents/MacOS/ptr"
+          python scripts/smoke_frozen.py "$installed/Contents/MacOS/sniff"
 
       # Named after the installer exists: naming it before building it is a mistake
       # worth remembering, because the smoke test above passes either way.
       - name: Name it
-        run: mv "dist/ptr.${{ matrix.installer }}" "dist/ptr-review-${{ matrix.label }}.${{ matrix.installer }}"
+        run: mv "dist/sniff.${{ matrix.installer }}" "dist/sniff-review-${{ matrix.label }}.${{ matrix.installer }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ptr-review-${{ matrix.label }}
-          path: dist/ptr-review-${{ matrix.label }}.${{ matrix.installer }}
+          name: sniff-review-${{ matrix.label }}
+          path: dist/sniff-review-${{ matrix.label }}.${{ matrix.installer }}
           if-no-files-found: error
 
   release:
@@ -141,7 +141,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: ptr-review-*
+          pattern: sniff-review-*
           path: bundles
 
       - name: Attach the installers to the tag
