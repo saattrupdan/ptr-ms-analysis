@@ -64,7 +64,7 @@ name is in `sniff/brand.py`, and the mark next to it is drawn by
 `packaging/make_icons.py`, which also builds the `.icns` and `.ico` the installers carry.
 
 ```bash
-sniff app                        # start screen: type a path or browse for a run
+sniff app                        # start screen: browse for a run
 sniff app FILE.h5 --no-browser   # open one file immediately, in a browser tab
 sniff app --window               # force the desktop window
 sniff app --port 8791            # fixed port (it probes upward if the port is taken)
@@ -90,14 +90,15 @@ summary already sits at that name — a Viewer export, say — it writes `<name>
 instead of overwriting it. Opening another file closes the current one, since a large
 run holds its data in memory.
 
-The opening screen is deliberately uncluttered: type a path or use **Browse this
-computer…** to choose a run. If a file is already open, it appears once in its own
-panel with **Open the review**. The app still remembers opened files in its local recent
-file store for API clients and diagnostics, but does not display that history in the
-opening screen. The dialog belongs to the computer rather than the tab, so it can appear
-behind the browser window. Files are never uploaded anywhere: the page talks only to
-`127.0.0.1`.
-
+The opening screen is deliberately uncluttered: use **Browse this computer…** to
+choose a run in the native file dialog. Paths cannot be typed or pasted into the start
+screen. If a file is already open, it appears once in its own panel with **Open the
+review**. The app still remembers opened files in its local recent file store for API
+clients and diagnostics, but does not display that history in the opening screen. The
+dialog belongs to the computer rather than the tab, so it can appear behind the browser
+window. If native file browsing is unavailable, the start screen reports that clearly;
+there is no path-field fallback. Files are never uploaded anywhere; the page talks only
+to `127.0.0.1`.
 Opening a file happens behind a full-screen sheet rather than as a line of text: the
 file's name, what the app is doing, a bar that tracks the cycles it has read, a rough
 ETA and **Cancel**. The bar is driven by the work itself — on the 2 GB fixture reading

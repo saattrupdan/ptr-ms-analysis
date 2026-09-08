@@ -640,7 +640,6 @@ h1{margin:0;font-size:20px;font-weight:650;letter-spacing:-.015em}
 .pick{padding:28px 30px;text-align:left}
 .pick h2{margin:0 2px 4px;font-size:18px;font-weight:650;letter-spacing:-.02em}
 .pick p{margin:0 0 18px;color:var(--mut);font-size:13px}
-.pathlabel{display:block;margin:0 0 7px;font-size:12px;font-weight:650;color:var(--fg)}
 .quick{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:18px;color:var(--mut);font-size:11px}
 .quick span{display:inline-flex;align-items:center;gap:5px}
 .quick i{width:6px;height:6px;border-radius:50%;background:var(--peach)}
@@ -650,14 +649,8 @@ h1{margin:0;font-size:20px;font-weight:650;letter-spacing:-.015em}
 .btn:disabled{opacity:.55;cursor:default;filter:none}
 .btn.sec{background:transparent;color:var(--fg);border:1px solid var(--line);font-weight:500}
 .btn.sec:hover{background:var(--sunk)}
-.row{display:flex;gap:8px;max-width:470px;margin:0 auto}
-input[type=text]{flex:1;min-width:0;padding:11px 12px;background:var(--sunk);
-  color:var(--fg);border:1px solid var(--line);border-radius:10px;font:13px/1.4 inherit}
-input[type=text]:focus-visible,.btn:focus-visible,.link:focus-visible{outline:2px solid var(--ring);
+.btn:focus-visible,.link:focus-visible{outline:2px solid var(--ring);
   outline-offset:2px}
-.or{display:flex;align-items:center;gap:10px;margin:16px auto;max-width:470px;
-  color:var(--mut);font-size:11px;letter-spacing:.07em;text-transform:uppercase}
-.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
 .meta{flex:none;text-align:right;font-size:12px;color:var(--mut)}
 .meta em{display:block;font-style:normal}
 .note{margin-top:18px;padding:11px 14px;border-radius:10px;background:var(--sunk);
@@ -709,8 +702,8 @@ html.lock,html.lock body{overflow:hidden}
 @media(prefers-reduced-motion:reduce){.ovmark{animation:none;border-top-color:var(--line)}
   .pbar i{transition:none}}
 @media(max-width:620px){main{padding-top:28px}.hero{grid-template-columns:1fr;gap:20px}
-  .spectrum{min-height:125px}.spectrum svg{height:100px}.pick{padding:23px 20px}.row{flex-direction:column}
-  .row .btn{width:100%}.quick{margin-top:16px}
+  .spectrum{min-height:125px}.spectrum svg{height:100px}.pick{padding:23px 20px}
+  .quick{margin-top:16px}
   .now{align-items:flex-start;row-gap:10px;flex-wrap:wrap}
   .now .txt,.now .meta{flex:1 1 100%}
   .now b,.now .sub{white-space:normal;overflow-wrap:anywhere;text-overflow:clip}
@@ -742,16 +735,9 @@ html.lock,html.lock body{overflow:hidden}
 
   <div class="card pick">
     <h2>Open an IONICON run</h2>
-    <p>Choose a file on this computer, or type its path below.</p>
-    <label class="pathlabel" for="path">Path to an HDF5 run</label>
-    <div class="row">
-      <input id="path" type="text" placeholder="/path/to/run.h5" spellcheck="false"
-             autocomplete="off" aria-describedby="path-help">
-      <button class="btn" id="go" type="button">Open run</button>
-    </div>
-    <div class="or">or</div>
-    <button class="btn sec" id="browse" type="button">Browse this computer&hellip;</button>
-    <div class="quick" id="path-help"><span><i aria-hidden="true"></i>Runs locally</span>
+    <p>Choose an HDF5 run with the native file dialog on this computer.</p>
+    <button class="btn" id="browse" type="button">Browse this computer&hellip;</button>
+    <div class="quick" id="quick-help"><span><i aria-hidden="true"></i>Runs locally</span>
       <span><i aria-hidden="true"></i>No uploads</span><span><i aria-hidden="true"></i>HDF5 input</span>
     </div>
   </div>
@@ -812,7 +798,7 @@ async function openFile(path){
   // Ask and start watching in the same breath: the server sets "loading" on its own
   // thread, so a poll that arrives first would otherwise show the old screen and
   // wait two and a half seconds before the sheet went up.
-  $('#path').value=''; ask=path; watching=true; resetEta(); showSheet(); tick();
+  ask=path; watching=true; resetEta(); showSheet(); tick();
 }
 
 // ---- the sheet an open runs behind -----------------------------------------
@@ -931,7 +917,7 @@ async function tick(){
       return;
     }
     if(s.status==='error')failSheet(s.error||'Could not open that file.');
-    else{closeSheet(); note('Opening cancelled.',false,false,true); $('#path').focus();}
+    else{closeSheet(); note('Opening cancelled.',false,false,true);}
   }
   if(!watching&&!failed){
     if(s.status==='exporting'){
@@ -946,8 +932,6 @@ async function tick(){
   setTimeout(tick, watching||s.status==='exporting'?900:2500);
 }
 
-$('#go').onclick=()=>{const p=$('#path').value.trim(); if(p)openFile(p);};
-$('#path').onkeydown=ev=>{if(ev.key==='Enter'){ev.preventDefault();$('#go').click();}};
 $('#browse').onclick=async()=>{
   const btn=$('#browse'); btn.disabled=true;
   note('Choose a file in the dialog that just opened on this computer.');
@@ -956,11 +940,10 @@ $('#browse').onclick=async()=>{
   btn.disabled=false;
   const body=r?await r.json().catch(()=>({})):{};
   if(!r||!r.ok){
-    note((body&&body.error)||'No file dialog here — type the path instead.',true,false,true);
-    return $('#path').focus();
+    return note((body&&body.error)||'Native file browsing is unavailable.',true,false,true);
   }
   if(body.cancelled)return note('');
-  $('#path').value=body.path; openFile(body.path);
+  openFile(body.path);
 };
 $('#cancel').onclick=async()=>{
   // Disable it here rather than wait for the poll to say the open is over: a second
@@ -969,7 +952,7 @@ $('#cancel').onclick=async()=>{
   $('#ovstage').textContent='Cancelling';
   try{await fetch('/cancel',{method:'POST'});}catch(e){}
 };
-$('#ovback').onclick=()=>{closeSheet(); note(''); $('#path').focus();};
+$('#ovback').onclick=()=>{closeSheet(); note('');};
 $('#quit').onclick=async ev=>{
   ev.preventDefault();
   const ok=await fetch('/shutdown',{method:'POST'}).then(r=>r.ok).catch(()=>false);
@@ -1074,7 +1057,7 @@ def _pick_file():
                 cmd = [tool] + extra
                 break
         else:
-            raise RuntimeError("no file dialog here; type the path instead")
+            raise RuntimeError("Native file browsing is unavailable.")
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     return done.stdout.strip() or None
 
@@ -1085,7 +1068,7 @@ def _browse():
 
     A desktop window owns a real dialog, and that is the one the reviewer is looking
     at. A browser tab owns none, so the machine is asked instead — its dialog can land
-    behind the window, which is normal and still better than typing a path.
+    behind the window, which is normal for a browser-based start screen.
     """
     window = desktop.current_window()
     if window is not None:
