@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Smoke-test a packaged bundle: does the frozen app actually serve a review?
 
-``ptr --help`` only proves the bootloader found argparse, so this drives the thing
+``sniff --help`` only proves the bootloader found argparse, so this drives the thing
 that matters — the app opening a real ``.h5`` file and serving the review page — with
 nothing but a synthetic file and a few seconds of patience.
 
-Usage:  python scripts/smoke_frozen.py path/to/dist/ptr/ptr.exe
-        python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/ptr"
+Usage:  python scripts/smoke_frozen.py path/to/dist/sniff/sniff.exe
+        python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/sniff"
 """
 
 from __future__ import annotations
@@ -126,11 +126,11 @@ def main(argv) -> int:
         print(f"frozen app smoke: FAIL — no such executable: {exe}", file=sys.stderr)
         return 1
 
-    work = Path(tempfile.mkdtemp(prefix="ptr-frozen-smoke-"))
+    work = Path(tempfile.mkdtemp(prefix="sniff-frozen-smoke-"))
     h5 = make_h5(work / "run.h5")
     port = free_port()
     cmd = [str(exe), "app", str(h5), "--no-browser", "--port", str(port)]
-    env = dict(os.environ, PTR_RECENT_PATH=str(work / "recent.json"))
+    env = dict(os.environ, SNIFF_RECENT_PATH=str(work / "recent.json"))
     print(f"frozen app smoke: {' '.join(cmd)}", file=sys.stderr)
 
     proc = subprocess.Popen(

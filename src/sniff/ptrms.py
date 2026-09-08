@@ -47,7 +47,7 @@ def load_rate_constants(path=None):
     try:
         if path is None:
             resource = (
-                resources.files("ptr_ms_analysis")
+                resources.files("sniff")
                 .joinpath("reference")
                 .joinpath("rate_constants.json")
             )

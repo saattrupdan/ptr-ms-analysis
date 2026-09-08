@@ -18,7 +18,7 @@ from unittest import mock
 import h5py
 import numpy as np
 
-from ptr_ms_analysis import formula_id, ptrms, viz
+from sniff import formula_id, ptrms, viz
 
 
 def _candidate(formula: str, name: str) -> dict:
@@ -156,7 +156,7 @@ def test_sample_selection_is_inert_in_the_summary_analysis():
     Until per-sample output exists it must stay metadata: a compound selected for
     at least one sample is summarised exactly as it was before the field existed.
     """
-    from ptr_ms_analysis import analyze
+    from sniff import analyze
 
     plain = {"mz": 100.0, "label": "analyte", "window": 0.4, "use": True}
     tagged = dict(plain, samples=["sample_01"])

@@ -44,14 +44,19 @@ from .analyze import (
 
 
 def _recent_path() -> Path:
-    """Where recent files are remembered. ``PTR_RECENT_PATH`` overrides it so a
+    """Where recent files are remembered. ``SNIFF_RECENT_PATH`` overrides it so a
     packaged build can be exercised (or a home folder kept clean) without patching
     Python in a frozen bundle."""
-    override = os.environ.get("PTR_RECENT_PATH")
-    return Path(override).expanduser() if override else Path.home() / ".ptr-ms" / "recent.json"
+    override = os.environ.get("SNIFF_RECENT_PATH")
+    return (
+        Path(override).expanduser()
+        if override
+        else Path.home() / ".sniff" / "recent.json"
+    )
 
 
 RECENT_PATH = _recent_path()
+LEGACY_RECENT_PATH = Path.home() / ".ptr-ms" / "recent.json"
 RECENT_LIMIT = 20
 
 # Where an open's phases sit on its progress axis, measured on the real 2 GB /
@@ -110,14 +115,14 @@ def _replace_from(tmp, target: Path) -> None:
                 pass
 
 
-# A ptr summary starts with this header; anything else that turns up under the name
+# A sniff summary starts with this header; anything else that turns up under the name
 # we would like to write is somebody else's table and stays untouched.
 _CSV_MARKERS = ("Variable", "Average(Corrected)")
 
 
 def _csv_target(h5_path: str) -> Path:
     """Where an export of ``h5_path`` goes: ``<stem>.csv`` beside it, unless a file
-    that is not a ptr summary already lives there — a Viewer or Excel export often
+    that is not a sniff summary already lives there — a Viewer or Excel export often
     does, and the review may be comparing against it."""
     target = Path(h5_path).with_suffix(".csv")
     if not target.exists():
@@ -126,30 +131,35 @@ def _csv_target(h5_path: str) -> Path:
         with target.open("r", encoding="utf-8-sig", errors="replace") as handle:
             head = handle.readline()
     except OSError:
-        return target.parent / (target.stem + "-ptr.csv")
+        return target.parent / (target.stem + "-sniff.csv")
     if all(marker in head for marker in _CSV_MARKERS):
         return target
-    return target.parent / (target.stem + "-ptr.csv")
+    return target.parent / (target.stem + "-sniff.csv")
 
 
 def config_path_for(h5_path: str) -> Path:
     """The config file belonging to an h5 file: same name, same folder.
 
-    ``~/d/ptr.h5`` -> ``~/d/ptr.json``. A ``<stem>-analysis-config.json`` written by
+    ``~/d/sniff.h5`` -> ``~/d/sniff.json``. A ``<stem>-analysis-config.json`` written by
     the older CLI flow is honoured when no ``<stem>.json`` exists yet, so opening a
     previously reviewed file does not start a fresh pipeline run. A same-stem JSON
-    that is not one of our configs is never overwritten: a ``<stem>.ptr.json`` is
+    that is not one of our configs is never overwritten: a ``<stem>.sniff.json`` is
     used instead.
     """
     p = Path(h5_path).expanduser()
     beside = p.with_suffix(".json")
-    legacy = p.parent / f"{p.stem}-analysis-config.json"
+    legacy_cli = p.parent / f"{p.stem}-analysis-config.json"
+    legacy_product = p.with_suffix(".ptr.json")
     if beside.exists():
         if _valid_config(_read_json(beside)):
             return beside
-        return p.with_suffix(".ptr.json")
-    if legacy.exists() and _valid_config(_read_json(legacy)):
-        return legacy
+        if legacy_product.exists() and _valid_config(_read_json(legacy_product)):
+            return legacy_product
+        return p.with_suffix(".sniff.json")
+    if legacy_cli.exists() and _valid_config(_read_json(legacy_cli)):
+        return legacy_cli
+    if legacy_product.exists() and _valid_config(_read_json(legacy_product)):
+        return legacy_product
     return beside
 
 
@@ -239,6 +249,11 @@ def bootstrap_config(h5_path: str, f=None, *, progress=None, should_stop=None) -
 
 def load_recent() -> list:
     value = _read_json(RECENT_PATH)
+    if value is None and RECENT_PATH == _recent_path():
+        # Read the old store without deleting it. The next write publishes the same
+        # entries under ~/.sniff, while an interrupted migration leaves the old file
+        # available for the previous release.
+        value = _read_json(LEGACY_RECENT_PATH)
     if not isinstance(value, list):
         return []
     return [p for p in value if isinstance(p, str)]
@@ -362,7 +377,7 @@ class Session:
             self._say(P_META)
             config = _read_json(config_path) if config_path.exists() else None
             if config is not None and not _valid_config(config):
-                raise ValueError(f"{config_path} is not a ptr config")
+                raise ValueError(f"{config_path} is not a sniff config")
             prep_start = P_META
             if config is None:
                 self.stage = "Detecting peaks and intervals"
@@ -1083,7 +1098,7 @@ def _background(fn, *args, **kwargs):
         try:
             fn(*args, **kwargs)
         except Exception as exc:
-            print(f"ptr: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            print(f"sniff: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
 
     threading.Thread(target=run, daemon=True).start()
 
@@ -1316,7 +1331,7 @@ def stop_the_app(session):
     except desktop.DesktopUnavailable as exc:
         # The server is stopping either way; a window left standing is worth a line on
         # stderr, not a failed request or a swallowed quit.
-        _log(f"ptr: {exc}; close that window yourself to get rid of it")
+        _log(f"sniff: {exc}; close that window yourself to get rid of it")
 
 
 def serve_app(
@@ -1341,8 +1356,8 @@ def serve_app(
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     _install_quit_handlers(lambda: stop_the_app(session))
 
-    _log(f"ptr: app running at {url}")
-    _log("ptr: a large run takes 30-90 s to open; the app stays up between files.")
+    _log(f"sniff: app running at {url}")
+    _log("sniff: a large run takes 30-90 s to open; the app stays up between files.")
     if initial:
         _background(
             session.open, initial, agent_url=agent_url, agent_timeout=agent_timeout
@@ -1365,7 +1380,7 @@ def serve_app(
             in_window = True
         except desktop.DesktopUnavailable as exc:
             _surface = "browser"
-            _log(f"ptr: no desktop window ({exc}); opening a browser instead")
+            _log(f"sniff: no desktop window ({exc}); opening a browser instead")
     if not in_window and open_browser:
         try:
             if not webbrowser.open(url):
@@ -1373,7 +1388,7 @@ def serve_app(
         except (OSError, webbrowser.Error) as exc:
             # In a double-clicked bundle this line is the only way the user learns the
             # server is up, so it has to carry the address.
-            _log(f"ptr: could not open a browser ({exc}); open {url} in one yourself")
+            _log(f"sniff: could not open a browser ({exc}); open {url} in one yourself")
     session.stop.wait()
     session.close()
     httpd.shutdown()

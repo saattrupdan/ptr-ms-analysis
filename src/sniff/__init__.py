@@ -10,6 +10,6 @@ __all__ = ["__version__"]
 try:
     from importlib.metadata import version as _version
 
-    __version__ = _version("ptr_ms_analysis")
+    __version__ = _version("sniff")
 except Exception:  # pragma: no cover - only from a bare checkout
     __version__ = "0.0.0+unknown"

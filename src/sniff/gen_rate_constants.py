@@ -17,7 +17,7 @@ molecular formula (PTR cannot separate structural isomers by mass), keeping:
               humidity/temperature dependent) and 'frag' (the protonated parent is
               not the main product ion -> fragments).
   isomers   = the distinct compound names the library lists at that formula.
-Run:  uv run python -m ptr_ms_analysis.gen_rate_constants
+Run:  uv run python -m sniff.gen_rate_constants
 """
 
 import csv
@@ -226,7 +226,7 @@ def main():
         "Spectrom. 2019, doi.org/10.1007/s13361-019-02209-3; "
         "tinyurl.com/PTRLibrary). One entry per neutral formula; k in "
         "1e-9 cm3/s (measured median, else Su-Chesnavich kcap flagged "
-        "k_estimated). Regenerate with `uv run python -m ptr_ms_analysis.gen_rate_constants`.",
+        "k_estimated). Regenerate with `uv run python -m sniff.gen_rate_constants`.",
         "compounds": compounds,
     }
     with OUT.open("w", encoding="utf-8") as fh:

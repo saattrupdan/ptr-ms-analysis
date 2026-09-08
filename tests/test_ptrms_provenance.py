@@ -5,7 +5,7 @@ import unittest
 import h5py
 import numpy as np
 
-from ptr_ms_analysis import analyze, ptrms
+from sniff import analyze, ptrms
 
 
 class ProvenanceTest(unittest.TestCase):

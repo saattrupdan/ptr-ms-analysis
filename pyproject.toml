@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ptr-ms-analysis"
+name = "sniff"
 version = "0.5.0"
 description = "Open-source reprocessor for IONICON IoniTOF PTR-MS / PTR-TOF .h5 files — a PTR-MS Viewer replacement."
 readme = "README.md"
@@ -17,16 +17,13 @@ dependencies = ["h5py>=3.0", "numpy>=1.20"]
 desktop = ["pywebview>=6"]
 
 [project.scripts]
-ptr = "ptr_ms_analysis.analyze:main"
-
-[project.urls]
-Homepage = "https://pypi.org/project/ptr-ms-analysis/"
+sniff = "sniff.analyze:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-ptr_ms_analysis = ["reference/*.json", "reference/*.csv", "reference/*.md"]
+sniff = ["reference/*.json", "reference/*.csv", "reference/*.md"]
 
 [dependency-groups]
 dev = [

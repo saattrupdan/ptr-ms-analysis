@@ -2,7 +2,7 @@
 
 The name appears in three different worlds: the browser page and its tab, the native
 window's title bar, and the installers, which additionally carry a bundle identifier
-that has to agree with the one in ``packaging/ptr-app.spec``. It used to be spelled
+that has to agree with the one in ``packaging/sniff-app.spec``. It used to be spelled
 four ways. It is spelled once here.
 
 The mark is the same story with a twist: the artwork itself belongs to
@@ -17,7 +17,7 @@ APP_NAME = "Sniff"
 # instrument and the activity next to it.
 TAGLINE = "PTR-MS review"
 PAGE_TITLE = APP_NAME + " \u2014 " + TAGLINE
-# Must equal CFBundleIdentifier in packaging/ptr-app.spec and IDENTIFIER in
+# Must equal CFBundleIdentifier in packaging/sniff-app.spec and IDENTIFIER in
 # packaging/make_pkg.py: to LaunchServices and to the receipts database, this string is
 # the product.
 BUNDLE_ID = "dk.samsmart.sniff"

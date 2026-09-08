@@ -1,5 +1,5 @@
 {
- "_source": "PTR Library (Pagonis, Sekimoto & de Gouw, J. Am. Soc. Mass Spectrom. 2019, doi.org/10.1007/s13361-019-02209-3; tinyurl.com/PTRLibrary). One entry per neutral formula; k in 1e-9 cm3/s (measured median, else Su-Chesnavich kcap flagged k_estimated). Regenerate with `uv run python -m ptr_ms_analysis.gen_rate_constants`.",
+ "_source": "PTR Library (Pagonis, Sekimoto & de Gouw, J. Am. Soc. Mass Spectrom. 2019, doi.org/10.1007/s13361-019-02209-3; tinyurl.com/PTRLibrary). One entry per neutral formula; k in 1e-9 cm3/s (measured median, else Su-Chesnavich kcap flagged k_estimated). Regenerate with `uv run python -m sniff.gen_rate_constants`.",
  "compounds": [
   {
    "name": "ammonia",

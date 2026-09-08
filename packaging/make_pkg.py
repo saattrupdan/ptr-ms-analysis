@@ -16,9 +16,9 @@ checkout produce the same bytes.
 
     python packaging/make_pkg.py --out build/pkg
     pkgbuild --component "dist/Sniff.app" --install-location /Applications \
-        --identifier dk.samsmart.sniff --version 0.4.0 build/pkg/ptr-component.pkg
+        --identifier dk.samsmart.sniff --version 0.4.0 build/pkg/sniff-component.pkg
     productbuild --distribution build/pkg/distribution.xml \
-        --package-path build/pkg dist/ptr.pkg
+        --package-path build/pkg dist/sniff.pkg
 
 `--package-path` is how productbuild finds the payload: the distribution names
 the component package by file name, so `--package` has to match what pkgbuild
@@ -38,14 +38,14 @@ import xml.etree.ElementTree as ET
 from make_msi import msi_version
 
 APP_NAME = "Sniff"
-# Same identifier as the bundle's CFBundleIdentifier (packaging/ptr-app.spec), so
+# Same identifier as the bundle's CFBundleIdentifier (packaging/sniff-app.spec), so
 # the bundle and the package that carries it are one product to LaunchServices,
 # the receipts database, and a future signed build.
 IDENTIFIER = "dk.samsmart.sniff"
 TITLE = APP_NAME
 # What pkgbuild writes into --package-path; the distribution names this file, so
 # the two have to agree. It is a name, never a path, for exactly that reason.
-COMPONENT_PKG = "ptr-component.pkg"
+COMPONENT_PKG = "sniff-component.pkg"
 # Big Sur is where arm64 macOS starts, and where the NumPy and h5py wheels this
 # bundle carries start. Claiming less would be a promise the payload cannot keep.
 MIN_MACOS = "11.0"
@@ -125,7 +125,7 @@ def main(argv) -> int:
         "--version",
         default=None,
         metavar="X.Y.Z",
-        help="override the version read from the installed package",
+        help="override the version read from pyproject.toml",
     )
     parser.add_argument(
         "--print-version",

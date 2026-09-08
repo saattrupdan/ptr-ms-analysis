@@ -73,7 +73,7 @@ reported at ~2× its true concentration).
 
 The package ships a rate-constant database as `rate_constants.json` (218 compounds,
 k in 1e-9 cm³/s, from the PTR Library and its cited literature). Query it with
-`ptr rates <name|formula|mz>`. Values carry
+`sniff rates <name|formula|mz>`. Values carry
 ~20–50 % uncertainty and set *relative* sensitivities — they refine, but do not
 replace, calibration with real standards.
 

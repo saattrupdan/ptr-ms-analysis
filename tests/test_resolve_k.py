@@ -13,8 +13,8 @@ from unittest import mock
 import h5py
 import numpy as np
 
-analyze = importlib.import_module("ptr_ms_analysis.analyze")
-ptrms = importlib.import_module("ptr_ms_analysis.ptrms")
+analyze = importlib.import_module("sniff.analyze")
+ptrms = importlib.import_module("sniff.ptrms")
 
 
 RATE_TABLE = {

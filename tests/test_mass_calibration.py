@@ -5,7 +5,7 @@ import unittest
 import h5py
 import numpy as np
 
-from ptr_ms_analysis import ptrms
+from sniff import ptrms
 
 # In-memory reproduction of the three-anchor calibration used by Data_10_26_33.
 # Keeping these values here avoids depending on the external measurement file.

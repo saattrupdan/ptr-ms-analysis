@@ -10,7 +10,7 @@ import pathlib
 import re
 import sys
 
-from ptr_ms_analysis import app, brand, viz
+from sniff import app, brand, viz
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
@@ -36,7 +36,7 @@ def test_the_installers_call_it_the_same_thing():
 
 
 def test_the_bundle_and_the_package_share_one_identifier():
-    spec = (REPO / "packaging" / "ptr-app.spec").read_text(encoding="utf-8")
+    spec = (REPO / "packaging" / "sniff-app.spec").read_text(encoding="utf-8")
     assert re.search(r'^BUNDLE_ID = "%s"$' % re.escape(brand.BUNDLE_ID), spec, re.M), (
         "the bundle identifier in the spec and in brand.py are two answers to the same"
         " question, and LaunchServices will believe the second one"
@@ -94,12 +94,12 @@ def test_the_version_is_stated_once():
     """
     from importlib.metadata import version
 
-    import ptr_ms_analysis
+    import sniff
 
-    assert ptr_ms_analysis.__version__ == version("ptr_ms_analysis")
+    assert sniff.__version__ == version("sniff")
     spec = (REPO / "pyproject.toml").read_text(encoding="utf-8")
     declared = re.search(r'^version = "([\d.]+[^"\n]*)"$', spec, re.M).group(1)
-    assert version("ptr_ms_analysis").split("+")[0] == declared
+    assert version("sniff").split("+")[0] == declared
 
 
 def test_no_page_still_calls_it_the_old_name():

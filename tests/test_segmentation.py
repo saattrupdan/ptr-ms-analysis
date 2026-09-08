@@ -11,7 +11,7 @@ import unittest
 
 import numpy as np
 
-from ptr_ms_analysis import analyze, ptrms
+from sniff import analyze, ptrms
 
 BASELINE = 1.0  # the trace is written in multiples of the run's own background
 

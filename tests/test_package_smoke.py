@@ -9,7 +9,7 @@ from importlib import resources
 from io import StringIO
 from unittest import mock
 
-from ptr_ms_analysis import analyze, ptrms, viz
+from sniff import analyze, ptrms, viz
 
 
 class _SingleArgumentTraversable:
@@ -31,12 +31,12 @@ class _SingleArgumentTraversable:
 class PackageSmokeTest(unittest.TestCase):
     def test_reference_resources_are_packaged(self):
         rate_constants = (
-            resources.files("ptr_ms_analysis")
+            resources.files("sniff")
             .joinpath("reference")
             .joinpath("rate_constants.json")
         )
         library = (
-            resources.files("ptr_ms_analysis")
+            resources.files("sniff")
             .joinpath("reference")
             .joinpath("ptrlibrary.csv")
         )
@@ -68,7 +68,7 @@ class PackageSmokeTest(unittest.TestCase):
     def test_rates_command_needs_no_hdf5_fixture(self):
         output = StringIO()
         with (
-            mock.patch.object(sys, "argv", ["ptr", "rates", "benzaldehyde"]),
+            mock.patch.object(sys, "argv", ["sniff", "rates", "benzaldehyde"]),
             redirect_stdout(output),
         ):
             analyze.main()
@@ -83,7 +83,7 @@ class PackageSmokeTest(unittest.TestCase):
 
         output = StringIO()
         with (
-            mock.patch.object(sys, "argv", ["ptr", "viz", "--help"]),
+            mock.patch.object(sys, "argv", ["sniff", "viz", "--help"]),
             redirect_stdout(output),
             self.assertRaises(SystemExit) as raised,
         ):
@@ -95,7 +95,7 @@ class PackageSmokeTest(unittest.TestCase):
     def test_help_command_needs_no_hdf5_fixture(self):
         output = StringIO()
         with (
-            mock.patch.object(sys, "argv", ["ptr", "--help"]),
+            mock.patch.object(sys, "argv", ["sniff", "--help"]),
             redirect_stdout(output),
             self.assertRaises(SystemExit) as raised,
         ):

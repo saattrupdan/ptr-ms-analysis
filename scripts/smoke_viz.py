@@ -21,9 +21,9 @@ import threading
 from pathlib import Path
 from typing import Any, ClassVar
 
-from ptr_ms_analysis import viz
+from sniff import viz
 
-SESSION = "ptr-ms-viz-regression"
+SESSION = "sniff-ms-viz-regression"
 
 
 def _candidate(formula: str, name: str, probability: float) -> dict[str, Any]:
@@ -430,7 +430,7 @@ def _assert_config_round_trip(config: dict[str, Any]) -> None:
 def _standalone_browser_pass(data: dict[str, Any]) -> None:
     """Exercise the offline app through a real ``file:`` browser URL."""
     session = f"{SESSION}-file-{threading.get_ident()}"
-    with tempfile.TemporaryDirectory(prefix="ptr-ms-viz-") as directory:
+    with tempfile.TemporaryDirectory(prefix="sniff-ms-viz-") as directory:
         html_path = Path(directory) / "review.html"
         html_path.write_text(viz.render_html(data), encoding="utf-8")
         download_path = Path(directory) / "downloaded-config.json"
@@ -1303,7 +1303,7 @@ def _review_round_browser_pass(session: str) -> None:
 def _provenance_browser_pass() -> None:
     """Regress effective file sources and explicit reset provenance."""
     session = f"{SESSION}-provenance-{threading.get_ident()}"
-    with tempfile.TemporaryDirectory(prefix="ptr-ms-viz-provenance-") as directory:
+    with tempfile.TemporaryDirectory(prefix="sniff-ms-viz-provenance-") as directory:
         directory_path = Path(directory)
         omitted = _synthetic_data()
         omitted_meta = omitted["meta"]

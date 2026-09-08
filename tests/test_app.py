@@ -18,7 +18,7 @@ import h5py
 import numpy as np
 import pytest
 
-from ptr_ms_analysis import app, viz
+from sniff import app, viz
 
 
 def make_h5(path, *, cycles=4, mz_count=8, signal=True):
@@ -43,21 +43,29 @@ def payload_stub(f, peaks, ranges, **kwargs):
 # --------------------------------------------------------------------------
 # where the config lives
 # --------------------------------------------------------------------------
+def test_default_recent_path_uses_sniff_state_directory(tmp_path):
+    with (
+        mock.patch.dict(os.environ, {}, clear=True),
+        mock.patch.object(Path, "home", return_value=tmp_path),
+    ):
+        assert app._recent_path() == tmp_path / ".sniff" / "recent.json"
+
+
 def test_valid_config_beside_the_file_is_used(tmp_path):
-    h5 = tmp_path / "ptr.h5"
+    h5 = tmp_path / "sniff.h5"
     h5.touch()
-    beside = tmp_path / "ptr.json"
+    beside = tmp_path / "sniff.json"
     beside.write_text(json.dumps({"peaks": [{"mz": 42.0}]}), encoding="utf-8")
     assert app.config_path_for(str(h5)) == beside
 
 
 def test_unrelated_same_stem_json_is_never_clobbered(tmp_path):
-    h5 = tmp_path / "ptr.h5"
+    h5 = tmp_path / "sniff.h5"
     h5.touch()
-    (tmp_path / "ptr.json").write_text('{"unrelated": true}', encoding="utf-8")
+    (tmp_path / "sniff.json").write_text('{"unrelated": true}', encoding="utf-8")
     target = app.config_path_for(str(h5))
-    assert target == tmp_path / "ptr.ptr.json"
-    assert json.loads((tmp_path / "ptr.json").read_text(encoding="utf-8")) == {
+    assert target == tmp_path / "sniff.sniff.json"
+    assert json.loads((tmp_path / "sniff.json").read_text(encoding="utf-8")) == {
         "unrelated": True
     }
 
@@ -74,6 +82,19 @@ def test_missing_config_targets_the_stem_json(tmp_path):
     h5 = tmp_path / "run.h5"
     h5.touch()
     assert app.config_path_for(str(h5)) == tmp_path / "run.json"
+
+
+def test_legacy_product_config_is_recognised_without_clobbering_neighbours(tmp_path):
+    h5 = tmp_path / "run.h5"
+    h5.touch()
+    beside = tmp_path / "run.json"
+    beside.write_text('{"owned_by": "someone else"}', encoding="utf-8")
+    legacy = tmp_path / "run.ptr.json"
+    legacy.write_text(json.dumps({"peaks": []}), encoding="utf-8")
+    assert app.config_path_for(str(h5)) == legacy
+    assert json.loads(beside.read_text(encoding="utf-8")) == {
+        "owned_by": "someone else"
+    }
 
 
 def test_config_written_on_open_is_reread_on_the_next_open(tmp_path):
@@ -93,6 +114,25 @@ def test_config_written_on_open_is_reread_on_the_next_open(tmp_path):
         with mock.patch.object(app.viz, "build_viz_data", payload_stub):
             session.open(str(h5))
     detect_peaks.assert_not_called()  # the saved config is reused, not recomputed
+
+
+def test_legacy_recent_store_is_read_and_copied_on_next_write(tmp_path):
+    recent = tmp_path / "new" / "recent.json"
+    legacy = tmp_path / "old" / "recent.json"
+    legacy.parent.mkdir()
+    legacy.write_text(json.dumps(["/data/old.h5"]), encoding="utf-8")
+    with (
+        mock.patch.object(app, "RECENT_PATH", recent),
+        mock.patch.object(app, "LEGACY_RECENT_PATH", legacy),
+        mock.patch.object(app, "_recent_path", return_value=recent),
+    ):
+        assert app.load_recent() == ["/data/old.h5"]
+        app.remember_recent("/data/new.h5")
+    assert json.loads(recent.read_text(encoding="utf-8")) == [
+        str(Path("/data/new.h5").resolve()),
+        "/data/old.h5",
+    ]
+    assert json.loads(legacy.read_text(encoding="utf-8")) == ["/data/old.h5"]
 
 
 # --------------------------------------------------------------------------
@@ -547,7 +587,7 @@ def test_export_never_overwrites_someone_elses_table(tmp_path):
     h5 = tmp_path / "run.h5"
     make_h5(h5)
     foreign = tmp_path / "run.csv"
-    foreign.write_text("Reviewers own table, NOT a ptr output\n1,2,3\n", encoding="utf-8")
+    foreign.write_text("Reviewers own table, NOT a sniff output\n1,2,3\n", encoding="utf-8")
     session = app.Session()
     session.path = str(h5)
     session.config = {"peaks": [], "ranges": []}
@@ -559,7 +599,7 @@ def test_export_never_overwrites_someone_elses_table(tmp_path):
 
     with mock.patch.object(app, "analyze_config_to_csv", side_effect=fake_analysis):
         result = session.export()
-    assert Path(result["out"]) == tmp_path / "run-ptr.csv"
+    assert Path(result["out"]) == tmp_path / "run-sniff.csv"
     assert foreign.read_text(encoding="utf-8").startswith("Reviewers own table")
 
 
@@ -583,7 +623,7 @@ def test_export_replaces_its_own_previous_summary(tmp_path):
         result = session.export()
     assert Path(result["out"]) == ours
     assert "new,row" in ours.read_text(encoding="utf-8")
-    assert not (tmp_path / "run-ptr.csv").exists()
+    assert not (tmp_path / "run-sniff.csv").exists()
 
 
 def test_export_leaves_no_temp_files_behind(tmp_path):
@@ -784,19 +824,19 @@ def _run_hook(argv, frozen):
 
 
 def test_a_bare_double_click_becomes_app_mode():
-    # Finder starts Contents/MacOS/ptr with no arguments at all; the plain CLI would
+    # Finder starts Contents/MacOS/sniff with no arguments at all; the plain CLI would
     # answer that with usage text and exit 2, which in a windowed bundle is invisible.
-    assert _run_hook(["ptr"], frozen=True) == ["ptr", "app"]
+    assert _run_hook(["sniff"], frozen=True) == ["sniff", "app"]
 
 
 def test_the_hook_leaves_named_commands_and_a_plain_cli_alone():
-    assert _run_hook(["ptr", "app", "--no-browser"], frozen=True) == ["ptr", "app", "--no-browser"]
-    assert _run_hook(["ptr"], frozen=False) == ["ptr"]
+    assert _run_hook(["sniff", "app", "--no-browser"], frozen=True) == ["sniff", "app", "--no-browser"]
+    assert _run_hook(["sniff"], frozen=False) == ["sniff"]
 
 
 def test_the_spec_still_installs_the_hook():
     """A spec that stopped listing the hook would break double-click silently."""
-    spec = HOOK.with_name("ptr-app.spec").read_text()
+    spec = HOOK.with_name("sniff-app.spec").read_text()
     assert "runtime_hook.py" in spec
 
 

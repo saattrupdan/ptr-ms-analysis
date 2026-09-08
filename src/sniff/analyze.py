@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """PTR-MS analysis CLI — open-source reprocessor for IONICON IoniTOF HDF5 files.
 
-Designed to be driven by an agent, not a human. Install once with
-`pipx install --editable <SKILL_DIR>` and invoke as `ptr <subcommand>` — do not
+Designed to be driven by an agent, not a human. From a checkout, invoke it with
+`uv run sniff <subcommand>` — do not
 read this source; every operation is a subcommand and every value is in its JSON
 output.
 
@@ -24,15 +24,15 @@ analyses it — so `viz`/`analyze` always operate on the best solution, not a me
 
 Flows:
   primary — agent curates, then an expert confirms in the browser:
-    1. ptr peaks FILE        -> pick assignments from each peak's `candidates`
-    2. ptr segments FILE     -> sample_01/background_01 ranges; never ask names
+    1. sniff peaks FILE        -> pick assignments from each peak's `candidates`
+    2. sniff segments FILE     -> sample_01/background_01 ranges; never ask names
     3. write analysis-config.json (the curated peaks + ranges)
-    4. ptr viz FILE --config analysis-config.json --out results.csv
+    4. sniff viz FILE --config analysis-config.json --out results.csv
        (serves the browser app; clicking 'Done' writes results.csv itself)
   no review (the same curated config, straight to CSV):
-       ptr analyze FILE --config analysis-config.json --include-cycle-rows --out results.csv
+       sniff analyze FILE --config analysis-config.json --include-cycle-rows --out results.csv
   quick deterministic fallback (no agent judgment, no browser — detect + quantify only):
-       ptr analyze FILE --auto-peaks --auto-segments --include-cycle-rows --out results.csv
+       sniff analyze FILE --auto-peaks --auto-segments --include-cycle-rows --out results.csv
 """
 
 from __future__ import annotations
@@ -550,7 +550,7 @@ def _is_noise_artifact(flags):
 def _compact_peak(e):
     """Trim a fully-annotated peak to the fields needed for curation: the top
     candidate summary + flags, dropping the per-candidate isotope arrays and the
-    long tail of low-probability formulas. `ptr peaks --full` keeps everything."""
+    long tail of low-probability formulas. `sniff peaks --full` keeps everything."""
     cands = e.get("candidates") or []
     top = cands[0] if cands else None
     out = {
@@ -976,7 +976,7 @@ def cmd_analyze(args):
                     return
                 sys.exit(
                     "No analyte peaks cleared the noise threshold (file has "
-                    "signal but no resolvable peaks). Inspect with `ptr peaks`."
+                    "signal but no resolvable peaks). Inspect with `sniff peaks`."
                 )
             sys.exit(
                 "No peaks. Pass --peaks-json '[{\"mz\":..}]', --config, or --auto-peaks."
@@ -1256,8 +1256,8 @@ def cmd_viz(args):
             sys.exit(
                 "viz needs an explicit peak list AND time ranges — it does not "
                 "detect them. Pass --config with 'peaks' and 'ranges' (or "
-                "--peaks-json/--ranges-json). Build them with `ptr peaks` and "
-                "`ptr segments`, then curate into the config."
+                "--peaks-json/--ranges-json). Build them with `sniff peaks` and "
+                "`sniff segments`, then curate into the config."
             )
         R = settings["R"]
         R_phys = settings["R_phys"]
@@ -1265,7 +1265,7 @@ def cmd_viz(args):
         # starts. Announce it so a watching agent waits for "review app running at …"
         # (below) rather than polling the port — which refuses until this finishes.
         print(
-            "ptr: preparing the review (loading the file + computing traces; large "
+            "sniff: preparing the review (loading the file + computing traces; large "
             "files take ~30-90 s) — the URL is printed when it's ready…",
             file=sys.stderr,
             flush=True,
@@ -1354,7 +1354,7 @@ def cmd_viz(args):
                 "concentration_available": data["meta"]["concentration_available"],
                 "note": "Standalone portable review app written. Open in a browser to "
                 "sanity-check/tweak and Download config.json to hand back for "
-                "`ptr analyze`. For a live-saving session that also writes the "
+                "`sniff analyze`. For a live-saving session that also writes the "
                 "CSV on Done, drop --html and pass --config cfg.json.",
             },
             args.raw,
@@ -1377,8 +1377,8 @@ def cmd_app(args):
     from . import app as app_mode
 
     if args.h5 and not os.path.isfile(args.h5):
-        raise SystemExit(f"ptr: file not found: {args.h5}")
-    agent = args.agent or os.environ.get("PTR_AGENT_URL")
+        raise SystemExit(f"sniff: file not found: {args.h5}")
+    agent = args.agent or os.environ.get("SNIFF_AGENT_URL")
     app_mode.serve_app(
         port=args.port,
         open_browser=not args.no_browser,
@@ -1752,7 +1752,7 @@ def main():
     )
 
     p = argparse.ArgumentParser(
-        prog="ptr",
+        prog="sniff",
         description=__doc__,
         parents=[common],
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -2081,7 +2081,7 @@ def main():
         "--agent",
         default=None,
         help="URL to post a freshly detected config to for curation; the "
-        "deterministic config is kept if the endpoint fails (or set PTR_AGENT_URL)",
+        "deterministic config is kept if the endpoint fails (or set SNIFF_AGENT_URL)",
     )
     pap.add_argument(
         "--agent-timeout",
