@@ -15,9 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   deleted. Installer payloads and generated artefacts use the Sniff names while the
   stable macOS bundle identifier, MSI upgrade code and component identities remain
   unchanged.
-- **The Sniff opening screen is now a focused local signal desk.** It keeps path entry,
-  Browse and the open-review affordance, but leaves recent-file history to its API and
-  storage layer rather than displaying it in the UI.
+- **The Sniff opening screen is now browse-only.** It uses the native file dialog rather
+  than path entry, while retaining Browse and the open-review affordance. Recent-file
+  history remains in the API and storage layer rather than being displayed in the UI;
+  an unavailable native dialog is reported without exposing a path-field fallback.
 - **Frozen one-dir bundles keep the launcher separate from package contents.** Windows
   stores the Python payload under `_internal/`, while the macOS app uses its standard
   `Contents/Resources/` area; both retain the visible `sniff` executable path.

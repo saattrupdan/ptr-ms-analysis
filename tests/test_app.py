@@ -877,15 +877,39 @@ def test_the_recent_api_flags_the_open_file(server, tmp_path, monkeypatch):
 
 
 def test_browse_says_so_when_the_system_has_no_file_dialog(server, monkeypatch):
-    """The page falls back to the path field on a 501, so the fallback has to be a
-    status the page can tell apart from a cancelled dialog."""
+    """A missing native dialog is reported instead of offering manual path entry."""
     api, _ = server
     monkeypatch.setattr(app.sys, "platform", "linux")
     monkeypatch.setattr(app.os, "name", "posix")
     monkeypatch.setattr(app.shutil, "which", lambda _cmd: None)
     code, body = api.post("/browse", {})
     assert code == 501
-    assert "type the path" in body["error"]
+    assert body["error"] == "Native file browsing is unavailable."
+
+
+def test_the_start_screen_is_browse_only():
+    """The intro must not expose a text control or a manual-open action."""
+    html = app._START_HTML
+    js = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[0]
+
+    assert "<input" not in html
+    assert 'id="path"' not in html
+    assert 'id="go"' not in html
+    assert "Open run" not in html
+    assert "value.trim()" not in js
+    assert "$('#path')" not in js
+    assert "$('#go')" not in js
+    assert "fetch('/browse'" in js
+    assert "openFile(body.path)" in js
+
+
+def test_the_start_screen_shows_browse_unavailable_error():
+    """The browse failure is concise and does not point users at a removed field."""
+    js = re.findall(r"<script>(.*?)</script>", app._START_HTML, re.DOTALL)[0]
+
+    assert "Native file browsing is unavailable." in js
+    assert "type the path" not in js
+    assert "$('#path').focus()" not in js
 
 
 # --------------------------------------------------------------------------

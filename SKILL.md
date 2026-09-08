@@ -516,12 +516,16 @@ as a desktop app it is named **Sniff** (see `sniff/brand.py`; the CLI stays
 `sniff` and the distribution stays `sniff`):
 
 ```bash
-sniff app                       # start screen: type an absolute path or browse
+sniff app                       # start screen: browse for a run
 sniff app FILE.h5 --no-browser  # open one file immediately (background it: ~30-90 s for 2 GB)
 sniff app --agent URL           # have an agent curate a newly detected config
 sniff app --window              # desktop window instead of a browser tab
 ```
 
+- **The start screen is browse-only.** Use **Browse this computer…** to choose an HDF5
+  run through the native file dialog. Paths cannot be typed or pasted there. If native
+  browsing is unavailable, the screen shows a concise error instead of offering a path
+  field; the `POST /browse` endpoint remains the native-dialog boundary.
 - **The config lives beside the h5 file, same stem**: `sniff.h5` → `sniff.json`. An existing
   `<stem>-analysis-config.json` is used when there is no `<stem>.json`, so a file
   reviewed through the CLI reopens exactly as it was left. A same-stem JSON that is not a
