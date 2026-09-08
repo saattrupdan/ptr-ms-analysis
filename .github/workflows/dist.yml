@@ -55,6 +55,9 @@ jobs:
           # browser tab; the spec picks it up automatically when it is installed.
           pip install ".[desktop]" pyinstaller
 
+      - name: Remove stale bundle output
+        run: python -c "import shutil; [shutil.rmtree(path, ignore_errors=True) for path in ('dist', 'build')]"
+
       - name: Build the bundle
         run: pyinstaller --noconfirm packaging/sniff-app.spec
 

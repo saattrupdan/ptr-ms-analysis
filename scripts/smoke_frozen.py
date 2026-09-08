@@ -5,8 +5,8 @@
 that matters — the app opening a real ``.h5`` file and serving the review page — with
 nothing but a synthetic file and a few seconds of patience.
 
-Usage:  python scripts/smoke_frozen.py path/to/dist/sniff/sniff.exe
-        python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/sniff"
+Usage:  uv run python scripts/smoke_frozen.py dist/sniff/sniff.exe
+        uv run python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/sniff"
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import typing as t
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -98,6 +99,16 @@ def free_port() -> int:
         return sock.getsockname()[1]
 
 
+def contents_directory(exe: Path) -> t.Optional[Path]:
+    """Return the non-executable PyInstaller contents directory."""
+    if exe.parent.name == "MacOS":
+        # BUNDLE maps the one-dir payload into the standard app Resources folder.
+        candidates = [exe.parent.parent / "Resources"]
+    else:
+        candidates = [exe.parent / "_internal"]
+    return next((path for path in candidates if path.is_dir()), None)
+
+
 def await_url(proc, timeout):
     """Block until the app reports its address on stderr. Returns (url, lines)."""
     deadline = time.monotonic() + timeout
@@ -122,8 +133,16 @@ def main(argv) -> int:
         print(__doc__, file=sys.stderr)
         return 2
     exe = Path(argv[1]).resolve()
-    if not exe.exists():
-        print(f"frozen app smoke: FAIL — no such executable: {exe}", file=sys.stderr)
+    if not exe.is_file():
+        print(f"frozen app smoke: FAIL — no such executable file: {exe}", file=sys.stderr)
+        return 1
+    contents = contents_directory(exe)
+    if contents is None:
+        print(
+            "frozen app smoke: FAIL — no PyInstaller contents directory for "
+            f"the executable: {exe}",
+            file=sys.stderr,
+        )
         return 1
 
     work = Path(tempfile.mkdtemp(prefix="sniff-frozen-smoke-"))

@@ -68,10 +68,14 @@ local fixture and inspect its JSON diagnostics or CSV output. Do not commit meas
 files, generated review HTML, configs, or result CSVs.
 
 Packaging is checked separately because it is slow and pulls its own toolchain:
-`uv run --with pyinstaller pyinstaller --noconfirm packaging/sniff-app.spec` then
-`uv run python scripts/smoke_frozen.py dist/sniff/sniff`, which starts the frozen bundle and
-asserts it serves the review page. Run it when `packaging/`, dependencies, or the app
-server change; the Windows half of it can only be verified on a Windows runner.
+Remove stale `dist/` and `build/` output, then run
+`uv run --with pyinstaller pyinstaller --noconfirm packaging/sniff-app.spec` and
+`uv run python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/sniff"` on
+macOS, or `dist/sniff/sniff.exe` on Windows, which starts the frozen bundle and asserts
+it serves the review page. The executable is at the bundle root; PyInstaller
+uses the app's `Contents/Resources/` on macOS and `_internal/` on Windows for its
+package data and libraries. Run it when `packaging/`, dependencies, or the app server
+change; the Windows half of it can only be verified on a Windows runner.
 
 ## Conventions
 
