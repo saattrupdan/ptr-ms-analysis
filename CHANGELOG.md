@@ -5,6 +5,14 @@ All notable changes to `ptr-ms-analysis` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **The Sniff opening screen is now a focused local signal desk.** It keeps path entry,
+  Browse and the open-review affordance, but leaves recent-file history to its API and
+  storage layer rather than displaying it in the UI.
+
 ## [0.5.0] - 2026-09-08
 
 ### Added

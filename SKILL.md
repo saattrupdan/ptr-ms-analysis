@@ -538,7 +538,7 @@ as a desktop app it is named **Sniff** (see `ptr_ms_analysis/brand.py`; the CLI 
 `ptr` and the distribution stays `ptr-ms-analysis`):
 
 ```bash
-ptr app                       # start screen: recent files, or type an absolute path
+ptr app                       # start screen: type an absolute path or browse
 ptr app FILE.h5 --no-browser  # open one file immediately (background it: ~30-90 s for 2 GB)
 ptr app --agent URL           # have an agent curate a newly detected config
 ptr app --window              # desktop window instead of a browser tab
@@ -586,7 +586,8 @@ ptr app --window              # desktop window instead of a browser tab
   intervals to re-centre peaks on them). Extraction therefore owns 89 % of the bar and
   reports cycles read, not a smoothed guess.
 - **One file is open at a time** (opening another closes the first, since a 2 GB run
-  holds its traces in memory), recents live in `~/.ptr-ms/recent.json`, and the server
+  holds its traces in memory). Opened files are retained in `~/.ptr-ms/recent.json` for
+  the local API and diagnostics, but are not shown on the opening screen. The server
   binds to 127.0.0.1 — nothing is uploaded anywhere. Closing the desktop window stops
   the server; `POST /shutdown` does the same from a browser tab, where the start screen
   keeps one quiet footer link for it. There is no Stop button on the start screen

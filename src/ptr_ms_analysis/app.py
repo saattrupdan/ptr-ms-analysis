@@ -571,29 +571,48 @@ _START_TEMPLATE = """<!doctype html>
 <title>__PAGE_TITLE__</title>
 <style>
 :root{
-  --bg:#f5f6f8;--card:#fff;--sunk:#f7f8fa;--fg:#131a22;--mut:#5f6b78;
-  --line:#e2e6ec;--line2:#eef1f5;--acc:#2f6feb;--accc:#fff;--ok:#0f7b4f;
-  --err:#b3261e;--errbg:#fdf0ef;--ring:rgba(47,111,235,.30);
-  --scrim:rgba(245,246,248,.86);
+  --bg:#fbf3e8;--card:#fffdf9;--sunk:#fff8ef;--fg:#173c3b;--mut:#5b706d;
+  --line:#d8e5df;--line2:#e8eee9;--acc:#1f6f6b;--accc:#fffdf9;--ok:#24715c;
+  --peach:#ffd9a8;--cream:#fff8ef;--err:#a33b32;--errbg:#fff0e9;
+  --ring:rgba(31,111,107,.34);--scrim:rgba(251,243,232,.88);
 }
 @media(prefers-color-scheme:dark){:root{
-  --bg:#0d1117;--card:#151b23;--sunk:#111721;--fg:#e6edf3;--mut:#8b98a6;
-  --line:#28313c;--line2:#1e252e;--acc:#4d8dff;--accc:#0b1220;--ok:#41b883;
-  --err:#ff6b60;--errbg:#2a1613;--ring:rgba(77,141,255,.40);
-  --scrim:rgba(13,17,23,.86);
+  --bg:#102322;--card:#173331;--sunk:#132b29;--fg:#effaf3;--mut:#a9c0b9;
+  --line:#31514d;--line2:#24423f;--acc:#71c3ad;--accc:#102322;--ok:#8bd3af;
+  --peach:#ffd9a8;--cream:#203c39;--err:#ff9c8f;--errbg:#3b211e;
+  --ring:rgba(113,195,173,.45);--scrim:rgba(16,35,34,.9);
 }}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);-webkit-font-smoothing:antialiased;
   font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
-main{max-width:660px;margin:0 auto;padding:60px 24px 44px}
-.head{display:flex;gap:12px;align-items:center;margin-bottom:10px}
-svg.brand{flex:none;width:40px;height:40px;border-radius:10px;
-  box-shadow:0 1px 4px rgba(0,0,0,.35)}
+main{max-width:920px;margin:0 auto;padding:clamp(28px,7vw,72px) 24px 44px}
+.head{display:flex;gap:12px;align-items:center;margin-bottom:28px}
+svg.brand{flex:none;width:42px;height:42px;border-radius:11px;
+  box-shadow:0 1px 4px rgba(0,0,0,.25)}
 .tag{font-weight:400;color:var(--mut);font-size:15px;letter-spacing:0}
-h1{margin:0;font-size:20px;font-weight:600;letter-spacing:-.015em}
-.lede{margin:0 0 26px;color:var(--mut)}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;
-  box-shadow:0 1px 1px rgba(16,24,40,.04),0 8px 24px -16px rgba(16,24,40,.30)}
+h1{margin:0;font-size:20px;font-weight:650;letter-spacing:-.015em}
+.lede{margin:0;color:var(--mut);max-width:38em}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;
+  box-shadow:0 1px 1px rgba(16,24,40,.04),0 14px 35px -24px rgba(16,24,40,.42)}
+.hero{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:28px;align-items:center;
+  margin-bottom:30px}
+.eyebrow{display:flex;align-items:center;gap:8px;margin:0 0 13px;color:var(--acc);
+  font-size:11px;font-weight:700;letter-spacing:.13em;text-transform:uppercase}
+.eyebrow i{width:8px;height:8px;border-radius:50%;background:var(--peach);
+  box-shadow:0 0 0 4px rgba(255,217,168,.35)}
+.hero h2{max-width:11em;margin:0 0 10px;font-size:clamp(30px,5vw,48px);line-height:1.02;
+  letter-spacing:-.045em;font-weight:700}
+.spectrum{position:relative;min-height:170px;padding:14px;border-radius:28px;
+  background:var(--acc);overflow:hidden;box-shadow:0 16px 35px -22px rgba(31,111,107,.75)}
+.spectrum::before,.spectrum::after{content:"";position:absolute;border-radius:50%;
+  background:var(--peach);opacity:.9}
+.spectrum::before{width:125px;height:125px;right:-32px;top:-44px}
+.spectrum::after{width:70px;height:70px;left:-23px;bottom:-28px;background:#f6b89c}
+.spectrum svg{position:relative;z-index:1;width:100%;height:140px}
+.spectrum .trace{stroke-dasharray:420;stroke-dashoffset:420;animation:trace 1.8s ease-out forwards}
+.spectrum .nose{transform-origin:62px 37px;animation:nose 3.4s ease-in-out 1.8s infinite}
+@keyframes trace{to{stroke-dashoffset:0}}
+@keyframes nose{0%,100%{transform:rotate(0)}50%{transform:rotate(4deg)}}
 .now{display:flex;gap:14px;align-items:center;padding:14px 16px;margin-bottom:20px;
   border-color:var(--acc)}
 .now .txt{min-width:0;flex:1}
@@ -601,9 +620,13 @@ h1{margin:0;font-size:20px;font-weight:600;letter-spacing:-.015em}
   white-space:nowrap}
 .now .sub{display:block;color:var(--mut);font-size:12px;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
-.pick{padding:24px 22px;text-align:center}
-.pick h2{margin:0 2px 4px;font-size:15px;font-weight:600}
-.pick p{margin:0 0 16px;color:var(--mut);font-size:13px}
+.pick{padding:28px 30px;text-align:left}
+.pick h2{margin:0 2px 4px;font-size:18px;font-weight:650;letter-spacing:-.02em}
+.pick p{margin:0 0 18px;color:var(--mut);font-size:13px}
+.pathlabel{display:block;margin:0 0 7px;font-size:12px;font-weight:650;color:var(--fg)}
+.quick{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:18px;color:var(--mut);font-size:11px}
+.quick span{display:inline-flex;align-items:center;gap:5px}
+.quick i{width:6px;height:6px;border-radius:50%;background:var(--peach)}
 .btn{appearance:none;border:0;border-radius:9px;background:var(--acc);color:var(--accc);
   font:inherit;font-weight:550;padding:9px 15px;cursor:pointer}
 .btn:hover{filter:brightness(1.07)}
@@ -611,36 +634,15 @@ h1{margin:0;font-size:20px;font-weight:600;letter-spacing:-.015em}
 .btn.sec{background:transparent;color:var(--fg);border:1px solid var(--line);font-weight:500}
 .btn.sec:hover{background:var(--sunk)}
 .row{display:flex;gap:8px;max-width:470px;margin:0 auto}
-input[type=text]{flex:1;min-width:0;padding:9px 11px;background:var(--sunk);
-  color:var(--fg);border:1px solid var(--line);border-radius:9px;font:13px/1.4 inherit}
-input[type=text]:focus-visible,.btn:focus-visible,.link:focus-visible,
-li:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+input[type=text]{flex:1;min-width:0;padding:11px 12px;background:var(--sunk);
+  color:var(--fg);border:1px solid var(--line);border-radius:10px;font:13px/1.4 inherit}
+input[type=text]:focus-visible,.btn:focus-visible,.link:focus-visible{outline:2px solid var(--ring);
+  outline-offset:2px}
 .or{display:flex;align-items:center;gap:10px;margin:16px auto;max-width:470px;
   color:var(--mut);font-size:11px;letter-spacing:.07em;text-transform:uppercase}
 .or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
-section{margin-top:30px}
-h3{margin:0 0 10px;font-size:11px;font-weight:600;letter-spacing:.07em;
-  text-transform:uppercase;color:var(--mut)}
-ul{list-style:none;margin:0;padding:0}
-li{display:flex;gap:12px;align-items:center;padding:11px 14px;cursor:pointer;
-  border-bottom:1px solid var(--line2)}
-li:last-child{border-bottom:0}
-li:hover{background:var(--sunk)}
-.glyph{flex:none;width:32px;height:32px;border-radius:8px;background:var(--sunk);
-  border:1px solid var(--line);display:grid;place-items:center;font-size:10px;
-  font-weight:600;color:var(--mut)}
-.glyph.gone{color:var(--err)}
-.nm{min-width:0;flex:1}
-.nm b{display:block;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.nm span{display:block;color:var(--mut);font-size:12px;overflow:hidden;
-  text-overflow:ellipsis;white-space:nowrap}
 .meta{flex:none;text-align:right;font-size:12px;color:var(--mut)}
 .meta em{display:block;font-style:normal}
-.meta .on{color:var(--ok)}
-.meta .miss{color:var(--err)}
-.go{flex:none;color:var(--mut);opacity:0;font-size:15px}
-li:hover .go,li:focus-visible .go{opacity:1}
-#empty{padding:16px;color:var(--mut);font-size:13px;text-align:center}
 .note{margin-top:18px;padding:11px 14px;border-radius:10px;background:var(--sunk);
   color:var(--mut);font-size:13px}
 .note[hidden]{display:none}
@@ -649,7 +651,8 @@ li:hover .go,li:focus-visible .go{opacity:1}
 .bar i{display:block;height:100%;width:35%;background:var(--acc);
   animation:slide 1.5s ease-in-out infinite}
 @keyframes slide{from{transform:translateX(-100%)}to{transform:translateX(380%)}}
-@media(prefers-reduced-motion:reduce){.bar i{animation:none;width:100%;opacity:.5}}
+@media(prefers-reduced-motion:reduce){.bar i{animation:none;width:100%;opacity:.5}
+  .spectrum .trace{animation:none;stroke-dashoffset:0}.spectrum .nose{animation:none}}
 footer{display:flex;gap:12px;align-items:center;justify-content:space-between;
   margin-top:32px;color:var(--mut);font-size:12px}
 .link{background:none;border:0;padding:0;color:var(--mut);font:inherit;
@@ -688,29 +691,49 @@ html.lock,html.lock body{overflow:hidden}
 #overr .msg{margin:10px 0 0;color:var(--err);font-size:13px;white-space:pre-wrap}
 @media(prefers-reduced-motion:reduce){.ovmark{animation:none;border-top-color:var(--line)}
   .pbar i{transition:none}}
+@media(max-width:620px){main{padding-top:28px}.hero{grid-template-columns:1fr;gap:20px}
+  .spectrum{min-height:125px}.spectrum svg{height:100px}.pick{padding:23px 20px}.row{flex-direction:column}
+  .row .btn{width:100%}.quick{margin-top:16px}}
 </style></head><body><main>
   <div class="head">__MARK__<h1>__APP_NAME__ <span class="tag">__TAGLINE__</span></h1></div>
-  <p class="lede">Open an IONICON run to review its peaks and intervals. A file you have
-    reviewed before reopens with its saved config; a new one is processed first.</p>
+
+  <div class="hero">
+    <div>
+      <p class="eyebrow"><i aria-hidden="true"></i>Local signal desk</p>
+      <h2>Find the story in your spectrum.</h2>
+      <p class="lede">Open an IONICON run to review its peaks and intervals. Saved configs
+        return exactly as you left them; new runs get a clear starting point.</p>
+    </div>
+    <div class="spectrum" aria-label="A stylised mass spectrum with a nose motif" role="img">
+      <svg viewBox="0 0 260 140" aria-hidden="true" focusable="false">
+        <polyline class="trace" points="8,105 42,105 58,78 73,104 91,105 110,102 125,28 137,104
+          158,94 171,101 187,83 200,105 226,105 251,105" fill="none" stroke="#eafaf6"
+          stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        <g class="nose" fill="none" stroke="#ffd9a8" stroke-width="4" stroke-linecap="round"
+          stroke-linejoin="round"><circle cx="125" cy="20" r="10" fill="#ffd9a8" stroke="none"/>
+          <path d="M121 19l9-4 6 6-5 5"/></g>
+        <circle cx="224" cy="36" r="4" fill="#f6b89c"/>
+      </svg>
+    </div>
+  </div>
 
   <div id="now"></div>
 
   <div class="card pick">
     <h2>Open an IONICON run</h2>
-    <p>Choose a file on this computer, or type the path to one.</p>
+    <p>Choose a file on this computer, or type its path below.</p>
+    <label class="pathlabel" for="path">Path to an HDF5 run</label>
     <div class="row">
       <input id="path" type="text" placeholder="/path/to/run.h5" spellcheck="false"
-             autocomplete="off">
-      <button class="btn" id="go" type="button">Open</button>
+             autocomplete="off" aria-describedby="path-help">
+      <button class="btn" id="go" type="button">Open run</button>
     </div>
     <div class="or">or</div>
     <button class="btn sec" id="browse" type="button">Browse this computer&hellip;</button>
+    <div class="quick" id="path-help"><span><i aria-hidden="true"></i>Runs locally</span>
+      <span><i aria-hidden="true"></i>No uploads</span><span><i aria-hidden="true"></i>HDF5 input</span>
+    </div>
   </div>
-
-  <section>
-    <h3>Recent</h3>
-    <div class="card"><ul id="recent"></ul><div id="empty" hidden></div></div>
-  </section>
 
   <div class="note" id="state" role="status" aria-live="polite" hidden></div>
 
@@ -749,51 +772,12 @@ html.lock,html.lock body{overflow:hidden}
 </div>
 <script>
 const $=s=>document.querySelector(s);
-let shown=null;                                  // the file the recents list was built for
-
-function human(b){const u=['B','KB','MB','GB','TB'];let v=b||0,i=0;
-  while(v>=1024&&i<u.length-1){v/=1024;i++;}
-  return (i&&v<10?v.toFixed(1):Math.round(v))+' '+u[i];}
-function when(t){if(!t)return'';const d=new Date(t*1000),mid=new Date();
-  mid.setHours(0,0,0,0);const days=Math.round((mid-d)/864e5);
-  if(days<=0)return'today';
-  if(days===1)return'yesterday';
-  if(days<14)return days+' days ago';
-  return d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});}
 const SEP=String.fromCharCode(92);          // Windows separators, without a literal
 function parts(p){const s=String(p).split(SEP).join('/'),i=s.lastIndexOf('/');
   if(i<0)return{name:s,dir:''};
   return{name:s.slice(i+1),dir:i===0?'/':s.slice(0,i)}}
 function el(tag,cls,text){const n=document.createElement(tag);
   if(cls)n.className=cls; if(text!=null)n.textContent=text; return n;}
-
-async function recent(){
-  let items=[];
-  try{items=await (await fetch('/api/recent')).json();}catch(e){}
-  const ul=$('#recent'); ul.innerHTML='';
-  const list=items.filter(e=>!e.is_open);
-  const msg=$('#empty');
-  msg.hidden=list.length>0;
-  if(!list.length)msg.textContent=items.length
-    ?'The only file you have opened is the one above.'
-    :'Nothing opened yet. Files you review will be listed here.';
-  for(const e of list){
-    const li=el('li'); li.dataset.path=e.path; li.tabIndex=0;
-    li.title=e.path;
-    li.append(el('div','glyph'+(e.exists?'':' gone'),e.exists?'H5':'!'));
-    const nm=el('div','nm'),q=parts(e.path);
-    nm.append(el('b',null,q.name),el('span',null,q.dir));
-    const m=el('div','meta');
-    m.append(el('div',null,e.exists?human(e.size)+' · '+when(e.mtime):null),
-             el('em',e.exists?(e.config_exists?'on':''):'miss',
-                e.exists?(e.config_exists?'reviewed before':'new · will be processed')
-                        :'gone from disk'));
-    li.append(nm,m,el('div','go','→'));
-    li.onclick=()=>openFile(e.path);
-    li.onkeydown=ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();openFile(e.path);}};
-    ul.append(li);
-  }
-}
 
 async function openFile(path){
   let r;
@@ -904,7 +888,7 @@ function current(s){
   close.onclick=async()=>{
     const r=await fetch('/close',{method:'POST'}).catch(()=>null);
     if(!r||!r.ok)return note('Could not close the file.',true,false,true);
-    note(''); box.innerHTML=''; shown=null; recent();
+    note(''); box.innerHTML='';
   };
   card.append(open,close); box.append(card);
 }
@@ -938,7 +922,6 @@ async function tick(){
       if(s.status==='ready') current(s); else $('#now').innerHTML='';
     }
   }
-  if(shown!==s.file){shown=s.file||null; recent();}
   setTimeout(tick, watching||s.status==='exporting'?900:2500);
 }
 
@@ -965,14 +948,14 @@ $('#cancel').onclick=async()=>{
   $('#ovstage').textContent='Cancelling';
   try{await fetch('/cancel',{method:'POST'});}catch(e){}
 };
-$('#ovback').onclick=()=>{closeSheet(); note(''); $('#path').focus(); recent();};
+$('#ovback').onclick=()=>{closeSheet(); note(''); $('#path').focus();};
 $('#quit').onclick=async ev=>{
   ev.preventDefault();
   const ok=await fetch('/shutdown',{method:'POST'}).then(r=>r.ok).catch(()=>false);
   note(ok?'The app has stopped. You can close this tab.':'Could not stop the app.',!ok,false,
        !ok?true:false);
 };
-recent(); tick();
+tick();
 </script></body></html>"""
 
 # The brand is spelled once, in brand.py; the page is a template rather than an
@@ -1002,8 +985,7 @@ def _reveal(path) -> bool:
 
 
 def _recent_entries(open_path=None):
-    """The recents list, with the open file flagged so the page can leave it out of
-    the list: it is already shown in the panel above, and twice is one too many."""
+    """Build the recent-file API records, including the current-file flag."""
     open_resolved = None
     if open_path:
         try:
