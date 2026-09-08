@@ -437,6 +437,10 @@ class Session:
             "config": str(self.config_path) if self.config_path else None,
             "agent_status": self.agent_status,
             "export": self.export_result,
+            # "window" or "browser": how the user is looking at this app right
+            # now. A bundle that meant to open a window and did not has to be able to say
+            # so — otherwise the only evidence is a tab the user has to notice.
+            "surface": surface(),
         }
 
 
@@ -990,6 +994,15 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
     return httpd, session, f"http://127.0.0.1:{actual}/"
 
 
+# How the running app reached the user: a window of its own, or a browser tab. Set by
+# serve_app, read by /api/state, and the difference between "the app opened" and "the
+# app opened a window", which no log line a windowed bundle can write would ever show.
+_surface = "browser"
+
+
+def surface() -> str:
+    return _surface
+
 def _log(text):
     """Report progress on stderr, and to a log file too when there is no console.
 
@@ -1067,16 +1080,24 @@ def serve_app(
         _background(
             session.open, initial, agent_url=agent_url, agent_timeout=agent_timeout
         )
+    global _surface
+    # Decided fresh on every serve: a second call in the same process — a test, or a
+    # script that restarts the app — must not inherit the previous run's surface.
+    _surface = "browser"
     in_window = False
     if window:
         try:
-            # Closing the window is the one thing it may do to the session, and it is
-            # the reverse of the /shutdown route, which stops the session first. When
-            # run_window returns the window is gone, and it has stopped the session on
-            # the way out whether or not the toolkit managed to fire the event.
+            # Said before the call, because run_window does not return for the life of
+            # the window: recorded afterwards, /api/state would answer "browser" at
+            # every moment a window was actually on screen. run_window raises before it
+            # blocks when there is no window to make, so this is not a promise it cannot
+            # keep. Closing the window is the one thing it may do to the session, and it
+            # is the reverse of the /shutdown route, which stops the session first.
+            _surface = "window"
             desktop.run_window(url, on_close=session.stop.set)
             in_window = True
         except desktop.DesktopUnavailable as exc:
+            _surface = "browser"
             _log(f"ptr: no desktop window ({exc}); opening a browser instead")
     if not in_window and open_browser:
         try:

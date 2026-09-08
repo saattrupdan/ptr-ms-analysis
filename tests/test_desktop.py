@@ -195,6 +195,31 @@ def test_the_window_reports_a_missing_extra_rather_than_an_import_error(monkeypa
     assert "desktop extra" in str(excinfo.value)
 
 
+def test_an_unimportable_webview_blames_the_packaging_not_the_user(monkeypatch):
+    """The installed bundle's failure, and the message that hid it.
+
+    ``webview`` is present, so ``find_spec`` finds it, but importing it raises for a
+    reason that has nothing to do with the extra — in the shipped bundle it was
+    ``bottle``, a dependency pywebview imports at module scope that PyInstaller never
+    saw because this package reaches webview through a string. Telling someone to
+    install the extra they already have is worse than saying nothing.
+    """
+    monkeypatch.setattr(
+        desktop.importlib.util, "find_spec",
+        lambda name, *a, **k: object() if name == "webview" else None,
+    )
+
+    def explode(name):
+        raise ModuleNotFoundError("No module named 'bottle'", name=name)
+
+    monkeypatch.setattr(desktop.importlib, "import_module", explode)
+    with pytest.raises(desktop.DesktopUnavailable) as excinfo:
+        desktop.run_window("http://127.0.0.1:1/")
+    message = str(excinfo.value)
+    assert "bottle" in message, message
+    assert "pip install" not in message, "the fix is in the spec, not on the user's machine"
+
+
 def test_the_package_imports_without_the_extra():
     """The core install is numpy + h5py + stdlib, so a clean interpreter must not
     have pywebview in it just because the app module was imported."""

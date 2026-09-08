@@ -82,6 +82,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   compound in only some samples records `samples` in the config; a compound in every
   sample needs no new field, and the summary output is unchanged either way.
 
+### Fixed
+
+- **The installed app opens its own window again.** A packaged bundle was opening a
+  browser tab and saying nothing useful about it. `desktop.py` reaches pywebview
+  through `importlib.import_module()`, which PyInstaller never follows, so although
+  pywebview itself was collected, `bottle` and `proxy_tools` — which `webview/__init__`
+  imports at module scope — were not. The first `import webview` failed with
+  `No module named 'bottle'`, and that was reported as *"the desktop extra is not
+  installed"* while the extra sat inside the bundle. The spec now bundles pywebview's
+  declared dependencies and the GUI toolkit its installed backend imports; the message
+  blames the packaging rather than the user; and `/api/state` reports `surface` as
+  `window` or `browser`, because a `console=False` bundle logs to no terminal and the
+  user had no way to tell. The frozen smoke test reads that field now — it used to
+  grep the log for the word "window", which a silent bundle satisfied by saying
+  nothing, and which the failure line also contained.
+
 ### Changed
 
 - **The desktop app is called Sniff.** `PTR-MS Review` described an instrument and an

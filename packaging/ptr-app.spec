@@ -12,12 +12,17 @@
 # Build on the machine you are targeting — PyInstaller cannot cross-compile. The
 # `package` workflow does exactly that on native macOS and Windows runners.
 #
-#   pip install . pyinstaller
+#   pip install '.[desktop]' pyinstaller
 #   pyinstaller --noconfirm packaging/ptr-app.spec
+#
+# The desktop extra is what gives the bundle a window of its own; built without it the
+# bundle still works, and opens a browser tab instead. The spec says so in its log.
 
+import ast
 import importlib.util
 import os
 import sys
+from importlib.metadata import requires
 from importlib.metadata import version as distribution_version
 
 from PyInstaller.utils.hooks import collect_all
@@ -50,11 +55,90 @@ else:
 # The desktop extra is optional by design: bundle it when it is installed so a
 # double-click opens a real window, and leave it out when it is not, where the very
 # same bundle falls back to a browser tab instead of failing.
+def _requirement_names(package):
+    """Top-level module names ``package`` declares as dependencies.
+
+    Distribution names are not module names, so each is taken down to its import name
+    and dropped if it cannot be imported here.
+    """
+    names = []
+    for spec in requires(package) or []:
+        if "extra ==" in spec or ";" in spec.split(";")[0]:
+            continue  # an optional extra, not something pip installed for us
+        name = spec.split(";")[0].split("[")[0]
+        for op in ("===", "==", "~=", ">=", "<=", ">", "<", "!="):
+            name = name.split(op)[0]
+        name = name.strip().replace("-", "_")
+        if name:
+            names.append(name)
+    return names
+
+
+def _backend_toolkits():
+    """Modules the installed GUI backend imports once a window is actually built.
+
+    Read out of the backend's own source, not from a list: pywebview imports PyObjC on
+    macOS and the WebView2 bridge on Windows, and a toolkit missing from the bundle
+    fails at window time rather than at start-up.
+    """
+    import webview  # only reached when the extra is installed
+
+    root = os.path.dirname(webview.__file__)
+    found = set()
+    for entry in sorted(os.listdir(os.path.join(root, "platforms"))):
+        if not entry.endswith(".py") or entry == "__init__.py":
+            continue
+        try:
+            tree = ast.parse(open(os.path.join(root, "platforms", entry)).read())
+        except (OSError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                found.add(node.names[0].name.split(".")[0])
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                found.add(node.module.split(".")[0])
+    return sorted(
+        name for name in found
+        if not name.startswith(("webview", "ptr_ms_analysis", "."))
+        and name not in {"os", "sys", "time", "re", "json", "threading", "typing", "math"}
+        and importlib.util.find_spec(name) is not None
+    )
+
+
 if importlib.util.find_spec("webview") is not None:
     _w_datas, _w_binaries, _w_hidden = collect_all("webview")
     datas += _w_datas
     binaries += _w_binaries
     hiddenimports += _w_hidden
+
+    # ...but collect_all() covers one package's own files, not the modules that its
+    # __init__ chain imports. The app reaches pywebview through importlib.import_module
+    # inside a function, which modulegraph never sees, so nothing else in the build was
+    # looking at pywebview's dependencies either -- and webview/__init__ imports bottle
+    # and proxy_tools at module scope. A bundle built that way installs cleanly, starts
+    # cleanly, and then fails to open a window with an ImportError that looks like a
+    # missing extra. So: whatever pip installed next to pywebview is bundled with it.
+    for _dep in _requirement_names("pywebview"):
+        if importlib.util.find_spec(_dep) is not None:
+            _d_datas, _d_binaries, _d_hidden = collect_all(_dep)
+            datas += _d_datas
+            binaries += _d_binaries
+            hiddenimports += _d_hidden
+
+    # The GUI toolkit a backend imports only when a window is actually created is a
+    # second, later failure of the same kind. Read it out of the installed backend's
+    # source rather than from a list someone remembered: PyObjC on macOS, and the
+    # WinForms/WebView2 bridge on Windows.
+    hiddenimports += _backend_toolkits()
+    print("ptr-app.spec: bundling the desktop window (pywebview + its dependencies)")
+else:
+    # Loud, because the alternative is a shipped installer that opens a browser tab and
+    # a build log that says nothing about it.
+    print(
+        "ptr-app.spec: WARNING - pywebview is not installed in this environment, so "
+        "this bundle will open a browser tab instead of its own window. "
+        "Build with: pip install '.[desktop]' pyinstaller"
+    )
 
 # Imported lazily inside cmd_app, so freeze it explicitly rather than hoping the
 # import graph reaches it.

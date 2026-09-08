@@ -310,6 +310,27 @@ def _wait_ready(api, timeout=20):
     raise AssertionError("the file never finished opening")
 
 
+def test_the_app_says_how_it_is_showing_itself(server):
+    """/api/state has to be able to tell a window from a tab.
+
+    A bundle that asked for a window and silently got a tab leaves the user with no
+    evidence: a windowed macOS build writes nothing to a console, so the only honest
+    report is the one the running app gives. It is read live, not snapshotted, because
+    the window either opened or it did not and the page must be able to say which.
+    """
+    api, session = server
+    _, body = api.get("/api/state")
+    assert json.loads(body)["surface"] == "browser"
+
+    previous = app.surface()
+    app._surface = "window"
+    try:
+        _, body = api.get("/api/state")
+        assert json.loads(body)["surface"] == "window"
+    finally:
+        app._surface = previous
+
+
 def test_start_screen_lists_recents_and_opens_files(server, tmp_path, monkeypatch):
     api, session = server
     h5 = tmp_path / "run.h5"

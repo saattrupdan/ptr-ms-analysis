@@ -53,7 +53,44 @@ pyinstaller --noconfirm packaging/ptr-app.spec
 (`pywebview`) is optional by design: the spec collects it when it is present so
 a double-click opens a real window, and leaves it out when it is not, where the
 same bundle falls back to a browser tab instead of failing. If you want the
-window in the artifact — you do — install the extra before building.
+window in the artifact — you do — install the extra before building, and check
+the build log says so:
+
+```
+ptr-app.spec: bundling the desktop window (pywebview + its dependencies)
+```
+
+Installing the extra is necessary and, on its own, not enough. `desktop.py`
+reaches pywebview through `importlib.import_module("webview")`, and PyInstaller's
+analysis follows only `import` statements, so nothing in the build looked at
+pywebview at all until the spec started calling `collect_all()` for it — and
+`collect_all()` covers one package's own files, not the modules its `__init__`
+chain imports. `webview/__init__` imports `bottle` and `proxy_tools` at module
+scope. The bundle therefore held `webview`, installed cleanly, and failed its
+first `import webview` at runtime with `No module named 'bottle'` — which
+`desktop.py` reported as *"the desktop extra is not installed"*, advising the user
+to install an extra that was inside the bundle at that moment. The spec now
+bundles what pywebview's own metadata declares, plus the GUI toolkit its installed
+backend imports, read out of that source with `ast` because PyObjC on macOS and
+the WebView2 bridge on Windows are not the same list.
+
+### Does the artifact open a window?
+
+Ask the running app rather than watching for a window:
+
+```bash
+curl -s http://127.0.0.1:8765/api/state | python3 -c "import json,sys; print(json.load(sys.stdin)['surface'])"
+```
+
+`window` or `browser`. For a macOS bundle this is the only reliable signal: it is
+built `console=False`, so it writes to no terminal, and the line explaining a
+fallback never reaches anyone who is not already reading `~/.ptr-ms/log.txt`.
+`scripts/smoke_frozen.py` reads this field for that reason. On a desktop machine
+`--window` must report `window`; a CI runner with no window server may report
+`browser`, and neither counts as a crash. To see the same fact from outside,
+`lsappinfo list | grep -i sniff` shows `type="Foreground"` only once something has
+registered with the window server — a bundle that only opened a tab never appears
+there at all.
 
 That leaves `dist/Sniff.app/Contents/MacOS/ptr` on macOS and
 `dist/ptr/ptr.exe` on Windows. Check it before wrapping it:
@@ -218,8 +255,14 @@ python scripts/smoke_frozen.py "/Applications/Sniff.app/Contents/MacOS/ptr"
 
 It runs three phases: `app <file> --no-browser --port N` must serve the review
 page for a synthetic run; the same executable with no arguments must open the
-start screen; and `--window` must either open a window or say it fell back to a
-browser tab, never die on a machine with no window server.
+start screen; and `--window` must report which surface it got, never die on a
+machine with no window server.
+
+The third phase asks `/api/state` for the surface. An earlier version decided by
+grepping the captured output for the word `window`, which was wrong twice over: a
+`console=False` macOS bundle writes nothing there, so an empty log read as
+success, and the one line that reported failure — `no desktop window (...)` —
+contained the word as well. That is how a browser-only artifact passed for green.
 
 To look inside a package without installing it — what it will write, and where:
 

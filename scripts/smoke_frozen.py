@@ -264,10 +264,23 @@ def main(argv) -> int:
                     file=sys.stderr,
                 )
                 return 1
+            # Ask the app, not the log. A windowed macOS bundle writes to no
+            # console at all, so grepping the captured output for the word "window"
+            # used to report success precisely when nothing had been written — and
+            # the failure it was meant to catch contained that word too.
+            surface = json.loads(get(win_base + "/api/state")[1]).get("surface")
+            if surface not in ("window", "browser"):
+                print(
+                    "frozen app smoke: FAIL — /api/state did not say how the app is "
+                    f"being shown: {surface!r}",
+                    file=sys.stderr,
+                )
+                return 1
             windowed = (
-                "fell back to a browser tab"
-                if any("window" in line.lower() for line in win_lines)
-                else "opened a window"
+                "opened its own window"
+                if surface == "window"
+                else "fell back to a browser tab (a runner with no window server "
+                     "would; a desktop machine should not)"
             )
             post(win_base + "/shutdown")
         finally:

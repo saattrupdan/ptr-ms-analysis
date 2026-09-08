@@ -16,6 +16,7 @@ never a traceback out of someone else's package.
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import threading
 
 from . import brand
@@ -45,16 +46,20 @@ def _import_webview():
     Called from inside every function here, never at module scope: the package has to
     stay importable — and useful — without the extra installed.
     """
-    try:
-        return importlib.import_module("webview")
-    except ImportError as exc:
+    if importlib.util.find_spec("webview") is None:
         raise DesktopUnavailable(
             "the desktop extra is not installed "
             "(pip install 'ptr-ms-analysis[desktop]')"
-        ) from exc
-    except Exception as exc:  # a GUI toolkit it could not load, say
+        )
+    try:
+        return importlib.import_module("webview")
+    except Exception as exc:
+        # The extra is installed — it is something pywebview itself needs that is
+        # missing or broken. In a frozen bundle that is usually a dependency the
+        # packer never saw, because this module reaches webview through a string,
+        # so say what failed rather than blaming the user's install.
         raise DesktopUnavailable(
-            f"pywebview would not load ({type(exc).__name__}: {exc})"
+            f"pywebview is installed but would not load ({type(exc).__name__}: {exc})"
         ) from exc
 
 
