@@ -93,6 +93,15 @@ your machine, so it can ask it, which a web page normally cannot. The dialog bel
 the computer rather than the tab, so it can appear behind the browser window. Files are
 never uploaded anywhere: the page talks only to `127.0.0.1`.
 
+Opening a file happens behind a full-screen sheet rather than as a line of text: the
+file's name, what the app is doing, a bar that tracks the cycles it has read, a rough
+ETA and **Cancel**. The bar is driven by the work itself — on the 2 GB fixture reading
+the run is about 89 % of an open, so it gets about 89 % of the bar — and a cancel stops
+the analysis at the next block, closes the file and puts you back on the start screen
+with nothing written and nothing broken, ready to open the same file again. When the
+open finishes you are taken straight into the review, so Back does not return you to a
+sheet for a file that is already open.
+
 ### Packaging the app
 
 `ptr app` freezes into something a reviewer can run with no Python installed:
@@ -169,9 +178,9 @@ bundle is signed and notarised with a Developer ID or code-signing certificate, 
 spec and both installer sources are ready for without other changes.
 
 A double-clicked app opens its review page in the browser and prints nothing, since
-there is no terminal; its URL and any errors go to `~/.ptr-ms/log.txt`. "Stop the app"
-at the bottom of the start screen shuts the server down — from a terminal, Ctrl-C does
-the same.
+there is no terminal; its URL and any errors go to `~/.ptr-ms/log.txt`. A window stops
+the server when you close it; in a browser tab, where there is no window to close, the
+*Stop the app* link in the footer does it — from a terminal, Ctrl-C does the same.
 
 `viz` opens a browser review app for an existing peak list + ranges so an expert can
 visually check and tweak peaks / segments / calibration. K, molar volume, kinetic and
