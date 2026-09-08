@@ -331,12 +331,14 @@ def test_the_app_says_how_it_is_showing_itself(server):
         app._surface = previous
 
 
-def test_start_screen_lists_recents_and_opens_files(server, tmp_path, monkeypatch):
+def test_start_screen_opens_files_without_rendering_recents(server, tmp_path, monkeypatch):
     api, session = server
     h5 = tmp_path / "run.h5"
     make_h5(h5)
     status, body = api.get("/")
     assert status == 200 and b"Sniff" in body and b"PTR-MS review" in body
+    assert b"/api/recent" not in body and b'id="recent"' not in body
+    assert b"Find the story in your spectrum." in body
 
     with (
         mock.patch.object(app, "auto_peaks", return_value=[{"mz": 42.0}]),
@@ -798,9 +800,8 @@ def test_the_spec_still_installs_the_hook():
     assert "runtime_hook.py" in spec
 
 
-def test_the_open_file_is_flagged_in_recents(server, tmp_path, monkeypatch):
-    """The start screen lists the open file in its own panel, so the recents list has
-    to say which entry that is; otherwise it shows twice, once without the button."""
+def test_the_recent_api_flags_the_open_file(server, tmp_path, monkeypatch):
+    """The backend keeps the open-file flag for API clients, independently of the UI."""
     api, session = server
     # This test is the only writer of its own recents file; the session-wide one would
     # otherwise see these paths too.

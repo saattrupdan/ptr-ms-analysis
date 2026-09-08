@@ -60,7 +60,7 @@ name is in `ptr_ms_analysis/brand.py`, and the mark next to it is drawn by
 `packaging/make_icons.py`, which also builds the `.icns` and `.ico` the installers carry.
 
 ```bash
-ptr app                        # start screen: recent files, or type a path
+ptr app                        # start screen: type a path or browse for a run
 ptr app FILE.h5 --no-browser   # open one file immediately, in a browser tab
 ptr app --window               # force the desktop window
 ptr app --port 8791            # fixed port (it probes upward if the port is taken)
@@ -86,12 +86,13 @@ summary already sits at that name — a Viewer export, say — it writes `<name>
 instead of overwriting it. Opening another file closes the current one, since a large
 run holds its data in memory.
 
-The start screen lists recent runs with their size, when you last had them open and
-whether a config exists yet; the one you have open is shown once, in its own panel, with
-**Open the review**. **Browse this computer…** opens a real file dialog — the app runs on
-your machine, so it can ask it, which a web page normally cannot. The dialog belongs to
-the computer rather than the tab, so it can appear behind the browser window. Files are
-never uploaded anywhere: the page talks only to `127.0.0.1`.
+The opening screen is deliberately uncluttered: type a path or use **Browse this
+computer…** to choose a run. If a file is already open, it appears once in its own
+panel with **Open the review**. The app still remembers opened files in its local recent
+file store for API clients and diagnostics, but does not display that history in the
+opening screen. The dialog belongs to the computer rather than the tab, so it can appear
+behind the browser window. Files are never uploaded anywhere: the page talks only to
+`127.0.0.1`.
 
 Opening a file happens behind a full-screen sheet rather than as a line of text: the
 file's name, what the app is doing, a bar that tracks the cycles it has read, a rough
