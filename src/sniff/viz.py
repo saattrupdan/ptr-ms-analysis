@@ -379,6 +379,9 @@ def build_viz_data(
         if good.any():
             href_default = round(float(np.median(humidity[good])), 5)
 
+    config_payload = dict(config_base or {})
+    config_payload.setdefault("mass_axis_domain", ptrms.MASS_AXIS_CONFIG_DOMAIN)
+    config_payload.setdefault("mass_axis_version", ptrms.MASS_AXIS_CONFIG_VERSION)
     return {
         "meta": {
             "file": os.path.abspath(f.filename) if hasattr(f, "filename") else "",
@@ -426,7 +429,7 @@ def build_viz_data(
             "primary_available": primary is not None,
             "concentration_available": primary is not None and K is not None,
         },
-        "config_base": config_base or {},
+        "config_base": config_payload,
         "merge_note": str(merge_note or ""),
         "transmission": {
             "masses": [round(float(x), 4) for x in tm],
@@ -1144,7 +1147,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <p class="lead" style="font-size:11.5px">How this tool turns the raw IONICON <code>.h5</code> into the concentrations you review here. Everything instrument-specific is read from the file; you curate the chemistry.</p>
 
   <h3>1 · Mass calibration &amp; drift</h3>
-  <p>The instrument stores two or more calibration anchors in <code>CALdata/Mapping</code> giving <b>timebin = a·√(m<sub>file</sub>) + b</b>. Two anchors determine the coefficients directly; three or more valid, well-conditioned anchors are fit by least squares and accepted only when their reconstructed masses have finite absolute relative errors of at most 100 ppm. Invalid or physically inconsistent Mapping data falls back to usable per-cycle <code>CALdata/Spectrum</code> coefficients. On top of that file mapping, Sniff detects the water-cluster (37.033) and iodobenzene (204.951) peaks in the sanitised average spectrum with sub-bin centring. Only two prominent, high-S/N, unambiguous and physically plausible anchors enable the separate correction <b>m<sub>corrected</sub> = scale·m<sub>file</sub> + offset</b>; otherwise the valid file axis is left unchanged and the precise reason is reported. This correction translates and scales the whole axis independently of the selected compound panel. Each isolated peak retains a tight local apex refinement; clustered components stay at corrected theoretical model centres so they do not jump onto a neighbour.</p>
+  <p>The instrument stores two or more calibration anchors in <code>CALdata/Mapping</code> giving <b>timebin = a·√(m<sub>file</sub>) + b</b>. Two anchors determine the coefficients directly; three or more valid, well-conditioned anchors are fit by least squares and accepted only when their reconstructed masses have finite absolute relative errors of at most 100 ppm. Invalid or physically inconsistent Mapping data falls back to usable per-cycle <code>CALdata/Spectrum</code> coefficients. On top of that file mapping, Sniff requires the operational water calibrant (37.033) and protonated iodobenzene (204.951) in the sanitised average spectrum with sub-bin centring. Both anchors must be prominent, high-S/N, unambiguous, conservatively positioned and persistent across raw cycle blocks when available; otherwise the analysis stops with structured calibration diagnostics rather than using the HDF5 axis. The separate correction is <b>m<sub>corrected</sub> = scale·m<sub>file</sub> + offset</b>, translating and scaling the whole axis independently of the selected compound panel. Each isolated peak retains a tight local apex refinement; clustered components stay at corrected theoretical model centres so they do not jump onto a neighbour.</p>
 
   <h3>2 · Peak detection &amp; identification</h3>
   <p>Peaks are local maxima of the average spectrum above a relative-height threshold. For each, candidate <b>molecular formulas</b> are enumerated offline (all plausible CHNOPS+halogen formulas within ~12 mDa) and ranked by three independent lines of evidence: exact-mass error, the measured-vs-predicted <b>¹³C (M+1) and heteroatom (M+2, e.g. S/Cl) isotope pattern</b>, and plausibility (integer ring+double-bond equivalents, the nitrogen rule, element ratios). Near-isobars are told apart by composition, not "nearest mass". Names and isomer labels come from the bundled PTR Library mapping when the formula is known; formula ranking cannot determine structural isomers.</p>

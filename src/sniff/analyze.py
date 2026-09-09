@@ -88,6 +88,17 @@ def _load_config(args):
         return json.load(fh)
 
 
+def _migrate_loaded_config(config, args, mass_axis):
+    """Migrate a file-backed config after successful internal calibration."""
+    if not getattr(args, "config", None) or not config:
+        return config
+    migrated, changed = ptrms.migrate_config_mass_axis(config, mass_axis)
+    if changed:
+        with open(args.config, "w", encoding="utf-8") as fh:
+            json.dump(migrated, fh, indent=2)
+    return migrated
+
+
 def resolve_analysis_settings(config=None, args=None):
     """Resolve analysis settings with CLI > curated config > legacy defaults.
 
@@ -349,7 +360,7 @@ def _attr(f, key):
 _REAGENT_MZ = {
     19.018: "H3O+ primary",
     21.022: "H3O+ (18O) isotope",
-    37.028: "H3O+·H2O cluster",
+    37.033: "H3O+·H2O cluster (operational calibration water)",
     55.039: "H3O+·(H2O)2 cluster",
     73.049: "H3O+·(H2O)3 cluster",
     31.989: "O2+",
@@ -942,12 +953,14 @@ def _auto_peaks(f, args, R=None, R_phys=None):
     )
 
 
-def _load_peaks(args, f, settings=None):
+def _load_peaks(args, f, settings=None, config=None):
     if args.peaks_json:
         return json.loads(args.peaks_json)
     if args.config:
-        with open(args.config, encoding="utf-8") as fh:
-            cfg = json.load(fh)
+        cfg = config
+        if cfg is None:
+            with open(args.config, encoding="utf-8") as fh:
+                cfg = json.load(fh)
         if cfg.get("peaks"):
             return cfg["peaks"]
     if getattr(args, "auto_peaks", False):
@@ -1009,10 +1022,11 @@ def _resolve_ranges(f, ranges_cfg):
 
 def cmd_analyze(args):
     config = _load_config(args)
-    settings = resolve_analysis_settings(config, args)
     with h5py.File(args.h5, "r") as f:
         mass_axis = ptrms.load_mass_axis(f)
-        peaks = _load_peaks(args, f, settings=settings)
+        config = _migrate_loaded_config(config, args, mass_axis)
+        settings = resolve_analysis_settings(config, args)
+        peaks = _load_peaks(args, f, settings=settings, config=config)
         if not peaks:
             # distinguish a genuinely blank file from a missing peak list
             if getattr(args, "auto_peaks", False):
@@ -1313,10 +1327,12 @@ def cmd_viz(args):
     from . import viz
 
     config = _load_config(args)
-    settings = resolve_analysis_settings(config, args)
     x_axis_unit = resolve_x_axis_unit(config, args)
     with h5py.File(args.h5, "r") as f:
-        peaks = _load_peaks(args, f, settings=settings)
+        mass_axis = ptrms.load_mass_axis(f)
+        config = _migrate_loaded_config(config, args, mass_axis)
+        settings = resolve_analysis_settings(config, args)
+        peaks = _load_peaks(args, f, settings=settings, config=config)
         ranges_cfg = _load_ranges(args, f)
         if not peaks or not ranges_cfg:
             sys.exit(
@@ -1363,6 +1379,8 @@ def cmd_viz(args):
         if not os.path.exists(cfg_path):
             initial = dict(config)
             initial.update({"peaks": peaks, "ranges": ranges_cfg})
+            initial["mass_axis_domain"] = ptrms.MASS_AXIS_CONFIG_DOMAIN
+            initial["mass_axis_version"] = ptrms.MASS_AXIS_CONFIG_VERSION
             initial["analyze"] = {
                 **(config.get("analyze") or {}),
                 **{key: settings[key] for key in _ANALYSIS_DEFAULTS},
@@ -1503,11 +1521,13 @@ def cmd_rates(args):
 def cmd_calibrate(args):
     """Fit the concentration constant K against a reference Viewer CSV."""
     config = _load_config(args)
-    settings = resolve_analysis_settings(config, args)
     ref = _parse_viewer_csv(args.reference)
     ref_conc = {k: v["con"] for k, v in ref.items()}
     with h5py.File(args.h5, "r") as f:
-        peaks = _load_peaks(args, f, settings=settings)
+        mass_axis = ptrms.load_mass_axis(f)
+        config = _migrate_loaded_config(config, args, mass_axis)
+        settings = resolve_analysis_settings(config, args)
+        peaks = _load_peaks(args, f, settings=settings, config=config)
         # default: calibrate on whatever masses appear in the reference
         if not peaks:
             masses = sorted({mz for (mz, _) in ref_conc})
@@ -1520,7 +1540,9 @@ def cmd_calibrate(args):
         R = settings["R"]
         R_phys = settings["R_phys"]
         primary_mz = settings["primary_mz"]
-        traces, _ = ptrms.extract_traces(f, masses, R=R, R_phys=R_phys)
+        traces, _ = ptrms.extract_traces(
+            f, masses, R=R, R_phys=R_phys, mass_axis=mass_axis
+        )
         K, resid, n = ptrms.calibrate_K(
             f, traces, ref_conc, ranges, primary_mz=primary_mz, R_used=R
         )
@@ -1646,11 +1668,12 @@ def analyze_config_to_csv(h5_path, config, out, sep=";", include_cycle_rows=True
     Honours `config['analyze']` settings (R, K, molar_volume, kinetic, k_anchor,
     humidity_*) when present. Used by `viz` after an interactive review and as the
     shared quantify path. Returns a small JSON summary."""
-    settings = resolve_analysis_settings(config)
-    peaks = config["peaks"]
-    ranges_cfg = config.get("ranges") or []
     with h5py.File(h5_path, "r") as f:
         mass_axis = ptrms.load_mass_axis(f)
+        config, _ = ptrms.migrate_config_mass_axis(config, mass_axis)
+        settings = resolve_analysis_settings(config)
+        peaks = config["peaks"]
+        ranges_cfg = config.get("ranges") or []
         masses = [float(p["mz"]) for p in peaks]
         labels = {
             float(p["mz"]): formula_id.identity_label(
@@ -2240,7 +2263,18 @@ def main():
     pc.set_defaults(func=cmd_compare)
 
     args = p.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except ptrms.MassCalibrationError as exc:
+        _emit(
+            {
+                "error": "mass_calibration_failed",
+                "message": str(exc),
+                "mass_axis_calibration": exc.diagnostics,
+            },
+            getattr(args, "raw", True),
+        )
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

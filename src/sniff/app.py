@@ -191,6 +191,7 @@ def bootstrap_config(h5_path: str, f=None, *, progress=None, should_stop=None) -
     source = h5py.File(h5_path, "r") if own else f
     try:
         _say(0.0)
+        mass_axis = ptrms.load_mass_axis(source)
         peaks = auto_peaks(source)
         _say(0.1)
         _halt()  # detection is the only cancellable gap before the review data
@@ -231,6 +232,9 @@ def bootstrap_config(h5_path: str, f=None, *, progress=None, should_stop=None) -
         "analyze": {k: v for k, v in settings.items() if k != "sources"},
         "viz": {"x_axis_unit": "cycle"},
         "checklist": checklist,
+        "mass_axis_domain": ptrms.MASS_AXIS_CONFIG_DOMAIN,
+        "mass_axis_version": ptrms.MASS_AXIS_CONFIG_VERSION,
+        "mass_axis_calibration": mass_axis.to_dict(),
         "diagnostics": {
             "n_peaks": len(peaks),
             "n_ranges": len(ranges),
@@ -284,6 +288,7 @@ class Session:
         self.status = "empty"  # empty | loading | ready | error
         self.stage = ""
         self.error = None
+        self.error_details = None
         self.progress = None  # 0..1 while an open runs, None at every other time
         self.started_at = None  # monotonic clock, for the page's ETA
         self.export_result = None
@@ -369,15 +374,23 @@ class Session:
         try:
             self.close()
             self.status, self.stage, self.error = "loading", "Opening the file", None
+            self.error_details = None
             self.agent_status = None
             self.export_result = None
             path = str(Path(path).expanduser().resolve())
             config_path = config_path_for(path)
             self._file = h5py.File(path, "r")
             self._say(P_META)
+            # Calibration is a gate: an old config must never be migrated before
+            # both run-internal anchors have been proved.
+            mass_axis = ptrms.load_mass_axis(self._file)
             config = _read_json(config_path) if config_path.exists() else None
             if config is not None and not _valid_config(config):
                 raise ValueError(f"{config_path} is not a sniff config")
+            if config is not None:
+                config, migrated = ptrms.migrate_config_mass_axis(config, mass_axis)
+                if migrated:
+                    _write_json(config_path, config)
             prep_start = P_META
             if config is None:
                 self.stage = "Detecting peaks and intervals"
@@ -423,6 +436,9 @@ class Session:
         except Exception as exc:
             self.close()
             self.status, self.error, self.stage = "error", str(exc), "Failed to open"
+            self.error_details = (
+                exc.diagnostics if isinstance(exc, ptrms.MassCalibrationError) else None
+            )
             raise
         finally:
             with self._lock:
@@ -463,6 +479,17 @@ class Session:
                 f"Agent review failed — using the automatic config "
                 f"({type(exc).__name__}: {exc})"
             )[:300]
+            return config
+        # Agent responses are edits to the already corrected automatic config, not
+        # pre-calibration exports. Keep the domain marker authoritative even when an
+        # otherwise valid agent omits unknown top-level fields.
+        answer.setdefault("mass_axis_domain", config["mass_axis_domain"])
+        answer.setdefault("mass_axis_version", config["mass_axis_version"])
+        if (
+            answer["mass_axis_domain"] != ptrms.MASS_AXIS_CONFIG_DOMAIN
+            or answer["mass_axis_version"] != ptrms.MASS_AXIS_CONFIG_VERSION
+        ):
+            self.agent_status = "Agent review failed — unsupported mass axis marker."
             return config
         self.agent_status = "Agent review applied."
         _write_json(config_path, answer)
@@ -560,6 +587,7 @@ class Session:
             "status": self.status,
             "stage": self.stage,
             "error": self.error,
+            "error_details": self.error_details,
             "file": self.path,
             "config": str(self.config_path) if self.config_path else None,
             "agent_status": self.agent_status,

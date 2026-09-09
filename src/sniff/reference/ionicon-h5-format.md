@@ -79,10 +79,14 @@ be represented by changing them.
 
 The run-average `SPECdata/AverageSpec` is sanitised by replacing non-finite and
 negative bins with zero. On the baseline file axis, Sniff searches conservatively for
-the water-cluster ion at 37.033 and iodobenzene at 204.951. Each centre is refined to
-sub-bin precision and must pass local prominence, robust S/N, resolved-competitor and
-search-window checks. Both anchors must pass, and their solution must be finite,
-monotonic, close to unit scale and limited in offset. The accepted mapping is:
+the operational water calibrant at 37.033 and protonated iodobenzene at 204.951.
+Each centre is refined to sub-bin precision and must pass local prominence, robust
+S/N, resolved-competitor, proximity and search-window checks. When raw spectra are
+available, the candidate must also persist in at least five of eight deterministic
+cycle blocks. Both anchors are mandatory: a missing, weak, ambiguous or implausible
+anchor raises a structured calibration error and the HDF5 axis is never used as a
+silent fallback. Their solution must be finite, monotonic, close to unit scale and
+limited in offset. The accepted mapping is:
 
 ```
 m_corrected = scale·m_file + offset
@@ -94,11 +98,12 @@ inverse is used for target-to-timebin windows. The two accepted observed centres
 exactly to 37.033 and 204.951, while every intermediate compound receives the same
 translation and scale. This replaces the former target-panel-derived multiplicative
 drift, avoiding a second correction whose value depended on the selected compounds.
-A missing, weak, ambiguous, malformed or physically implausible anchor leaves
-`scale = 1` and `offset = 0`: the valid file calibration is retained, with the precise
-fallback and per-anchor evidence exposed in diagnostics. Per-cycle `MassCal_a/b` also
-exist in `AddTraces/DataCollection`, but barely differ from the global fit in the
-examined files.
+A failed anchor is reported with its status, reason, prominence/S/N and (when
+available) per-cycle-block persistence in the JSON error diagnostics. The 37.033
+peak is the operational calibrant; humidity calculations may use its water-cluster
+ratio, but that ratio is not a substitute for calibration evidence. Per-cycle
+`MassCal_a/b` also exist in `AddTraces/DataCollection`, but barely differ from the
+global fit in the examined files.
 
 ## The four quantities
 

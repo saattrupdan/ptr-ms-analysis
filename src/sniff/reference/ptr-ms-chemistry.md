@@ -25,7 +25,7 @@ These are not analytes; they are the chemistry of the source. Skip them as VOCs
 |---|---|---|
 | 19.018 | H₃O⁺ | primary ion (usually off-scale) |
 | 21.022 | H₃¹⁸O⁺ | primary-ion isotope, ×500 → total H₃O⁺ |
-| 37.028 | H₃O⁺·H₂O | first water cluster |
+| 37.033 | H₃O⁺·H₂O | operational water calibrant; use its ratio for humidity only after calibration |
 | 55.039 | H₃O⁺·(H₂O)₂ | second water cluster |
 | 32 / 30 / 48 | O₂⁺ / NO⁺ / O₂⁺·? | present if in NO⁺/O₂⁺ mode or from impurities |
 

@@ -22,12 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   handling,
   diagnostic checks, range labels, concentration caveats or identification limits.
 
-- **Masses now use a conservative internal two-point axis correction.** Water-cluster
-  (37.033) and iodobenzene (204.951) anchors define a separate affine mass-domain
-  scale and offset only when both pass sub-bin prominence, S/N, ambiguity and
-  plausibility checks. Otherwise the valid HDF5 calibration is retained with a precise
-  fallback diagnostic. The corrected forward/inverse mapping is shared by detection,
-  extraction, identification, analysis and browser interaction.
+- **Mass calibration now fails closed on two required internal standards.** The
+  operational water calibrant (37.033) and protonated iodobenzene (204.951) must both
+  pass prominence, S/N, ambiguity, proximity and raw-cycle persistence checks. Missing
+  or implausible anchors produce structured errors rather than silently using the HDF5
+  axis; corrected forward/inverse mapping remains shared by detection, extraction,
+  identification, analysis and browser interaction. Unmarked old configs are migrated
+  once from file-axis masses to corrected-axis masses and marked with their domain and
+  version.
 - **The product is now Sniff.** The installable package and source directory are
   `sniff`, and the command is `sniff`. Desktop state lives under `~/.sniff`; existing
   `~/.ptr-ms/recent.json` and beside-file `.ptr.json` data remain readable and are never
