@@ -242,7 +242,10 @@ def validate_mass_axis(mass_axis):
             ).all()
             or not np.isclose(target_value, target, rtol=0, atol=1e-12)
             or observed <= 0
-            or abs(observed - target) > INTERNAL_ANCHOR_SEARCH_DA
+            or (
+                INTERNAL_ANCHOR_SEARCH_DA - abs(observed - target)
+                < INTERNAL_ANCHOR_PROXIMITY_DA
+            )
             or not np.isclose(
                 timebin,
                 mass_axis.a * np.sqrt(observed) + mass_axis.b,

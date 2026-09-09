@@ -156,6 +156,12 @@ def test_mass_axis_validator_rejects_implausible_affine_correction(scale, offset
         ptrms.validate_mass_axis(axis)
 
 
+def test_mass_axis_validator_rejects_anchor_near_search_boundary():
+    axis = valid_axis(scale=1.0, offset=-0.18)
+    with pytest.raises(ptrms.MassCalibrationError):
+        ptrms.validate_mass_axis(axis)
+
+
 def test_mass_axis_validator_rejects_bad_persistence_arithmetic():
     axis = valid_axis()
     persistence = axis.diagnostics["anchors"][0]["persistence"]
