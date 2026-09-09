@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Mass-axis persistence ignores unrelated corrupt bins.** Raw-cycle anchor checks now
+  use only finite samples in each anchor window, while rejecting anchors without two usable
+  cycles and preserving the existing block-persistence threshold.
+
 ### Changed
 
 - **Mass-axis calibration is now one validated, cancellable operation per open.** Its

@@ -306,13 +306,42 @@ class InternalMassAxisCalibrationTest(unittest.TestCase):
             "fewer than two usable", caught.exception.diagnostics["fallback_reason"]
         )
 
-    def test_nonfinite_raw_cycles_are_rejected(self):
+    def test_unrelated_nonfinite_raw_bins_do_not_reject_calibration(self):
         with self._file(peaks=self._good_peaks()) as h5:
             h5["SPECdata/Intensities"][0, 0] = np.nan
+            axis = ptrms.load_mass_axis(h5)
+
+        self.assertTrue(axis.applied)
+        for anchor in axis.diagnostics["anchors"]:
+            self.assertTrue(anchor["persistence"]["available"])
+
+    def test_nonfinite_anchor_window_is_rejected_with_anchor_diagnostic(self):
+        water = int(self.A * np.sqrt(self._observed_mass(37.033)))
+        with self._file(peaks=self._good_peaks()) as h5:
+            h5["SPECdata/Intensities"][:, water - 30 : water + 31] = np.nan
             with self.assertRaises(ptrms.MassCalibrationError) as caught:
                 ptrms.load_mass_axis(h5)
 
-        self.assertIn("non-finite", caught.exception.diagnostics["fallback_reason"])
+        diagnostics = caught.exception.diagnostics
+        self.assertIn("water_cluster anchor", diagnostics["fallback_reason"])
+        self.assertIn(
+            "fewer than two usable raw cycles", diagnostics["fallback_reason"]
+        )
+        self.assertFalse(diagnostics["anchors"][0]["persistence"]["available"])
+
+    def test_unusable_anchor_window_is_rejected_with_anchor_diagnostic(self):
+        water = int(self.A * np.sqrt(self._observed_mass(37.033)))
+        with self._file(peaks=self._good_peaks()) as h5:
+            h5["SPECdata/Intensities"][:, water - 30 : water + 31] = 0.0
+            with self.assertRaises(ptrms.MassCalibrationError) as caught:
+                ptrms.load_mass_axis(h5)
+
+        diagnostics = caught.exception.diagnostics
+        self.assertIn("water_cluster anchor", diagnostics["fallback_reason"])
+        self.assertIn(
+            "fewer than two usable raw cycles", diagnostics["fallback_reason"]
+        )
+        self.assertFalse(diagnostics["anchors"][0]["persistence"]["available"])
 
     def test_supplied_unapplied_axes_are_rejected_by_production_entry_points(self):
         axis = ptrms.MassAxisCalibration(
