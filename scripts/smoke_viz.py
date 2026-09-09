@@ -10,6 +10,7 @@ without making the package grow a frontend test dependency.
 
 from __future__ import annotations
 
+import copy
 import http.server
 import json
 import shutil
@@ -113,6 +114,16 @@ def _synthetic_data() -> dict[str, Any]:
         "spectrum": [10] * 13000,
         "peaks": [
             {
+                "_config_original": {
+                    "mz": 100.0,
+                    "label": "Unassigned sole candidate",
+                    "apex": 99.999,
+                    "center": 100.001,
+                    "mass": 100.002,
+                    "win_l": 0.04,
+                    "win_r": 0.04,
+                    "future": {"keep": [1, 2, 3]},
+                },
                 "id": 0,
                 "mz": 100.0,
                 "apex": 100.0,
@@ -246,7 +257,20 @@ def _synthetic_data() -> dict[str, Any]:
             },
         ],
         "ranges": [
-            {"label": "sample_01", "start": 1, "end": 2, "class": "sample"},
+            {
+                "_config_original": {
+                    "label": "sample_01",
+                    "start": 1,
+                    "end": 2,
+                    "unit": "cycle",
+                    "merged_gaps": [{"start": 2, "end": 2}],
+                    "future": {"keep": True},
+                },
+                "label": "sample_01",
+                "start": 1,
+                "end": 2,
+                "class": "sample",
+            },
             {"label": "sample_02", "start": 3, "end": 4, "class": "sample"},
         ],
         "config_base": {
@@ -439,7 +463,7 @@ def _standalone_browser_pass(data: dict[str, Any]) -> None:
             _browser(session, "wait", "--load", "networkidle")
             _browser(session, "eval", "localStorage.setItem('ptrms-onboarded', '1')")
             _browser(session, "reload")
-            _freeze_animations(session)   # the reload dropped the injected override
+            _freeze_animations(session)  # the reload dropped the injected override
             _browser(session, "wait", "--load", "networkidle")
             _assert(
                 _eval(
@@ -709,7 +733,9 @@ def _start_screen_browser_pass() -> None:
                     "return r.width>0&&r.height>0&&r.left>=cr.left&&r.right<=cr.right}), "
                     "noPageOverflow:document.documentElement.scrollWidth<=window.innerWidth}; })()",
                 )
-                _assert_eq(layout["width"], width, "start screen viewport did not apply")
+                _assert_eq(
+                    layout["width"], width, "start screen viewport did not apply"
+                )
                 _assert(
                     layout["name"] == "very-long-ionicon-run-name.h5"
                     and layout["sub"].endswith("/September"),
@@ -927,9 +953,11 @@ def _review_round_browser_pass(session: str) -> None:
         "unticking one sample interval changed the other samples too: " + str(scoped),
     )
     _assert(
-        scoped["back"] == "all" and scoped["other"] is True
+        scoped["back"] == "all"
+        and scoped["other"] is True
         and scoped["aggregate"] == "all",
-        "ticking the sample back did not restore the compound everywhere: " + str(scoped),
+        "ticking the sample back did not restore the compound everywhere: "
+        + str(scoped),
     )
 
     # ticking one sample and unticking another between renders must not cancel the
@@ -955,7 +983,8 @@ def _review_round_browser_pass(session: str) -> None:
         two_toggles["state"] == "some"
         and two_toggles["samples"] == ["sample_02"]
         and two_toggles["listed"],
-        "ticking one sample and unticking another lost the compound: " + str(two_toggles),
+        "ticking one sample and unticking another lost the compound: "
+        + str(two_toggles),
     )
 
     # --- the interval in scope is one control, and it follows the interval the
@@ -996,8 +1025,10 @@ def _review_round_browser_pass(session: str) -> None:
         + str(scope["off"]),
     )
     _assert(
-        scope["clsBack"] == "sample" and scope["labelBack"] == scope["first"]
-        and scope["untouched"] and scope["samples"] is None,
+        scope["clsBack"] == "sample"
+        and scope["labelBack"] == scope["first"]
+        and scope["untouched"]
+        and scope["samples"] is None,
         "classing an interval background and back changed the config: " + str(scope),
     )
 
@@ -1041,8 +1072,10 @@ def _review_round_browser_pass(session: str) -> None:
         + str(disc),
     )
     _assert(
-        disc["off"]["state"] is False and disc["off"]["cfg"] is False
-        and disc["off"]["aria"] == "false" and disc["on"] is True
+        disc["off"]["state"] is False
+        and disc["off"]["cfg"] is False
+        and disc["off"]["aria"] == "false"
+        and disc["on"] is True
         and disc["cfgOn"] is True,
         "the composite VOC legend is not a working switch: " + str(disc),
     )
@@ -1059,11 +1092,10 @@ def _review_round_browser_pass(session: str) -> None:
         "max:Number(plotResize.getAttribute('aria-valuemax'))}; "
         "plotHeight=keep; relayout(); return out; })()",
     )
-    _browser(
-        session, "set", "viewport", str(was_size["w"]), str(was_size["h"])
-    )
+    _browser(session, "set", "viewport", str(was_size["w"]), str(was_size["h"]))
     _assert(
-        split["plot"] > 560 and split["body"] <= split["min"] + 4
+        split["plot"] > 560
+        and split["body"] <= split["min"] + 4
         and abs(split["max"] - split["plot"]) <= 1,
         "the plot stops growing before the card below is full: " + str(split),
     )
@@ -1155,7 +1187,6 @@ def _review_round_browser_pass(session: str) -> None:
     )
     _browser(session, "eval", "document.getElementById('pkdetails').click()")
 
-
     # --- the selected unit drives the sidebar values and the spectrum alike ---
     # Details stays open: the abundance cells and the pills only render there
     _browser(
@@ -1208,7 +1239,7 @@ def _review_round_browser_pass(session: str) -> None:
     # only the plots: a cached value from the previous setting is a wrong number.
     for control, value, unit in (
         ("K", "2.5", "con"),
-        ("Vm", "49.0", "ug"),      # molar volume only enters through µg/m³
+        ("Vm", "49.0", "ug"),  # molar volume only enters through µg/m³
         ("kanchor", "3.4", "con"),
     ):
         edited = _eval(
@@ -1384,7 +1415,7 @@ def _provenance_browser_pass() -> None:
             _browser(session, "wait", "--load", "networkidle")
             _browser(session, "eval", "localStorage.setItem('ptrms-onboarded', '1')")
             _browser(session, "reload")
-            _freeze_animations(session)   # the reload dropped the injected override
+            _freeze_animations(session)  # the reload dropped the injected override
             _browser(session, "wait", "--load", "networkidle")
             _browser(session, "eval", "document.querySelector('#methodBtn').click()")
             omitted_state = _eval(
@@ -1485,7 +1516,7 @@ def main() -> int:
         # nondeterministic; mark it complete before reloading the generated page.
         _browser(session, "eval", "localStorage.setItem('ptrms-onboarded', '1')")
         _browser(session, "reload")
-        _freeze_animations(session)   # the reload dropped the injected override
+        _freeze_animations(session)  # the reload dropped the injected override
         _browser(session, "wait", "--load", "networkidle")
         # Discard any delayed request from the previous page/session before the
         # first controlled edit; every request below has a matching snapshot.
@@ -1519,6 +1550,47 @@ def main() -> int:
                 "Isolated control",
             ],
             "default peak order is not m/z",
+        )
+        preserved = peak_order["config"]
+        first_peak = preserved["peaks"][0]
+        first_range = preserved["ranges"][0]
+        _assert(
+            first_peak["apex"] == 99.999
+            and first_peak["center"] == 100.001
+            and first_peak["mass"] == 100.002
+            and first_peak["future"] == {"keep": [1, 2, 3]}
+            and first_range["merged_gaps"] == [{"start": 2, "end": 2}]
+            and first_range["future"] == {"keep": True},
+            "nested authored peak/range fields were not preserved on save",
+        )
+        # Serve the saved snapshot as the next page's authored config, then perform
+        # a real browser reload. This catches loss in both buildConfig and the page
+        # initialiser, rather than merely checking a string in generated HTML.
+        reload_data = copy.deepcopy(data)
+        reload_data["config_base"] = preserved
+        reload_data["peaks"][0]["_config_original"] = preserved["peaks"][0]
+        reload_data["ranges"][0]["_config_original"] = preserved["ranges"][0]
+        _ReviewHandler.html = viz.render_html(reload_data)
+        _browser(session, "reload")
+        _freeze_animations(session)
+        _browser(session, "wait", "--load", "networkidle")
+        reloaded = _eval(
+            session,
+            "(() => { const c=buildConfig(); const p=c.peaks[0], r=c.ranges[0]; "
+            "return {apex:p.apex,center:p.center,mass:p.mass,future:p.future,"
+            "merged:r.merged_gaps,rangeFuture:r.future}; })()",
+        )
+        _assert(
+            reloaded
+            == {
+                "apex": 99.999,
+                "center": 100.001,
+                "mass": 100.002,
+                "future": {"keep": [1, 2, 3]},
+                "merged": [{"start": 2, "end": 2}],
+                "rangeFuture": {"keep": True},
+            },
+            "saved authored fields did not survive browser reload",
         )
         header_layout = _eval(
             session,
@@ -2178,8 +2250,7 @@ def main() -> int:
         _browser(session, "wait", "700")
         assigned = _eval(
             session,
-            "{conf:document.querySelector('#idconf').innerText, "
-            "config:buildConfig()}",
+            "{conf:document.querySelector('#idconf').innerText, config:buildConfig()}",
         )
         _assert_config_round_trip(assigned["config"])
         post_cursor = _assert_complete_posts(assigned["config"], "/save", post_cursor)

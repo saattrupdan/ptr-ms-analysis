@@ -73,9 +73,7 @@ class MassCalibrationTest(unittest.TestCase):
 
         mapping = DATA_10_26_33_MAPPING.astype(np.float64)
         design = np.column_stack((np.sqrt(mapping[:, 0]), np.ones(3)))
-        expected_a, expected_b = np.linalg.lstsq(
-            design, mapping[:, 1], rcond=None
-        )[0]
+        expected_a, expected_b = np.linalg.lstsq(design, mapping[:, 1], rcond=None)[0]
         self.assertAlmostEqual(a, expected_a, places=10)
         self.assertAlmostEqual(b, expected_b, places=10)
         self.assertNotEqual((a, b), (900.5, 1.0))
@@ -125,9 +123,7 @@ class MassCalibrationTest(unittest.TestCase):
             self.assertEqual(ptrms.load_mass_cal(h5), (11.0, 3.0))
 
     def test_ill_conditioned_multi_mapping_falls_back_to_spectrum(self):
-        mapping = np.array(
-            [[100.0, 500.0], [100.00001, 501.0], [100.00002, 502.0]]
-        )
+        mapping = np.array([[100.0, 500.0], [100.00001, 501.0], [100.00002, 502.0]])
         spectrum = np.array([[10.0, 2.0], [12.0, 4.0]])
 
         with self._file(mapping=mapping, spectrum=spectrum) as h5:
@@ -144,8 +140,9 @@ class MassCalibrationTest(unittest.TestCase):
         mapping = np.array([[19.0, 500.0], [19.0, 600.0]])
         spectrum = np.array([[0.0, 2.0], [np.nan, 4.0]])
 
-        with self._file(mapping=mapping, spectrum=spectrum) as h5, self.assertRaisesRegex(
-            ValueError, "no mass calibration"
+        with (
+            self._file(mapping=mapping, spectrum=spectrum) as h5,
+            self.assertRaisesRegex(ValueError, "no mass calibration"),
         ):
             ptrms.load_mass_cal(h5)
 
@@ -203,9 +200,7 @@ class InternalMassAxisCalibrationTest(unittest.TestCase):
         with self._file(peaks=self._good_peaks()) as h5:
             axis = ptrms.load_mass_axis(h5)
             detected = analyze.detect_peaks(h5, mass_axis=axis)
-            traces, _ = ptrms.extract_traces(
-                h5, [100.123], R=1200.0, mass_axis=axis
-            )
+            traces, _ = ptrms.extract_traces(h5, [100.123], R=1200.0, mass_axis=axis)
 
         self.assertTrue(axis.applied)
         self.assertNotEqual(axis.scale, 1.0)
@@ -281,6 +276,61 @@ class InternalMassAxisCalibrationTest(unittest.TestCase):
 
         self.assertIn("no finite bins", caught.exception.diagnostics["fallback_reason"])
 
+    def test_missing_raw_cycles_never_enable_calibration(self):
+        with self._file(peaks=self._good_peaks()) as h5:
+            del h5["SPECdata/Intensities"]
+            with self.assertRaises(ptrms.MassCalibrationError) as caught:
+                ptrms.load_mass_axis(h5)
+
+        self.assertFalse(caught.exception.diagnostics["applied"])
+        for anchor in caught.exception.diagnostics["anchors"]:
+            self.assertFalse(anchor["persistence"]["available"])
+
+    def test_malformed_raw_cycles_are_structured(self):
+        with self._file(peaks=self._good_peaks()) as h5:
+            del h5["SPECdata/Intensities"]
+            h5.create_dataset("SPECdata/Intensities", data=np.ones(self.NBIN))
+            with self.assertRaises(ptrms.MassCalibrationError) as caught:
+                ptrms.load_mass_axis(h5)
+
+        self.assertIn("malformed", caught.exception.diagnostics["fallback_reason"])
+
+    def test_fewer_than_two_usable_raw_cycles_are_rejected(self):
+        with self._file(peaks=self._good_peaks()) as h5:
+            raw = h5["SPECdata/Intensities"]
+            raw[1:, :] = 0.0
+            with self.assertRaises(ptrms.MassCalibrationError) as caught:
+                ptrms.load_mass_axis(h5)
+
+        self.assertIn(
+            "fewer than two usable", caught.exception.diagnostics["fallback_reason"]
+        )
+
+    def test_nonfinite_raw_cycles_are_rejected(self):
+        with self._file(peaks=self._good_peaks()) as h5:
+            h5["SPECdata/Intensities"][0, 0] = np.nan
+            with self.assertRaises(ptrms.MassCalibrationError) as caught:
+                ptrms.load_mass_axis(h5)
+
+        self.assertIn("non-finite", caught.exception.diagnostics["fallback_reason"])
+
+    def test_supplied_unapplied_axes_are_rejected_by_production_entry_points(self):
+        axis = ptrms.MassAxisCalibration(
+            self.A, self.B, diagnostics={"applied": False, "fallback_reason": "test"}
+        )
+        with self._file(peaks=self._good_peaks()) as h5:
+            calls = (
+                lambda: analyze.detect_peaks(h5, mass_axis=axis),
+                lambda: ptrms.extract_primary(h5, mass_axis=axis),
+                lambda: ptrms.water_cluster_ratio(h5, mass_axis=axis),
+                lambda: ptrms.build_discriminator(h5, mass_axis=axis),
+                lambda: ptrms.extract_traces(h5, [100.0], mass_axis=axis),
+            )
+            for call in calls:
+                with self.subTest(entry_point=call):
+                    with self.assertRaises(ptrms.MassCalibrationError):
+                        call()
+
     def test_one_anchor_never_enables_partial_correction(self):
         water = (self._observed_mass(37.033), 1200.0)
         with self._file(peaks=[water]) as h5:
@@ -302,9 +352,7 @@ class InternalMassAxisCalibrationTest(unittest.TestCase):
                 ptrms.load_mass_axis(h5)
 
         diagnostics = caught.exception.diagnostics
-        self.assertIn(
-            diagnostics["anchors"][1]["status"], {"ambiguous", "accepted"}
-        )
+        self.assertIn(diagnostics["anchors"][1]["status"], {"ambiguous", "accepted"})
         self.assertFalse(diagnostics["applied"])
 
 

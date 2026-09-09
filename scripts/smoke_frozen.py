@@ -38,12 +38,21 @@ def make_h5(path: Path) -> Path:
     config is the path a reviewer hits every day, and it keeps this check out of the
     detection pipeline, which unit tests cover.
     """
-    ncyc, nmz = 24, 6
-    masses = np.array([19.036, 21.022, 31.0, 33.0, 37.0, 45.0])
-    trace = np.zeros((ncyc, nmz))
-    trace[:, 1] = 1e6  # the reagent ion
-    trace[:, 2] = 5e3
-    trace[8:, 2] = 4e4  # an analyte that arrives halfway through
+    ncyc, nmz = 24, 15000
+    anchor_masses = np.array([37.033, 204.951])
+    a, b = 1000.0, 0.0
+    trace = np.ones((ncyc, nmz), dtype=np.float64)
+    bins = np.arange(nmz, dtype=np.float64)
+
+    def add_peak(mass, height, cycles=slice(None)):
+        centre = a * np.sqrt(mass) + b
+        trace[cycles, :] += height * np.exp(-0.5 * ((bins - centre) / 1.5) ** 2)
+
+    add_peak(21.022, 1e6)  # the reagent-ion isotope
+    add_peak(31.0, 5e3)
+    add_peak(31.0, 4e4, slice(8, None))  # an analyte that arrives halfway through
+    add_peak(37.033, 2e5)  # persistent water-cluster calibration anchor
+    add_peak(204.951, 2e5)  # persistent iodobenzene calibration anchor
     with h5py.File(path, "w") as h5:
         h5.create_dataset("SPECdata/Intensities", data=trace)
         h5.create_dataset("SPECdata/AverageSpec", data=trace.mean(axis=0))
@@ -56,17 +65,20 @@ def make_h5(path: Path) -> Path:
         h5.attrs["MassAxisType"] = "mz"
         h5.create_group("InstrumentSection")
         cal = h5.create_group("CALdata")
-        cal.create_dataset("Mass_Use", data=np.ones(nmz, dtype=bool))
-        cal.create_dataset("Mass_MZ", data=masses)
+        cal.create_dataset("Mass_Use", data=np.ones(anchor_masses.size, dtype=bool))
+        cal.create_dataset("Mass_MZ", data=anchor_masses)
         cal.create_dataset(
-            "Mapping", data=np.column_stack([masses, 100.0 * np.sqrt(masses) + 10.0])
+            "Mapping",
+            data=np.column_stack([anchor_masses, a * np.sqrt(anchor_masses) + b]),
         )
     config = path.with_suffix(".json")
     config.write_text(
         json.dumps(
             {
                 "peaks": [{"mz": 31.0, "label": "test analyte"}],
-                "ranges": [{"label": "sample_01", "start": 9, "end": 24, "unit": "cycle"}],
+                "ranges": [
+                    {"label": "sample_01", "start": 9, "end": 24, "unit": "cycle"}
+                ],
                 "viz": {"x_axis_unit": "cycle"},
             },
             indent=2,
@@ -134,7 +146,9 @@ def main(argv) -> int:
         return 2
     exe = Path(argv[1]).resolve()
     if not exe.is_file():
-        print(f"frozen app smoke: FAIL — no such executable file: {exe}", file=sys.stderr)
+        print(
+            f"frozen app smoke: FAIL — no such executable file: {exe}", file=sys.stderr
+        )
         return 1
     contents = contents_directory(exe)
     if contents is None:
@@ -164,12 +178,17 @@ def main(argv) -> int:
     try:
         url, lines = await_url(proc, LAUNCH_TIMEOUT)
         if url is None:
-            print("frozen app smoke: FAIL — no URL on stderr within the timeout", file=sys.stderr)
+            print(
+                "frozen app smoke: FAIL — no URL on stderr within the timeout",
+                file=sys.stderr,
+            )
             print("\n".join(lines), file=sys.stderr)
             return 1
         base = url.rstrip("/")
         if int(url.rsplit(":", 1)[1].rstrip("/")) != port:
-            print(f"frozen app smoke: note — the app moved to port {url}", file=sys.stderr)
+            print(
+                f"frozen app smoke: note — the app moved to port {url}", file=sys.stderr
+            )
 
         base = url.rstrip("/")
         deadline = time.monotonic() + OPEN_TIMEOUT
@@ -180,7 +199,10 @@ def main(argv) -> int:
                 break
             time.sleep(0.5)
         if state.get("status") != "ready":
-            print(f"frozen app smoke: FAIL — the file never opened: {state}", file=sys.stderr)
+            print(
+                f"frozen app smoke: FAIL — the file never opened: {state}",
+                file=sys.stderr,
+            )
             print("\n".join(lines), file=sys.stderr)
             return 1
 
@@ -195,7 +217,10 @@ def main(argv) -> int:
 
         recent = json.loads(get(base + "/api/recent")[1])
         if not recent or not Path(recent[0]["path"]).samefile(h5):
-            print(f"frozen app smoke: FAIL — recents did not list the file: {recent}", file=sys.stderr)
+            print(
+                f"frozen app smoke: FAIL — recents did not list the file: {recent}",
+                file=sys.stderr,
+            )
             return 1
         if post(base + "/close") != 200:
             print("frozen app smoke: FAIL — could not close the file", file=sys.stderr)
@@ -301,7 +326,7 @@ def main(argv) -> int:
                 "opened its own window"
                 if surface == "window"
                 else "fell back to a browser tab (a runner with no window server "
-                     "would; a desktop machine should not)"
+                "would; a desktop machine should not)"
             )
             post(win_base + "/shutdown")
         finally:

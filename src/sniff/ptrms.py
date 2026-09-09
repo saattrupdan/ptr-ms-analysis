@@ -96,6 +96,91 @@ class MassAxisCalibration:
         return dict(self.diagnostics)
 
 
+def validate_mass_axis(mass_axis):
+    """Require a caller-supplied axis to be an internally applied calibration.
+
+    A calibration object is deliberately not trusted merely because its ``applied``
+    flag is true: callers must receive the same two accepted, persistent anchors as
+    the loader. This keeps test doubles explicit and prevents a fallback axis from
+    silently selecting the legacy broad-drift path.
+
+    Raises:
+        MassCalibrationError:
+            If the object is missing, unapplied, or diagnostically inconsistent.
+    """
+    diagnostics = getattr(mass_axis, "diagnostics", None)
+    if not isinstance(mass_axis, MassAxisCalibration) or not isinstance(
+        diagnostics, dict
+    ):
+        raise MassCalibrationError(
+            "caller-supplied mass axis is not an internal calibration",
+            {"applied": False, "fallback_reason": "invalid mass-axis object"},
+        )
+    if not mass_axis.applied:
+        raise MassCalibrationError(
+            "caller-supplied mass axis is not an applied internal calibration",
+            dict(diagnostics),
+        )
+    scale = diagnostics.get("scale")
+    offset = diagnostics.get("offset_da")
+    try:
+        values = np.asarray(
+            [
+                mass_axis.a,
+                mass_axis.b,
+                mass_axis.scale,
+                mass_axis.offset,
+                scale,
+                offset,
+            ],
+            dtype=np.float64,
+        )
+        scale_value = float(scale)
+        offset_value = float(offset)
+    except (TypeError, ValueError):
+        values = np.array([np.nan])
+        scale_value = offset_value = np.nan
+    if (
+        not np.isfinite(values).all()
+        or mass_axis.a <= 0
+        or mass_axis.scale <= 0
+        or not np.isclose(mass_axis.scale, scale_value, rtol=0, atol=1e-12)
+        or not np.isclose(mass_axis.offset, offset_value, rtol=0, atol=1e-12)
+    ):
+        raise MassCalibrationError(
+            "caller-supplied mass axis has inconsistent diagnostics",
+            dict(diagnostics),
+        )
+    anchors = diagnostics.get("anchors")
+    by_name = (
+        {
+            item.get("name"): item
+            for item in anchors
+            if isinstance(item, dict) and item.get("name")
+        }
+        if isinstance(anchors, list)
+        else {}
+    )
+    missing = []
+    for name, _ in INTERNAL_MASS_ANCHORS:
+        anchor = by_name.get(name)
+        persistence = anchor.get("persistence") if anchor else None
+        if not anchor or anchor.get("status") != "accepted":
+            missing.append(f"{name} anchor was not accepted")
+        elif (
+            not isinstance(persistence, dict)
+            or persistence.get("available") is not True
+        ):
+            missing.append(f"{name} anchor persistence is unavailable")
+    if missing:
+        raise MassCalibrationError(
+            "caller-supplied mass axis lacks the required internal calibration: "
+            + "; ".join(missing),
+            dict(diagnostics),
+        )
+    return mass_axis
+
+
 def migrate_config_mass_axis(config, mass_axis):
     """Migrate an unmarked config from file masses to corrected masses.
 
@@ -416,10 +501,16 @@ def load_mass_axis(f):
     ]
     _add_anchor_persistence(f, avg, a, b, anchors)
     base["anchors"] = anchors
-    failures = [anchor for anchor in anchors if anchor["status"] != "accepted"]
+    failures = [
+        anchor
+        for anchor in anchors
+        if anchor["status"] != "accepted"
+        or anchor.get("persistence", {}).get("available") is not True
+    ]
     if failures:
         reasons = "; ".join(
-            f"{anchor['name']} anchor {anchor['status']}: {anchor['reason']}"
+            f"{anchor['name']} anchor {anchor['status']}: "
+            f"{anchor['reason'] if anchor['status'] != 'accepted' else anchor.get('persistence', {}).get('reason', anchor['reason'])}"
             for anchor in failures
         )
         _mass_axis_failure(a, b, base, reasons)
@@ -469,9 +560,7 @@ def load_mass_axis(f):
         }
     )
     for anchor in anchors:
-        anchor["corrected_mz"] = float(
-            scale * anchor["observed_file_mz"] + offset
-        )
+        anchor["corrected_mz"] = float(scale * anchor["observed_file_mz"] + offset)
     return MassAxisCalibration(a, b, scale=scale, offset=offset, diagnostics=base)
 
 
@@ -490,21 +579,31 @@ def _mass_axis_failure(a, b, diagnostics, reason):
 def _add_anchor_persistence(f, avg, a, b, anchors):
     """Check accepted average-spectrum anchors in deterministic raw cycle blocks."""
     dataset = f.get("SPECdata/Intensities")
+    reason = None
     if dataset is None or len(getattr(dataset, "shape", ())) != 2:
+        reason = "raw cycle spectra are unavailable or malformed"
+    elif int(dataset.shape[1]) != int(avg.size):
+        reason = "raw cycle spectra do not match the average spectrum"
+    elif int(dataset.shape[0]) < 2:
+        reason = "fewer than two raw cycle spectra are available"
+    else:
+        usable = 0
+        try:
+            for start in range(0, int(dataset.shape[0]), 512):
+                section = np.asarray(dataset[start : start + 512, :], dtype=np.float64)
+                if not np.isfinite(section).all():
+                    reason = "raw cycle spectra contain non-finite values"
+                    break
+                usable += int((section > 0).any(axis=1).sum())
+        except (OSError, TypeError, ValueError):
+            reason = "raw cycle spectra are unavailable or malformed"
+        if reason is None and usable < 2:
+            reason = "fewer than two usable raw cycle spectra are available"
+    if reason is not None:
         for anchor in anchors:
-            anchor["persistence"] = {
-                "available": False,
-                "reason": "raw cycle spectra are unavailable",
-            }
+            anchor["persistence"] = {"available": False, "reason": reason}
         return
     ncyc = int(dataset.shape[0])
-    if ncyc < 2:
-        for anchor in anchors:
-            anchor["persistence"] = {
-                "available": False,
-                "reason": "fewer than two raw cycle spectra are available",
-            }
-        return
     for anchor in anchors:
         if anchor["status"] != "accepted":
             anchor["persistence"] = {
@@ -579,9 +678,11 @@ def _detect_internal_anchor(avg, a, b, name, target_mz):
         return result
 
     section = avg[tlo : thi + 1]
-    maxima = np.where(
-        (section[1:-1] > section[:-2]) & (section[1:-1] >= section[2:])
-    )[0] + tlo + 1
+    maxima = (
+        np.where((section[1:-1] > section[:-2]) & (section[1:-1] >= section[2:]))[0]
+        + tlo
+        + 1
+    )
     if maxima.size == 0:
         result["reason"] = (
             f"no local maximum within +-{INTERNAL_ANCHOR_SEARCH_DA:.2f} Da"
@@ -662,10 +763,13 @@ def _detect_internal_anchor(avg, a, b, name, target_mz):
             }
         )
         return result
-    if min(
-        observed - (target_mz - INTERNAL_ANCHOR_SEARCH_DA),
-        (target_mz + INTERNAL_ANCHOR_SEARCH_DA) - observed,
-    ) < INTERNAL_ANCHOR_PROXIMITY_DA:
+    if (
+        min(
+            observed - (target_mz - INTERNAL_ANCHOR_SEARCH_DA),
+            (target_mz + INTERNAL_ANCHOR_SEARCH_DA) - observed,
+        )
+        < INTERNAL_ANCHOR_PROXIMITY_DA
+    ):
         result.update(
             {
                 "status": "ambiguous",
@@ -695,12 +799,14 @@ def _sub_bin_centre(spectrum, index):
 
 def m_to_tb(m, a, b, mass_axis=None):
     if mass_axis is not None:
+        validate_mass_axis(mass_axis)
         return mass_axis.m_to_tb(m)
     return a * np.sqrt(m) + b
 
 
 def tb_to_m(tb, a, b, mass_axis=None):
     if mass_axis is not None:
+        validate_mass_axis(mass_axis)
         return mass_axis.tb_to_m(tb)
     return ((tb - b) / a) ** 2
 
@@ -762,9 +868,7 @@ def derive_sensitivity_percycle(f, min_corrected=1000.0):
     return s
 
 
-def extract_primary(
-    f, primary_mz=21.022, R=1200.0, block=400, mass_axis=None
-):
+def extract_primary(f, primary_mz=21.022, R=1200.0, block=400, mass_axis=None):
     """Per-cycle primary-ion (reagent-ion) signal used to normalise concentration.
 
     In H3O+ mode the primary ion is monitored via its H3(18O)+ isotope at m/z ~21
@@ -772,6 +876,8 @@ def extract_primary(
     primary_mz when available (fast, and what the instrument/Viewer normalise to);
     otherwise integrates the peak from the raw spectra. Returns a length-n_cycles
     array, or None if it cannot be obtained."""
+    if mass_axis is not None:
+        validate_mass_axis(mass_axis)
     if "TRACEdata/TraceRaw" in f and "TRACEdata/TraceInfo" in f:
         ti = f["TRACEdata/TraceInfo"][:]
         centers = np.array([float(ti[2, c]) for c in range(ti.shape[1])])
@@ -800,6 +906,8 @@ def water_cluster_ratio(
     (m/z 21.022 by default) as the denominator instead. A constant isotope factor
     cancels once the ratio is normalised to a reference. Returns a length-n_cycles
     array, or None."""
+    if mass_axis is not None:
+        validate_mass_axis(mass_axis)
 
     def get(mz):
         if "TRACEdata/TraceRaw" in f and "TRACEdata/TraceInfo" in f:
@@ -992,9 +1100,7 @@ def _cluster_design(
     streaming pass (a gzip-compressed file decompresses whole rows, so a per-cluster
     pass would re-decompress the entire dataset once per cluster)."""
     centers_tb = np.array([m_to_tb(m, a, b, mass_axis) for m in centers_m])
-    sig_tb = np.array(
-        [_sigma_tb(m, a, R_phys, mass_axis=mass_axis) for m in centers_m]
-    )
+    sig_tb = np.array([_sigma_tb(m, a, R_phys, mass_axis=mass_axis) for m in centers_m])
     tlo = int(np.floor(centers_tb.min() - 6 * sig_tb.max()))
     thi = int(np.ceil(centers_tb.max() + 6 * sig_tb.max()))
     tlo = max(0, tlo)
@@ -1098,6 +1204,8 @@ def extract_traces(
     changes nothing — no arithmetic and no ordering depends on them."""
     if mass_axis is None:
         mass_axis = load_mass_axis(f)
+    else:
+        validate_mass_axis(mass_axis)
     a, b = mass_axis.a, mass_axis.b
     inten = f["SPECdata/Intensities"]
     ncyc = inten.shape[0]
@@ -1115,14 +1223,11 @@ def extract_traces(
     clusters = [g for g in groups if len(g) > 1]
 
     # Isolated peaks retain a tight local snap after the shared axis correction.
-    # On fallback, use the legacy broad search so a valid but drifted file remains
-    # quantifiable. Clustered model centres always stay on the common mass axis.
+    # Clustered model centres always stay on the common mass axis.
     apexes = {}
-    search_tol = refine_tol if mass_axis.applied else max(0.15, refine_tol)
+    search_tol = refine_tol
     for m in isolated:
-        apex_m, _, _ = find_apex(
-            avg, a, b, m, tol=search_tol, mass_axis=mass_axis
-        )
+        apex_m, _, _ = find_apex(avg, a, b, m, tol=search_tol, mass_axis=mass_axis)
         apexes[m] = apex_m
     for g in clusters:
         for m in g:
@@ -1278,14 +1383,14 @@ MERGE_REASON_ADJACENT = "adjacent"
 MERGE_REASON_LENGTH = "length only"
 
 
-def build_discriminator(
-    f, mz_lo=40.0, mz_hi=200.0, block=400, mass_axis=None
-):
+def build_discriminator(f, mz_lo=40.0, mz_hi=200.0, block=400, mass_axis=None):
     """Per-cycle composite VOC signal, ~1 at background and high during samples.
 
     Fast path uses the pre-computed TraceRaw (normalising each strong VOC trace to
     its own baseline so no single peak dominates). Fallback streams the raw spectra
     and sums a VOC m/z band. Returns a 1-D array length n_cycles."""
+    if mass_axis is not None:
+        validate_mass_axis(mass_axis)
     if "TRACEdata/TraceRaw" in f and "TRACEdata/TraceInfo" in f:
         ti = f["TRACEdata/TraceInfo"][:]
         centers = np.array([float(ti[2, c]) for c in range(ti.shape[1])])
@@ -1400,8 +1505,17 @@ def merge_gap_cap(f, window_s=MERGE_GAP_WINDOW_S):
     return max(MERGE_MIN_GAP_CYCLES, int(round(window_s / spec_duration_s(f))))
 
 
-def _gap_record(previous, current, gap, D, baseline, band, evidence,
-                previous_level=None, lower_bound=True):
+def _gap_record(
+    previous,
+    current,
+    gap,
+    D,
+    baseline,
+    band,
+    evidence,
+    previous_level=None,
+    lower_bound=True,
+):
     """Provenance for one candidate gap, or None when the gap refuses the merge.
 
     ``previous_level`` is the level of the plateau the gap actually abuts. A merged
@@ -1436,8 +1550,11 @@ def _gap_record(previous, current, gap, D, baseline, band, evidence,
     if not (np.isfinite(low) and np.isfinite(high)):
         return None  # cycles we cannot measure are not evidence of a wobble
     levels = [
-        float(previous_level if previous_level is not None
-              else previous.get("level") or 0.0),
+        float(
+            previous_level
+            if previous_level is not None
+            else previous.get("level") or 0.0
+        ),
         float(current.get("level") or 0.0),
     ]
     # the gap must never have left the phase its neighbours are in: no excursion out
