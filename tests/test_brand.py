@@ -53,12 +53,24 @@ def test_the_page_mark_and_the_icon_are_the_same_drawing():
     def points(value):
         return " ".join("%g,%g" % pair for pair in value)
 
+    def circle(value):
+        return 'cx="%g" cy="%g" r="%g"' % value
+
     assert 'points="%s"' % points(icons.TRACE) in svg
     assert 'stroke-width="%g"' % icons.TRACE_WIDTH in svg
-    assert 'points="%s"' % points(icons.NOSE) in svg
-    assert 'cx="%g" cy="%g" r="%g"' % icons.NOSTRIL in svg
-    assert 'points="%s"' % points(icons.BREATH) in svg
-    assert 'stroke-width="%g"' % icons.BREATH_WIDTH in svg
+    assert 'points="%s"' % points(icons.MASCOT_BODY) in svg
+    assert 'points="%s"' % points(icons.COLLAR) in svg
+    assert 'points="%s"' % points(icons.COAT_SEAM) in svg
+    for geometry in (
+        icons.COAT_BUTTONS[0],
+        icons.COAT_BUTTONS[1],
+        icons.MASCOT_HEAD,
+        icons.MASCOT_EYE,
+        icons.MASCOT_PUPIL,
+        icons.MAGNIFIER_LENS,
+    ):
+        assert circle(geometry) in svg
+    assert 'points="%s"' % points(icons.MAGNIFIER_HANDLE) in svg
     assert re.search(r'rx="([\d.]+)"', svg).group(1) == "%g" % icons.RADIUS
 
     generated = icons.svg_text()
@@ -66,10 +78,36 @@ def test_the_page_mark_and_the_icon_are_the_same_drawing():
     assert generated == artwork
     for fragment in (
         'points="%s"' % points(icons.TRACE),
-        'points="%s"' % points(icons.NOSE),
-        'points="%s"' % points(icons.BREATH),
+        'points="%s"' % points(icons.MASCOT_BODY),
+        'points="%s"' % points(icons.COLLAR),
+        'points="%s"' % points(icons.MAGNIFIER_HANDLE),
+        circle(icons.MASCOT_HEAD),
+        circle(icons.MAGNIFIER_LENS),
     ):
         assert fragment in generated
+
+
+def test_the_brand_no_longer_contains_nose_geometry():
+    icons = _load("make_icons", "packaging/make_icons.py")
+    assert not hasattr(icons, "NOSE")
+    assert not hasattr(icons, "NOSTRIL")
+    assert not hasattr(icons, "BREATH")
+    assert "nostril" not in brand.MARK_SVG.lower()
+    assert "breath" not in brand.MARK_SVG.lower()
+
+
+def test_the_mascot_faces_the_peak_with_its_magnifier():
+    icons = _load("make_icons", "packaging/make_icons.py")
+    peak_x, peak_y = icons.TRACE[3]
+    head_x, _, _ = icons.MASCOT_HEAD
+    eye_x, _, _ = icons.MASCOT_EYE
+    pupil_x, _, _ = icons.MASCOT_PUPIL
+    lens_x, lens_y, lens_radius = icons.MAGNIFIER_LENS
+
+    assert head_x > peak_x
+    assert eye_x > peak_x
+    assert pupil_x < eye_x
+    assert (lens_x - peak_x) ** 2 + (lens_y - peak_y) ** 2 < lens_radius**2
 
 
 def test_the_icon_renders_somewhere_other_than_transparent():
@@ -81,10 +119,10 @@ def test_the_icon_renders_somewhere_other_than_transparent():
         assert buf[3] == 0, "the corners must be transparent or the Dock squares them off"
 
     compact = icons.render(32)
-    warm = icons.NOSE_COLOUR[:3]
-    assert all(tuple(compact[i : i + 3]) != warm for i in range(0, len(compact), 4))
+    mascot = icons.MASCOT_SKIN_COLOUR[:3]
+    assert any(tuple(compact[i : i + 3]) == mascot for i in range(0, len(compact), 4))
     detailed = icons.render(64)
-    assert any(tuple(detailed[i : i + 3]) == warm for i in range(0, len(detailed), 4))
+    assert any(tuple(detailed[i : i + 3]) == mascot for i in range(0, len(detailed), 4))
 
 
 def test_both_pages_carry_the_mark_and_the_name():
