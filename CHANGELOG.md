@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The packaged app icon now fits the macOS Cmd+Tab switcher.** Its coloured tile is
+  drawn inside the platform safe area instead of filling the entire icon canvas and
+  appearing oversized beside other apps.
 - **Supplied mass axes now require complete calibration evidence.** Production boundaries
   reject contradictory coefficients, models, anchors, peak-quality fields, timebins and
   persistence records instead of trusting a forged applied diagnostic.

@@ -69,25 +69,38 @@ def test_the_brand_contains_no_character_geometry():
         assert word not in brand.MARK_SVG.lower()
 
 
-def test_the_icon_renders_somewhere_other_than_transparent():
+def test_the_icon_uses_the_platform_safe_area():
     icons = _load("make_icons", "packaging/make_icons.py")
     for size in (16, 32, 64, 128, 256):
         buf = icons.render(size)
         opaque = sum(1 for i in range(3, len(buf), 4) if buf[i] > 200)
-        assert 0.8 < opaque / (size * size) < 1.0, "the tile is not filled at %d px" % size
-        assert buf[3] == 0, "the corners must be transparent or the Dock squares them off"
+        assert 0.6 < opaque / (size * size) < 0.7, (
+            "the tile is mis-sized at %d px" % size
+        )
 
-    trace = icons.TRACE_COLOUR[:3]
+        edge_points = (
+            (size // 2, 0),
+            (size - 1, size // 2),
+            (size // 2, size - 1),
+            (0, size // 2),
+        )
+        for x, y in edge_points:
+            alpha = buf[(y * size + x) * 4 + 3]
+            assert alpha == 0, "the icon needs transparent padding at %d px" % size
+
     for size in (16, 32, 64):
         buf = icons.render(size)
-        assert any(tuple(buf[i : i + 3]) == trace for i in range(0, len(buf), 4))
+        pixels = (tuple(buf[i : i + 4]) for i in range(0, len(buf), 4))
+        assert any(r > 180 and g > 220 and b > 220 and a > 100 for r, g, b, a in pixels)
 
 
 def test_both_pages_carry_the_mark_and_the_name():
     page = viz.render_html({"file": "x.h5", "peaks": [], "ranges": [], "meta": {}})
-    for needle, what in ((brand.APP_NAME, "the product name"),
-                         ('class="brand"', "the mark"),
-                         ("PTR-MS review", "what the app is for")):
+    for needle, what in (
+        (brand.APP_NAME, "the product name"),
+        ('class="brand"', "the mark"),
+        ("PTR-MS review", "what the app is for"),
+    ):
         assert needle in page, "%s is missing from the review page" % what
     assert "__APP_NAME__" not in page and "__PAGE_TITLE__" not in page
     assert brand.APP_NAME in app._START_HTML

@@ -219,8 +219,10 @@ rounded teal tile and one narrow mass-spectrum peak — and draws it twice: as S
 (`gfx/sniff.svg`, and the same geometry in `sniff/brand.py`, which is what the pages
 show) and as a bitmap. The spec calls it during the build, so the macOS job gets a
 `sniff.icns` through `iconutil` and the Windows job gets a `sniff.ico`, both from the
-same run. The macOS window also applies that bundled icon directly at launch rather
-than relying on a possibly stale LaunchServices cache.
+same run. The bitmap places the tile inside the platform icon safe area, so it sits at
+the same visual scale as neighbouring apps in the Dock and Cmd+Tab switcher; the web SVG
+has no extra canvas padding. The macOS window also applies that bundled icon directly at
+launch rather than relying on a possibly stale LaunchServices cache.
 
 ```bash
 uv run python packaging/make_icons.py --svg gfx/sniff.svg      # the drawing, as SVG

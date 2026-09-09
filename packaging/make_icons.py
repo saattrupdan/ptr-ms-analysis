@@ -39,6 +39,9 @@ TRACE_COLOUR = (0xEA, 0xFA, 0xF6, 255)
 RADIUS = 14.0  # of the tile, in field units
 TRACE = [(6, 46), (24, 46), (27, 46), (32, 17), (37, 46), (40, 46), (58, 46)]
 TRACE_WIDTH = 5.0
+# macOS displays app icons beside system artwork drawn inside an approximately 80%
+# safe area. Without this transparent margin, Sniff looks larger than every neighbour.
+ICON_INSET = 6.0
 
 # iconutil accepts exactly these names. A 64x64 entry, however reasonable it looks,
 # makes it reject the whole iconset with "Invalid Iconset".
@@ -49,6 +52,7 @@ ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
 # ---------------------------------------------------------------------------
 # Rasterising
 # ---------------------------------------------------------------------------
+
 
 def _coverage(px, py, cx, cy, r):
     """Fraction of a pixel's area inside a circle, by 3x3 subsampling."""
@@ -90,10 +94,10 @@ def _over(dst, src, alpha):
     oa = sa + da * (1.0 - sa)
     if oa <= 0:
         return bytes((0, 0, 0, 0))
-    c = [
-        (src[i] * sa + dst[i] * da * (1.0 - sa)) / oa for i in range(3)
-    ]
-    return bytes((int(round(c[0])), int(round(c[1])), int(round(c[2])), int(round(oa * 255))))
+    c = [(src[i] * sa + dst[i] * da * (1.0 - sa)) / oa for i in range(3)]
+    return bytes(
+        (int(round(c[0])), int(round(c[1])), int(round(c[2])), int(round(oa * 255)))
+    )
 
 
 def _stroke(buf, size, points, width, colour):
@@ -106,7 +110,9 @@ def _stroke(buf, size, points, width, colour):
         steps = max(int(length / max(w * 0.34, 0.6)), 1)
         for i in range(steps + 1):
             t = i / steps
-            _stamp(buf, size, (x0 + dx * t) * scale, (y0 + dy * t) * scale, w / 2.0, colour)
+            _stamp(
+                buf, size, (x0 + dx * t) * scale, (y0 + dy * t) * scale, w / 2.0, colour
+            )
     for x, y in (points[0], points[-1]):
         _stamp(buf, size, x * scale, y * scale, w / 2.0, colour)
     for x, y in (points[0], points[-1]):
@@ -116,23 +122,25 @@ def _stroke(buf, size, points, width, colour):
 def render(size):
     """An RGBA byte string for one square icon of ``size`` pixels."""
     buf = bytearray(size * size * 4)
-    tile_colour = TILE
+    icon_scale = (FIELD - 2 * ICON_INSET) / FIELD
+    inset = ICON_INSET / FIELD * size
+    tile_end = size - inset
 
-    # Tile: a rounded square. Filled row by row, corners checked against the
-    # quarter-circle, which is exact for a rounded rect.
-    r = RADIUS / FIELD * size
+    # Tile: a rounded square inside the platform icon safe area. Filled row by row,
+    # corners checked against the quarter-circle, which is exact for a rounded rect.
+    r = RADIUS * icon_scale / FIELD * size
     for y in range(size):
         for x in range(size):
-            cx = min(max(x + 0.5, r), size - r)
-            cy = min(max(y + 0.5, r), size - r)
+            cx = min(max(x + 0.5, inset + r), tile_end - r)
+            cy = min(max(y + 0.5, inset + r), tile_end - r)
             if (x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 <= r * r:
                 i = (y * size + x) * 4
-                buf[i : i + 4] = bytes(tile_colour)
+                buf[i : i + 4] = bytes(TILE)
 
-    def paint(points, width, colour):
-        _stroke(buf, size, points, width, colour)
-
-    paint(TRACE, TRACE_WIDTH, TRACE_COLOUR)
+    trace = [
+        (ICON_INSET + x * icon_scale, ICON_INSET + y * icon_scale) for x, y in TRACE
+    ]
+    _stroke(buf, size, trace, TRACE_WIDTH * icon_scale, TRACE_COLOUR)
     return bytes(buf)
 
 
@@ -140,9 +148,12 @@ def render(size):
 # Containers
 # ---------------------------------------------------------------------------
 
+
 def png_bytes(size, rgba):
     """A 8-bit RGBA PNG, filter 0 on every row, written without an image library."""
-    raw = b"".join(b"\x00" + rgba[y * size * 4 : (y + 1) * size * 4] for y in range(size))
+    raw = b"".join(
+        b"\x00" + rgba[y * size * 4 : (y + 1) * size * 4] for y in range(size)
+    )
 
     def chunk(kind, payload):
         body = kind + payload
@@ -168,9 +179,7 @@ def ico_bytes(sizes):
     offset = 6 + 16 * len(entries)
     for size, data in entries:
         w = 0 if size >= 256 else size
-        out += struct.pack(
-            "<BBBBHHII", w, w, 0, 0, 1, 32, len(data), offset
-        )
+        out += struct.pack("<BBBBHHII", w, w, 0, 0, 1, 32, len(data), offset)
         offset += len(data)
     for _, data in entries:
         out += data
@@ -202,6 +211,7 @@ def icns_file(path, sizes=ICNS_SIZES):
 # ---------------------------------------------------------------------------
 # SVG, from the same primitives
 # ---------------------------------------------------------------------------
+
 
 def svg_text(size=FIELD):
     def pts(points):
