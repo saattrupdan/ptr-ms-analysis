@@ -22,27 +22,13 @@ PAGE_TITLE = APP_NAME + " \u2014 " + TAGLINE
 # the product.
 BUNDLE_ID = "dk.samsmart.sniff"
 
-# 64x64 field: a teal tile, a baseline with one narrow mass-spectrum peak, and a
-# deliberately small lab-coated mascot looking left towards it through a magnifying
-# glass. Sized by CSS, so it carries no width or height of its own.
+# 64x64 field: a teal tile and one centred, narrow mass-spectrum peak. Sized by CSS,
+# so it carries no width or height of its own.
 MARK_SVG = (
     '<svg class="brand" viewBox="0 0 64 64" role="img" aria-label="Sniff">'
     '<rect width="64" height="64" rx="14" fill="#1f6f6b"/>'
-    '<polyline points="6,46 20,46 24,46 26,27 28,46 58,46" fill="none"'
-    ' stroke="#eafaf6" stroke-width="3.6" stroke-linejoin="round"'
+    '<polyline points="6,46 24,46 27,46 32,17 37,46 40,46 58,46" fill="none"'
+    ' stroke="#eafaf6" stroke-width="5" stroke-linejoin="round"'
     ' stroke-linecap="round"/>'
-    '<polygon points="42,29 51,29 54,34 56,46 38,46 40,34" fill="#f7fbff"/>'
-    '<polygon points="44.8,29 48,34 51,29" fill="#9bd9d5"/>'
-    '<polyline points="48,34 48,45" fill="none" stroke="#9bd9d5" stroke-width="1"'
-    ' stroke-linejoin="round" stroke-linecap="round"/>'
-    '<circle cx="49.7" cy="36.5" r="0.72" fill="#1f6f6b"/>'
-    '<circle cx="49.7" cy="40" r="0.72" fill="#1f6f6b"/>'
-    '<circle cx="47" cy="22" r="5.8" fill="#ffd9a8"/>'
-    '<circle cx="43.6" cy="21" r="1.45" fill="#f7fbff"/>'
-    '<circle cx="43" cy="21" r="0.62" fill="#1f6f6b"/>'
-    '<polyline points="34,35 42,43" fill="none" stroke="#ffd9a8" stroke-width="2.2"'
-    ' stroke-linejoin="round" stroke-linecap="round"/>'
-    '<circle cx="30" cy="31" r="5.8" fill="#ffd9a8"/>'
-    '<circle cx="30" cy="31" r="4.15" fill="#b8e8e4" fill-opacity="0.627451"/>'
     '</svg>'
 )

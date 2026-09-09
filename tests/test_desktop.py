@@ -70,6 +70,7 @@ class _FakeWebview:
     def __init__(self, fire_closed=True):
         self.windows = []
         self.loops = 0
+        self.start_args = ()
         self.fire_closed = fire_closed
         self._released = threading.Event()
 
@@ -85,8 +86,11 @@ class _FakeWebview:
         self.windows.append(window)
         return window
 
-    def start(self, *_args, **_kwargs):
+    def start(self, *args, **_kwargs):
         self.loops += 1
+        self.start_args = args
+        if args and callable(args[0]):
+            args[0]()
         if not self._released.wait(TIMEOUT):
             raise AssertionError("the fake GUI loop was never released")
 
@@ -256,9 +260,44 @@ def test_the_window_is_asked_for_once_with_the_url_and_no_chrome(monkeypatch):
     assert window.title == desktop.DEFAULT_TITLE
     assert (window.width, window.height) == (1024, 700)
     assert window.maximized is True
+    assert fake.start_args == (desktop._set_macos_app_icon,)
     assert desktop.close_window() is True
     worker.join(TIMEOUT)
     assert not worker.is_alive()
+
+
+def test_the_frozen_macos_window_sets_its_bundled_icon(monkeypatch):
+    calls = {}
+    image = object()
+    loader = types.SimpleNamespace(
+        alloc=lambda: types.SimpleNamespace(
+            initWithContentsOfFile_=lambda path: calls.setdefault("path", path) and image
+        )
+    )
+    application = types.SimpleNamespace(
+        setApplicationIconImage_=lambda value: calls.setdefault("image", value)
+    )
+    modules = {
+        "AppKit": types.SimpleNamespace(
+            NSImage=loader,
+            NSApplication=types.SimpleNamespace(
+                sharedApplication=lambda: application
+            ),
+        ),
+        "Foundation": types.SimpleNamespace(
+            NSBundle=types.SimpleNamespace(
+                mainBundle=lambda: types.SimpleNamespace(
+                    pathForResource_ofType_=lambda name, kind: f"/{name}.{kind}"
+                )
+            )
+        ),
+    }
+    monkeypatch.setattr(desktop.sys, "platform", "darwin")
+    monkeypatch.setattr(desktop.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(desktop.importlib, "import_module", modules.__getitem__)
+
+    assert desktop._set_macos_app_icon() is True
+    assert calls == {"path": "/sniff.icns", "image": image}
 
 
 def test_the_close_handler_fires_once_when_the_toolkit_reports_the_close(monkeypatch):

@@ -1150,22 +1150,8 @@ def test_the_start_screen_holds_an_open_behind_a_modal_sheet():
     assert 'id="cancel"' in html and "fetch('/cancel'" in html
     assert "s.progress" in html and "s.cancellable" in html
     assert 'points="8,105 74,105 99,105 108,34 117,105 251,105"' in html
-    assert 'class="mascot"' in html and 'class="lab-coat"' in html
-    assert 'class="magnifier"' in html
-    trace = re.search(r'class="trace" points="([^"]+)"', html)
-    lens = re.search(
-        r'class="magnifier">.*?<circle cx="([\d.]+)" cy="([\d.]+)" r="([\d.]+)"',
-        html,
-        re.DOTALL,
-    )
-    assert trace is not None and lens is not None
-    peak = min(
-        (tuple(map(float, point.split(","))) for point in trace.group(1).split()),
-        key=lambda point: point[1],
-    )
-    lens_x, lens_y, lens_radius = map(float, lens.groups())
-    assert (peak[0] - lens_x) ** 2 + (peak[1] - lens_y) ** 2 < lens_radius**2
-    assert 'class="nose"' not in html and "nose motif" not in html
+    for retired in ("nose", "mascot", "lab-coat", "magnifier"):
+        assert retired not in html.lower()
     assert 'aria-hidden="true"' in html and 'class="ovart"' in html
     assert "iondrift" in html and "breathe" in html
     assert 'left(rest)' in html, "no ETA is derived from the fraction"

@@ -18,9 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- **The Sniff mark now features a small lab-coated mascot with a magnifying glass.**
-  The mascot looks towards the mass-spectrum peak, and the shared canonical geometry
-  keeps the web mark, SVG and packaged icons aligned without the former nose artwork.
+- **The Sniff mark is now a focused mass-spectrum peak.** The web mark,
+  start-screen artwork, Dock icon and Windows icon share the same clean peak without
+  a nose or mascot. The macOS app also applies its bundled icon directly at launch so
+  Cmd+Tab cannot retain stale artwork.
 - **The native desktop app now opens maximised.** It uses the full usable screen as a
   normal window while retaining its explicit width and height arguments for
   compatibility.
@@ -31,10 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   cycle persistence is mandatory for both internal anchors, caller-supplied axes must
   be applied internal calibrations, and browser saves retain authored peak/range fields
   while updating only the fields edited in the review.
-- **The Sniff mark keeps a clear PTR-MS silhouette.** A quiet baseline and one narrow
-  peak sit beside a small lab-coated mascot with a magnifying glass. The same artwork is
-  used by the compact web marks, hero, Dock icon and Windows icon, with a trace-only
-  version at the smallest sizes.
 - **Opening a run now has a little more life and a smoother finish.** The progress sheet
   carries restrained, accessible peak, ion and breath motion without covering the file,
   stage, percentage, ETA or Cancel. Completion settles at 100%, hands off into the

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import sys
 import threading
 
 from . import brand
@@ -67,6 +68,27 @@ def _describe(exc: BaseException) -> str:
     """One line about a toolkit failure, without pretending to know its class names."""
     text = str(exc).strip()
     return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+
+
+def _set_macos_app_icon() -> bool:
+    """Use the bundled icon directly so Cmd+Tab does not retain stale artwork."""
+    if sys.platform != "darwin" or not getattr(sys, "frozen", False):
+        return False
+    try:
+        appkit = importlib.import_module("AppKit")
+        foundation = importlib.import_module("Foundation")
+        icon_path = foundation.NSBundle.mainBundle().pathForResource_ofType_(
+            "sniff", "icns"
+        )
+        if not icon_path:
+            return False
+        image = appkit.NSImage.alloc().initWithContentsOfFile_(icon_path)
+        if image is None:
+            return False
+        appkit.NSApplication.sharedApplication().setApplicationIconImage_(image)
+    except Exception:
+        return False
+    return True
 
 
 def available() -> bool:
@@ -171,7 +193,7 @@ def run_window(
     with _lock:
         _active = window
     try:
-        webview.start()
+        webview.start(_set_macos_app_icon)
     except Exception as exc:
         with _lock:
             if _active is window:

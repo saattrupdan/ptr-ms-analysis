@@ -214,13 +214,13 @@ installs cleanly and does nothing.
 
 ## The icon, and what a rename costs
 
-The mark is not a file in the repo. `packaging/make_icons.py` holds the geometry
-— a rounded teal tile, the mass-spectrum trace, and a deliberately small lab-coated
-mascot studying the peak through a magnifying glass — and draws it twice: as SVG
+The mark is not a file in the repo. `packaging/make_icons.py` holds the geometry — a
+rounded teal tile and one narrow mass-spectrum peak — and draws it twice: as SVG
 (`gfx/sniff.svg`, and the same geometry in `sniff/brand.py`, which is what the pages
 show) and as a bitmap. The spec calls it during the build, so the macOS job gets a
 `sniff.icns` through `iconutil` and the Windows job gets a `sniff.ico`, both from the
-same run.
+same run. The macOS window also applies that bundled icon directly at launch rather
+than relying on a possibly stale LaunchServices cache.
 
 ```bash
 uv run python packaging/make_icons.py --svg gfx/sniff.svg      # the drawing, as SVG
