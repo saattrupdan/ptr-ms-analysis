@@ -31,6 +31,8 @@ INTERNAL_MASS_ANCHORS = (
     ("water_cluster", 37.033),
     ("iodobenzene", 204.951),
 )
+INTERNAL_MASS_CORRECTION_MODEL = "m_corrected = scale*m_file + offset"
+FILE_MASS_CALIBRATION_MODEL = "timebin = a*sqrt(m_file) + b"
 INTERNAL_ANCHOR_SEARCH_DA = 0.20
 INTERNAL_ANCHOR_MIN_PROMINENCE = 8.0
 INTERNAL_ANCHOR_MIN_SNR = 8.0
@@ -122,9 +124,9 @@ def validate_mass_axis(mass_axis):
         raise MassCalibrationError(reason, dict(diagnostics))
 
     def numeric(value):
-        return isinstance(value, (int, float, np.integer, np.floating)) and not isinstance(
-            value, bool
-        )
+        return isinstance(
+            value, (int, float, np.integer, np.floating)
+        ) and not isinstance(value, bool)
 
     try:
         values = np.asarray(
@@ -137,18 +139,30 @@ def validate_mass_axis(mass_axis):
         fail("caller-supplied mass axis has non-finite or non-physical coefficients")
     if diagnostics.get("applied") is not True:
         fail("caller-supplied mass axis is not an applied internal calibration")
-    if diagnostics.get("model") != "m_corrected = scale*m_file + offset":
+    if diagnostics.get("fallback_reason") is not None:
+        fail("caller-supplied mass axis retains a fallback reason")
+    if diagnostics.get("model") != INTERNAL_MASS_CORRECTION_MODEL:
         fail("caller-supplied mass axis has an unsupported correction model")
 
     try:
         diag_scale_value = diagnostics["scale"]
         diag_offset_value = diagnostics["offset_da"]
         file_cal = diagnostics["file_calibration"]
+        if (
+            not isinstance(file_cal, dict)
+            or file_cal.get("model") != FILE_MASS_CALIBRATION_MODEL
+        ):
+            raise TypeError
         file_a_value = file_cal["a"]
         file_b_value = file_cal["b"]
         if not all(
             numeric(value)
-            for value in (diag_scale_value, diag_offset_value, file_a_value, file_b_value)
+            for value in (
+                diag_scale_value,
+                diag_offset_value,
+                file_a_value,
+                file_b_value,
+            )
         ):
             raise TypeError
         diag_scale = float(diag_scale_value)
@@ -159,6 +173,13 @@ def validate_mass_axis(mass_axis):
         fail("caller-supplied mass axis has incomplete calibration diagnostics")
     if not np.isfinite([diag_scale, diag_offset, file_a, file_b]).all():
         fail("caller-supplied mass axis has non-finite calibration diagnostics")
+    if file_a <= 0:
+        fail("caller-supplied mass axis has non-physical file calibration")
+    if (
+        abs(mass_axis.scale - 1.0) > INTERNAL_MASS_SCALE_LIMIT
+        or abs(mass_axis.offset) > INTERNAL_MASS_OFFSET_LIMIT_DA
+    ):
+        fail("caller-supplied mass axis has an implausible correction")
     if not np.allclose(
         [mass_axis.scale, mass_axis.offset, mass_axis.a, mass_axis.b],
         [diag_scale, diag_offset, file_a, file_b],
@@ -174,7 +195,11 @@ def validate_mass_axis(mass_axis):
     if any(not isinstance(anchor, dict) for anchor in anchors):
         fail("caller-supplied mass axis contains malformed anchor evidence")
     names = [anchor.get("name") for anchor in anchors]
-    if set(names) != set(required) or len(set(names)) != len(names):
+    if (
+        any(not isinstance(name, str) for name in names)
+        or len(set(names)) != len(names)
+        or set(names) != set(required)
+    ):
         fail("caller-supplied mass axis contains contradictory anchor names")
 
     min_blocks = 2
@@ -185,27 +210,60 @@ def validate_mass_axis(mass_axis):
             target_raw = anchor["target_mz"]
             observed_raw = anchor["observed_file_mz"]
             corrected_raw = anchor["corrected_mz"]
+            timebin_raw = anchor["timebin"]
+            prominence_raw = anchor["prominence"]
+            snr_raw = anchor["snr"]
             persistence = anchor["persistence"]
-            if not all(numeric(value) for value in (target_raw, observed_raw, corrected_raw)):
+            if not all(
+                numeric(value)
+                for value in (
+                    target_raw,
+                    observed_raw,
+                    corrected_raw,
+                    timebin_raw,
+                    prominence_raw,
+                    snr_raw,
+                )
+            ):
                 raise TypeError
             target_value = float(target_raw)
             observed = float(observed_raw)
             corrected = float(corrected_raw)
+            timebin = float(timebin_raw)
+            prominence = float(prominence_raw)
+            snr = float(snr_raw)
         except (KeyError, TypeError, ValueError):
             fail(f"{name} anchor evidence is incomplete")
         if (
             anchor.get("status") != "accepted"
-            or not np.isfinite([target_value, observed, corrected]).all()
+            or anchor.get("reason") != ""
+            or not np.isfinite(
+                [target_value, observed, corrected, timebin, prominence, snr]
+            ).all()
             or not np.isclose(target_value, target, rtol=0, atol=1e-12)
+            or observed <= 0
+            or abs(observed - target) > INTERNAL_ANCHOR_SEARCH_DA
             or not np.isclose(
-                corrected, mass_axis.scale * observed + mass_axis.offset,
+                timebin,
+                mass_axis.a * np.sqrt(observed) + mass_axis.b,
+                rtol=0,
+                atol=1e-6,
+            )
+            or prominence < INTERNAL_ANCHOR_MIN_PROMINENCE
+            or snr < INTERNAL_ANCHOR_MIN_SNR
+            or not np.isclose(
+                corrected,
+                mass_axis.scale * observed + mass_axis.offset,
                 rtol=0,
                 atol=1e-9,
             )
             or not np.isclose(corrected, target, rtol=0, atol=1e-9)
         ):
             fail(f"{name} anchor is not a valid corrected endpoint")
-        if not isinstance(persistence, dict) or persistence.get("available") is not True:
+        if (
+            not isinstance(persistence, dict)
+            or persistence.get("available") is not True
+        ):
             fail(f"{name} anchor persistence is unavailable")
         if persistence.get("checked", True) is not True:
             fail(f"{name} anchor persistence was not checked")
@@ -235,8 +293,12 @@ def validate_mass_axis(mass_axis):
             or accepted_blocks > blocks
             or not isinstance(statuses, list)
             or len(statuses) != blocks
-            or any(status not in {"accepted", "missing", "weak", "ambiguous", "implausible"}
-                   for status in statuses)
+            or any(
+                not isinstance(status, str)
+                or status
+                not in {"accepted", "missing", "weak", "ambiguous", "implausible"}
+                for status in statuses
+            )
             or statuses.count("accepted") != accepted_blocks
             or not np.isfinite(fraction)
             or not np.isclose(fraction, accepted_blocks / blocks, rtol=0, atol=1e-12)
@@ -500,7 +562,7 @@ def load_mass_axis(f, *, progress=None, should_stop=None):
         a, b = load_mass_cal(f)
     except ValueError as exc:
         diagnostics = {
-            "model": "m_corrected = scale*m_file + offset",
+            "model": INTERNAL_MASS_CORRECTION_MODEL,
             "applied": False,
             "scale": 1.0,
             "offset_da": 0.0,
@@ -517,13 +579,13 @@ def load_mass_axis(f, *, progress=None, should_stop=None):
         }
         raise MassCalibrationError(str(exc), diagnostics) from exc
     base = {
-        "model": "m_corrected = scale*m_file + offset",
+        "model": INTERNAL_MASS_CORRECTION_MODEL,
         "applied": False,
         "scale": 1.0,
         "offset_da": 0.0,
         "fallback_reason": None,
         "file_calibration": {
-            "model": "timebin = a*sqrt(m_file) + b",
+            "model": FILE_MASS_CALIBRATION_MODEL,
             "a": a,
             "b": b,
         },
@@ -640,7 +702,9 @@ def load_mass_axis(f, *, progress=None, should_stop=None):
     )
     for anchor in anchors:
         anchor["corrected_mz"] = float(scale * anchor["observed_file_mz"] + offset)
-    calibration = MassAxisCalibration(a, b, scale=scale, offset=offset, diagnostics=base)
+    calibration = MassAxisCalibration(
+        a, b, scale=scale, offset=offset, diagnostics=base
+    )
     validate_mass_axis(calibration)
     if progress is not None:
         progress(1.0)
@@ -659,9 +723,7 @@ def _mass_axis_failure(a, b, diagnostics, reason):
     raise MassCalibrationError(reason, diagnostics)
 
 
-def _add_anchor_persistence(
-    f, avg, a, b, anchors, *, progress=None, should_stop=None
-):
+def _add_anchor_persistence(f, avg, a, b, anchors, *, progress=None, should_stop=None):
     """Check both anchors in one deterministic raw-cycle persistence scan."""
     dataset = f.get("SPECdata/Intensities")
     reason = None
@@ -771,7 +833,10 @@ def _add_anchor_persistence(
             "fraction": float(fraction),
             "statuses": block_statuses,
         }
-        if anchor["status"] == "accepted" and fraction < INTERNAL_ANCHOR_MIN_PERSISTENCE:
+        if (
+            anchor["status"] == "accepted"
+            and fraction < INTERNAL_ANCHOR_MIN_PERSISTENCE
+        ):
             anchor["status"] = "ambiguous"
             anchor["reason"] = (
                 f"raw-spectrum persistence is {fraction:.0%} "

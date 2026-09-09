@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Supplied mass axes now require complete calibration evidence.** Production boundaries
+  reject contradictory coefficients, models, anchors, peak-quality fields, timebins and
+  persistence records instead of trusting a forged applied diagnostic.
 - **Mass-axis persistence ignores unrelated corrupt bins.** Raw-cycle anchor checks now
   use only finite samples in each anchor window, while rejecting anchors without two usable
   cycles and preserving the existing block-persistence threshold.
