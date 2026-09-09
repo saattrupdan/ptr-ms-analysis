@@ -120,8 +120,9 @@ class _Server:
 
 @pytest.fixture(autouse=True)
 def _no_window_left_open(monkeypatch):
-    """A window registered by one test must never be handed to the next one."""
+    """Window state from one test must never be handed to the next one."""
     monkeypatch.setattr(desktop, "_active", None)
+    monkeypatch.setattr(app, "_surface", "browser")
 
 
 @pytest.fixture

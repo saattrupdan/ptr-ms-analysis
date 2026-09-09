@@ -701,9 +701,9 @@ h1{margin:0;font-size:20px;font-weight:650;letter-spacing:-.015em}
 .spectrum::after{width:70px;height:70px;left:-23px;bottom:-28px;background:#f6b89c}
 .spectrum svg{position:relative;z-index:1;width:100%;height:140px}
 .spectrum .trace{stroke-dasharray:420;stroke-dashoffset:420;animation:trace 1.8s ease-out forwards}
-.spectrum .nose{transform-origin:115px 30px;animation:nose 3.4s ease-in-out 1.8s infinite}
+.spectrum .mascot{transform-origin:176px 84px;animation:inspect 3.4s ease-in-out 1.8s infinite}
 @keyframes trace{to{stroke-dashoffset:0}}
-@keyframes nose{0%,100%{transform:rotate(0)}50%{transform:rotate(4deg)}}
+@keyframes inspect{0%,100%{transform:translate(0)}50%{transform:translate(-2px,-1px)}}
 .now{display:flex;gap:14px;align-items:center;padding:14px 16px;margin-bottom:20px;
   border-color:var(--acc)}
 .now .txt{min-width:0;flex:1}
@@ -738,7 +738,7 @@ h1{margin:0;font-size:20px;font-weight:650;letter-spacing:-.015em}
   animation:slide 1.5s ease-in-out infinite}
 @keyframes slide{from{transform:translateX(-100%)}to{transform:translateX(380%)}}
 @media(prefers-reduced-motion:reduce){.bar i{animation:none;width:100%;opacity:.5}
-  .spectrum .trace{animation:none;stroke-dashoffset:0}.spectrum .nose{animation:none}}
+  .spectrum .trace{animation:none;stroke-dashoffset:0}.spectrum .mascot{animation:none}}
 footer{display:flex;gap:12px;align-items:center;justify-content:space-between;
   margin-top:32px;color:var(--mut);font-size:12px}
 .link{background:none;border:0;padding:0;color:var(--mut);font:inherit;
@@ -811,13 +811,20 @@ html.lock,html.lock body{overflow:hidden}
       <p class="lede">Open an IONICON run to review its peaks and intervals. Saved configs
         return exactly as you left them; new runs get a clear starting point.</p>
     </div>
-    <div class="spectrum" aria-label="A stylised mass spectrum with a nose motif" role="img">
+    <div class="spectrum" aria-label="A stylised mass-spectrum peak studied by a small scientist" role="img">
       <svg viewBox="0 0 260 140" aria-hidden="true" focusable="false">
         <polyline class="trace" points="8,105 74,105 99,105 108,34 117,105 251,105" fill="none"
           stroke="#eafaf6" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-        <g class="nose" fill="#ffd9a8"><path d="M91 43c-1-8 3-15 11-19 7-3 16-1 20 4 3 4 2 8-3 10-6 2-8 6-13 8-6 2-11 1-15-3Z"/>
-          <circle cx="113" cy="30" r="2" fill="#1f6f6b"/>
-          <path d="M126 22c9-7 18-4 23 4" fill="none" stroke="#ffd9a8" stroke-width="3" stroke-linecap="round"/></g>
+        <g class="mascot">
+<g class="lab-coat"><path d="M181 67h25l7 38h-46l8-38Z" fill="#f7fbff" stroke="#9bd9d5" stroke-width="2"/>
+<path d="M181 67l12 13 13-13M193 80v25" fill="none" stroke="#9bd9d5" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="198" cy="87" r="1.5" fill="#1f6f6b"/><circle cx="198" cy="95" r="1.5" fill="#1f6f6b"/></g>
+<circle cx="193" cy="51" r="14" fill="#ffd9a8"/>
+<circle cx="185" cy="48" r="3.5" fill="#f7fbff"/><circle cx="183.5" cy="48" r="1.5" fill="#1f6f6b"/>
+<path d="M183 58q8 7 16 0" fill="none" stroke="#1f6f6b" stroke-width="2" stroke-linecap="round"/>
+<g class="magnifier"><path d="M125 54l49 36" fill="none" stroke="#ffd9a8" stroke-width="6" stroke-linecap="round"/>
+<circle cx="112" cy="42" r="17" fill="#b8e8e4" fill-opacity=".65" stroke="#ffd9a8" stroke-width="5"/></g>
+</g>
       </svg>
     </div>
   </div>

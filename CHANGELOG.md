@@ -19,10 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - **The Sniff mark now features a small lab-coated mascot with a magnifying glass.**
-  The mascot looks towards the mass-spectrum peak, and the shared canonical geometry keeps
-  the web mark, SVG and packaged icons aligned without the former nose artwork.
+  The mascot looks towards the mass-spectrum peak, and the shared canonical geometry
+  keeps the web mark, SVG and packaged icons aligned without the former nose artwork.
 - **The native desktop app now opens maximised.** It uses the full usable screen as a
-  normal window while retaining its explicit width and height arguments for compatibility.
+  normal window while retaining its explicit width and height arguments for
+  compatibility.
 - **Mass-axis calibration is now one validated, cancellable operation per open.** Its
   progress is included in the opening bar, raw-cycle persistence is scanned once, and
   the validated axis is reused by detection, review preparation and extraction.
