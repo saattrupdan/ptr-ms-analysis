@@ -1108,6 +1108,10 @@ def test_the_start_screen_holds_an_open_behind_a_modal_sheet():
     assert 'role="progressbar"' in html, "the bar is not announced as a bar"
     assert 'id="cancel"' in html and "fetch('/cancel'" in html
     assert "s.progress" in html and "s.cancellable" in html
+    assert 'points="8,105 74,105 99,105 108,34 117,105 251,105"' in html
+    assert 'class="nose"' in html and 'cx="113" cy="30"' in html
+    assert 'aria-hidden="true"' in html and 'class="ovart"' in html
+    assert "iondrift" in html and "breathe" in html
     assert 'left(rest)' in html, "no ETA is derived from the fraction"
     assert "minutes left" in html and "s left" in html, "the ETA is a raw number"
 
@@ -1118,8 +1122,13 @@ def test_a_finished_open_navigates_and_offers_no_button_about_it():
     js = re.findall(r"<script>(.*?)</script>", app._START_HTML, re.S)[0]
     ready = js[js.index("}else if(watching){") :]
     ready = ready[: ready.index("if(s.status==='error')")]
-    assert "location.replace('/review')" in ready, "a finished open does not navigate"
+    assert "handoff()" in ready, "a finished open does not use the completion handoff"
     assert "return;" in ready, "the poll keeps running into a page that is going away"
+    assert "function handoff()" in js
+    assert "animationend" in js and "setTimeout(settle,760)" in js
+    assert "sessionStorage.setItem('sniff-review-entrance','1')" in js
+    assert "prefers-reduced-motion: reduce" in js
+    assert "location.replace('/review')" in js
     assert "Open the review" not in ready
 
 

@@ -49,31 +49,42 @@ def test_the_bundle_and_the_package_share_one_identifier():
 def test_the_page_mark_and_the_icon_are_the_same_drawing():
     icons = _load("make_icons", "packaging/make_icons.py")
     svg = brand.MARK_SVG
-    points = re.findall(r'<polyline points="([^"]+)"[^>]*stroke="#(\w+)"', svg)
-    assert len(points) == 2, "expected the trace and the curl of breath"
-    for text, colour in points:
-        parsed = [tuple(float(v) for v in pair.split(",")) for pair in text.split()]
-        want = icons.TRACE if colour == "eafaf6" else icons.SNORT
-        assert [tuple(float(v) for v in ("%.1f" % x, "%.1f" % y)) for x, y in parsed] == [
-            (float(x), float(y)) for x, y in want
-        ]
-        width = float(re.search(r'points="%s"[^>]*stroke-width="([\d.]+)"'
-                                % re.escape(text), svg).group(1))
-        assert abs(width - (icons.TRACE_WIDTH if colour == "eafaf6"
-                            else icons.SNORT_WIDTH)) < 0.05
-    cx, cy, r = (float(v) for v in re.search(
-        r'<circle cx="([\d.]+)" cy="([\d.]+)" r="([\d.]+)"', svg).groups())
-    assert (cx, cy, r) == tuple(float(v) for v in icons.NOSE)
+
+    def points(value):
+        return " ".join("%g,%g" % pair for pair in value)
+
+    assert 'points="%s"' % points(icons.TRACE) in svg
+    assert 'stroke-width="%g"' % icons.TRACE_WIDTH in svg
+    assert 'points="%s"' % points(icons.NOSE) in svg
+    assert 'cx="%g" cy="%g" r="%g"' % icons.NOSTRIL in svg
+    assert 'points="%s"' % points(icons.BREATH) in svg
+    assert 'stroke-width="%g"' % icons.BREATH_WIDTH in svg
     assert re.search(r'rx="([\d.]+)"', svg).group(1) == "%g" % icons.RADIUS
+
+    generated = icons.svg_text()
+    artwork = (REPO / "gfx" / "sniff.svg").read_text(encoding="utf-8")
+    assert generated == artwork
+    for fragment in (
+        'points="%s"' % points(icons.TRACE),
+        'points="%s"' % points(icons.NOSE),
+        'points="%s"' % points(icons.BREATH),
+    ):
+        assert fragment in generated
 
 
 def test_the_icon_renders_somewhere_other_than_transparent():
     icons = _load("make_icons", "packaging/make_icons.py")
-    for size in (16, 128):
+    for size in (16, 32, 64, 128, 256):
         buf = icons.render(size)
         opaque = sum(1 for i in range(3, len(buf), 4) if buf[i] > 200)
         assert 0.8 < opaque / (size * size) < 1.0, "the tile is not filled at %d px" % size
         assert buf[3] == 0, "the corners must be transparent or the Dock squares them off"
+
+    compact = icons.render(32)
+    warm = icons.NOSE_COLOUR[:3]
+    assert all(tuple(compact[i : i + 3]) != warm for i in range(0, len(compact), 4))
+    detailed = icons.render(64)
+    assert any(tuple(detailed[i : i + 3]) == warm for i in range(0, len(detailed), 4))
 
 
 def test_both_pages_carry_the_mark_and_the_name():
@@ -102,6 +113,23 @@ def test_the_version_is_stated_once():
     spec = (REPO / "pyproject.toml").read_text(encoding="utf-8")
     declared = re.search(r'^version = "([\d.]+[^"\n]*)"$', spec, re.M).group(1)
     assert version("sniff").split("+")[0] == declared
+
+
+def test_agent_contracts_are_not_still_in_a_retired_skill_file():
+    agents = (REPO / "AGENTS.md").read_text(encoding="utf-8")
+    assert not (REPO / "SKILL.md").exists()
+    assert "Read `SKILL.md`" not in agents
+    for contract in (
+        "CLI boundary",
+        "Review ownership",
+        "Peak scope",
+        "Blank files",
+        "Background diagnostic",
+        "Range labels",
+        "Concentration communication",
+        "Identification limits",
+    ):
+        assert contract in agents
 
 
 def test_no_page_still_calls_it_the_old_name():
