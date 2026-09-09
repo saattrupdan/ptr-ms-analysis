@@ -22,16 +22,21 @@ PAGE_TITLE = APP_NAME + " \u2014 " + TAGLINE
 # the product.
 BUNDLE_ID = "dk.samsmart.sniff"
 
-# 64x64 field: a teal tile, the mass-spectrum trace, and one warm nose above the
-# tallest peak. Sized by CSS, so it carries no width or height of its own.
+# 64x64 field: a teal tile, a baseline with one narrow mass-spectrum peak, and
+# a warm side-profile nose with a nostril and a small breath detail. Sized by CSS,
+# so it carries no width or height of its own.
 MARK_SVG = (
     '<svg class="brand" viewBox="0 0 64 64" role="img" aria-label="Sniff">'
     '<rect width="64" height="64" rx="14" fill="#1f6f6b"/>'
-    '<polyline points="6,46 18,46 23,33 28,54 33,45 38,46 58,46" fill="none"'
+    '<polyline points="6,46 20,46 24,46 26,27 28,46 58,46" fill="none"'
     ' stroke="#eafaf6" stroke-width="3.6" stroke-linejoin="round"'
     ' stroke-linecap="round"/>'
-    '<polyline points="29.5,15 34.5,13 36.5,17.5" fill="none" stroke="#ffd9a8"'
-    ' stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>'
-    '<circle cx="23" cy="21" r="6.6" fill="#ffd9a8"/>'
-    "</svg>"
+    '<polygon points="20.5,23 20.3,21 21,18.8 22.5,16.8 24.5,15.5 27,14.8'
+    ' 29.2,15.2 31,16.5 31.6,18 30.7,19.1 28.8,19.5 27.3,20.8'
+    ' 25.3,21.8 23,22.5 20.5,23" fill="#ffd9a8"/>'
+    '<circle cx="28.9" cy="18.1" r="1.05" fill="#1f6f6b"/>'
+    '<polyline points="32.5,14.5 34.8,13 37,13.8 38.5,15.8" fill="none"'
+    ' stroke="#ffd9a8" stroke-width="1.8" stroke-linejoin="round"'
+    ' stroke-linecap="round"/>'
+    '</svg>'
 )

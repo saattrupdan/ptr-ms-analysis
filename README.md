@@ -104,9 +104,11 @@ file's name, what the app is doing, a bar that tracks the cycles it has read, a 
 ETA and **Cancel**. The bar is driven by the work itself — on the 2 GB fixture reading
 the run is about 89 % of an open, so it gets about 89 % of the bar — and a cancel stops
 the analysis at the next block, closes the file and puts you back on the start screen
-with nothing written and nothing broken, ready to open the same file again. When the
-open finishes you are taken straight into the review, so Back does not return you to a
-sheet for a file that is already open.
+with nothing written and nothing broken, ready to open the same file again. Small,
+non-blocking peak, ion and breath details make the wait feel alive without hiding the
+status information. Completion settles at 100% and hands smoothly into the review;
+reduced-motion preferences skip the animation. Back does not return you to a sheet for
+a file that is already open.
 
 ### Packaging the app
 

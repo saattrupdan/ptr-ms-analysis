@@ -625,7 +625,7 @@ h1{margin:0;font-size:20px;font-weight:650;letter-spacing:-.015em}
 .spectrum::after{width:70px;height:70px;left:-23px;bottom:-28px;background:#f6b89c}
 .spectrum svg{position:relative;z-index:1;width:100%;height:140px}
 .spectrum .trace{stroke-dasharray:420;stroke-dashoffset:420;animation:trace 1.8s ease-out forwards}
-.spectrum .nose{transform-origin:62px 37px;animation:nose 3.4s ease-in-out 1.8s infinite}
+.spectrum .nose{transform-origin:115px 30px;animation:nose 3.4s ease-in-out 1.8s infinite}
 @keyframes trace{to{stroke-dashoffset:0}}
 @keyframes nose{0%,100%{transform:rotate(0)}50%{transform:rotate(4deg)}}
 .now{display:flex;gap:14px;align-items:center;padding:14px 16px;margin-bottom:20px;
@@ -691,7 +691,20 @@ html.lock,html.lock body{overflow:hidden}
 .ovmark.stop{border-color:var(--err);border-top-color:transparent;animation:none;
   border-radius:0;background:none}
 @keyframes spin{to{transform:rotate(360deg)}}
-.ovstage{margin:14px 0 6px;color:var(--mut);font-size:13px;min-height:20px}
+.ovart{height:42px;margin:14px 0 4px;border-radius:10px;background:var(--sunk);overflow:hidden}
+.ovart svg{display:block;width:100%;height:100%}
+.ovart .base{stroke:var(--line);stroke-width:2}
+.ovart .peak{stroke:var(--acc);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;
+  fill:none;stroke-dasharray:90;stroke-dashoffset:90;animation:drawpeak 2.8s ease-in-out infinite}
+.ovart .ion{fill:var(--peach);opacity:.7;animation:iondrift 3.2s ease-in-out infinite}
+.ovart circle.ion:nth-of-type(2){animation-delay:-1.1s}
+.ovart circle.ion:nth-of-type(3){animation-delay:-2.2s}
+.ovart .breath{stroke:var(--peach);stroke-width:1.7;fill:none;stroke-linecap:round;
+  opacity:.72;animation:breathe 3.4s ease-in-out infinite}
+@keyframes drawpeak{0%,100%{stroke-dashoffset:90;opacity:.5}45%,70%{stroke-dashoffset:0;opacity:1}}
+@keyframes iondrift{0%,100%{transform:translate(0,3px);opacity:.25}50%{transform:translate(9px,-3px);opacity:.85}}
+@keyframes breathe{0%,100%{transform:translateX(-3px);opacity:.2}50%{transform:translateX(4px);opacity:.8}}
+.ovstage{margin:10px 0 6px;color:var(--mut);font-size:13px;min-height:20px}
 .pbar{height:6px;border-radius:4px;background:var(--line);overflow:hidden}
 .pbar i{display:block;height:100%;width:0;background:var(--acc);border-radius:4px;
   transition:width .35s ease}
@@ -699,8 +712,12 @@ html.lock,html.lock body{overflow:hidden}
   color:var(--mut);font-size:12px;font-variant-numeric:tabular-nums}
 .ovrow{display:flex;justify-content:flex-end;margin-top:16px}
 #overr .msg{margin:10px 0 0;color:var(--err);font-size:13px;white-space:pre-wrap}
-@media(prefers-reduced-motion:reduce){.ovmark{animation:none;border-top-color:var(--line)}
-  .pbar i{transition:none}}
+#ov.handoff .ovcard{animation:handoffcard .62s cubic-bezier(.22,.75,.25,1) both}
+#ov.handoff .ovart{animation:handoffart .62s ease both}
+@keyframes handoffcard{to{opacity:0;transform:scale(1.035) translateY(-6px)}}
+@keyframes handoffart{to{opacity:0;transform:scale(1.08)}}
+@media(prefers-reduced-motion:reduce){.ovmark,.ovart .peak,.ovart .ion,.ovart .breath{animation:none}
+  .ovart .peak{stroke-dashoffset:0}.pbar i{transition:none}}
 @media(max-width:620px){main{padding-top:28px}.hero{grid-template-columns:1fr;gap:20px}
   .spectrum{min-height:125px}.spectrum svg{height:100px}.pick{padding:23px 20px}
   .quick{margin-top:16px}
@@ -720,13 +737,11 @@ html.lock,html.lock body{overflow:hidden}
     </div>
     <div class="spectrum" aria-label="A stylised mass spectrum with a nose motif" role="img">
       <svg viewBox="0 0 260 140" aria-hidden="true" focusable="false">
-        <polyline class="trace" points="8,105 42,105 58,78 73,104 91,105 110,102 125,28 137,104
-          158,94 171,101 187,83 200,105 226,105 251,105" fill="none" stroke="#eafaf6"
-          stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-        <g class="nose" fill="none" stroke="#ffd9a8" stroke-width="4" stroke-linecap="round"
-          stroke-linejoin="round"><circle cx="125" cy="20" r="10" fill="#ffd9a8" stroke="none"/>
-          <path d="M121 19l9-4 6 6-5 5"/></g>
-        <circle cx="224" cy="36" r="4" fill="#f6b89c"/>
+        <polyline class="trace" points="8,105 74,105 99,105 108,34 117,105 251,105" fill="none"
+          stroke="#eafaf6" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        <g class="nose" fill="#ffd9a8"><path d="M91 43c-1-8 3-15 11-19 7-3 16-1 20 4 3 4 2 8-3 10-6 2-8 6-13 8-6 2-11 1-15-3Z"/>
+          <circle cx="113" cy="30" r="2" fill="#1f6f6b"/>
+          <path d="M126 22c9-7 18-4 23 4" fill="none" stroke="#ffd9a8" stroke-width="3" stroke-linecap="round"/></g>
       </svg>
     </div>
   </div>
@@ -757,6 +772,16 @@ html.lock,html.lock body{overflow:hidden}
         <span class="ovmark" aria-hidden="true"></span>
         <div class="txt"><b id="ovname">Opening a file</b>
           <span class="sub" id="ovdir"></span></div>
+      </div>
+      <div class="ovart" aria-hidden="true">
+        <svg viewBox="0 0 320 42" focusable="false">
+          <path class="base" d="M12 28H308" fill="none"/>
+          <path class="peak" d="M12 28H137L151 8L165 28H308"/>
+          <path class="breath" d="M184 18c12-9 24-9 35 0"/>
+          <circle class="ion" cx="205" cy="28" r="2.5"/>
+          <circle class="ion" cx="248" cy="28" r="2.5"/>
+          <circle class="ion" cx="278" cy="28" r="2.5"/>
+        </svg>
       </div>
       <p class="ovstage" id="ovstage" role="status" aria-live="polite"></p>
       <div class="pbar" role="progressbar" id="ovbar"
@@ -809,8 +834,34 @@ let watching=false;                    // an open is in flight, from this page
 let failed=false;                      // the sheet is showing an error, not a bar
 let ask=null;                          // the path this page asked to open
 let t0=0;                              // when this page started watching
+let navigating=false;                   // ready can be observed by two poll turns
+const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function resetEta(){t0=0;}
+function handoff(){
+  if(navigating)return;
+  navigating=true;
+  watching=false;
+  setBar(1);
+  $('#ovstage').textContent='Ready';
+  $('#cancel').disabled=true; $('#cancel').hidden=true;
+  try{sessionStorage.setItem('sniff-review-entrance','1');}catch(e){}
+  const go=()=>{
+    if(!navigating)return;
+    navigating=false;
+    location.replace('/review');
+  };
+  if(reducedMotion)return go();
+  const sheet=$('#ov'), card=sheet.querySelector('.ovcard');
+  let settled=false;
+  const settle=e=>{
+    if(settled|| (e && e.animationName!=='handoffcard'))return;
+    settled=true; card.removeEventListener('animationend',settle); go();
+  };
+  card.addEventListener('animationend',settle);
+  sheet.classList.add('handoff');
+  window.setTimeout(settle,760);
+}
 function lock(on){
   document.documentElement.classList.toggle('lock',on);
   const m=document.querySelector('main'); if(m)m.inert=on;
@@ -911,9 +962,9 @@ async function tick(){
   }else if(watching){
     watching=false;
     if(s.status==='ready'){
-      // replace, not assign: Back must not land on a sheet for a file that is
-      // already open behind it.
-      location.replace('/review');
+      // The handoff lets the user see that the work completed; its guard also
+      // handles a ready response arriving twice before navigation finishes.
+      handoff();
       return;
     }
     if(s.status==='error')failSheet(s.error||'Could not open that file.');

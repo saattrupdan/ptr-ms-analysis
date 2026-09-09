@@ -469,6 +469,8 @@ def render_html(data, config_path=None, mode="review"):
         _TEMPLATE.replace("/*__DATA__*/", payload)
         .replace("/*__CFGPATH__*/", json.dumps(config_path or ""))
         .replace("/*__APPMODE__*/", json.dumps(bool(mode == "app")))
+        .replace("/*__MARK__*/", brand.MARK_SVG.replace('aria-label="Sniff"',
+                                                        'aria-label="' + brand.APP_NAME + '"'))
         .replace("/*__APP_NAME__*/", brand.APP_NAME)
         .replace("/*__PAGE_TITLE__*/", brand.PAGE_TITLE)
     )
@@ -949,11 +951,15 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .spin{width:15px;height:15px;border-radius:50%;border:2px solid var(--line);
         border-top-color:var(--acc);animation:spinrot .7s linear infinite}
   @keyframes spinrot{to{transform:rotate(360deg)}}
+  body.review-enter header,body.review-enter .app{animation:reviewenter .58s cubic-bezier(.22,.75,.25,1) both}
+  body.review-enter .app{animation-delay:.06s}
+  @keyframes reviewenter{from{opacity:0;transform:translateY(8px) scale(.992)}to{opacity:1;transform:none}}
+  @media(prefers-reduced-motion:reduce){body.review-enter header,body.review-enter .app{animation:none}}
 </style>
 </head>
 <body>
 <header>
-  <svg class="brand" viewBox="0 0 64 64" role="img" aria-label="/*__APP_NAME__*/"><rect width="64" height="64" rx="14" fill="#1f6f6b"/><polyline points="6,46 18,46 23,33 28,54 33,45 38,46 58,46" fill="none" stroke="#eafaf6" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round"/><polyline points="29.5,15 34.5,13 36.5,17.5" fill="none" stroke="#ffd9a8" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="23" cy="21" r="6.6" fill="#ffd9a8"/></svg>
+  /*__MARK__*/
   <h1>/*__APP_NAME__*/ <span class="h1tag">PTR-MS review</span></h1>
   <span class="file" id="file"></span>
   <span class="meta" id="meta"></span>
@@ -2769,6 +2775,15 @@ window.addEventListener("resize",()=>{ if(tourArr) positionTour(); });
 document.getElementById("tourBtn").onclick=()=>startTour();
 
 // ---- init ----
+try{
+  if(sessionStorage.getItem("sniff-review-entrance")==="1"){
+    sessionStorage.removeItem("sniff-review-entrance");
+    document.body.classList.add("review-enter");
+    const clearEntrance=()=>document.body.classList.remove("review-enter");
+    document.body.addEventListener("animationend",clearEntrance,{once:true});
+    setTimeout(clearEntrance,720);
+  }
+}catch(e){}
 document.getElementById("file").textContent=M.file.split("/").pop();
 document.getElementById("meta").textContent=
   `${NCYC.toLocaleString()} cycles · ${(NCYC*M.dur/60).toFixed(1)} min · ${peaks.length} peaks · ${ranges.length} intervals`;

@@ -1,12 +1,9 @@
 # PTR-MS analysis
 
-This skill is an agent-driven, open-source replacement for PTR-MS Viewer. It ships a
-Python CLI that reads IONICON IoniTOF `.h5` files, detects and quantifies ion peaks,
-proposes time segments, and serves a browser-based expert review.
-
-Read `SKILL.md` before changing behaviour. It defines the intended analysis workflow,
-scientific caveats, and agent-facing contract; `README.md` is the shorter user-facing
-CLI reference.
+Sniff is an open-source replacement for proprietary PTR-MS Viewer. It ships a Python
+CLI that reads IONICON IoniTOF `.h5` files, detects and quantifies ion peaks, proposes
+time segments, and serves a browser-based expert review. This file contains durable
+agent-facing contracts; `README.md` and the CLI remain the user documentation.
 
 ## Stack
 
@@ -26,6 +23,43 @@ CLI reference.
 | `src/sniff/gen_rate_constants.py` | Rebuilds the bundled rate-constant JSON. |
 | `src/sniff/reference/` | Scientific references and package data shipped with the CLI. |
 | `packaging/` | PyInstaller spec and frozen-entry point; the `package` workflow builds a folder bundle per OS. |
+
+## Agent-facing contracts
+
+- **CLI boundary:** use `sniff <command> --help` and the CLI's JSON output for
+  inspection and analysis. Do not perform ad-hoc HDF5 analysis in an agent or script;
+  keep scientific decisions in the package's CLI and library.
+- **Review ownership:** the browser review belongs to the human reviewer. Prepare the
+  config before opening it, then hand over the URL or app. Do not use browser
+  automation to inspect or edit the review, tick its checklist, or click Done.
+- **Peak scope:** decide comprehensive versus targeted output before selecting peaks.
+  Comprehensive output retains every credible real channel, including fragments,
+  isotopes, reagent ions and water clusters; targeted output is only for an explicit
+  named panel. Never silently reduce a general export to familiar VOCs.
+- **Blank files:** if the CLI reports no significant reagent ion and no peaks, treat
+  the run as blank/no-beam/aborted. Report it and stop; never lower thresholds or
+  invent analytes from noise.
+- **Background diagnostic:** after ranges are curated, inspect the `background`
+  diagnostic. Channels stronger in backgrounds (S/B below 1) or with an upward
+  background trend are background or contamination: relabel or drop them rather than
+  shipping them as analytes.
+- **Range labels:** preserve chronological, deterministic labels: `sample_01`,
+  `sample_02`, and `background_01`, `background_02`, numbered independently. Do not
+  ask users to name automatically detected plateaus.
+- **Concentration communication:** distinguish file-derived scale from a project or
+  standards calibration. State when K is uncalibrated and treat humidity-sensitive
+  compounds as indicative unless their calibration supports more. Never imply that a
+  plausible number is accurate without evidence.
+- **Identification limits:** m/z and formula candidates are proposals, not proof of
+  chemical identity. Preserve honest unknowns, report ambiguity and overlap, and do
+  not present a library match or candidate score as a calibrated probability.
+
+## Repository workflow
+
+- Work directly on `main` in this repository; do not create a feature branch.
+- After every completed change, rebuild and install `/Applications/Sniff.app` so Dan
+  can test it by opening Sniff. The orchestrator may perform this step outside an
+  isolated builder worktree.
 
 ## Running it
 
@@ -85,8 +119,8 @@ change; the Windows half of it can only be verified on a Windows runner.
 - Preserve JSON on stdout for discovery commands and send progress logs to stderr.
 - Keep the CLI deterministic. Chemistry assignment and segment curation remain explicit
   agent decisions; do not add a one-shot automatic workflow.
-- Update `SKILL.md` and `README.md` when flags, output fields, workflow, or scientific
-  interpretation change. The `analyze` object is resolved with CLI override > curated
+- Update `README.md` when flags, output fields, workflow, or scientific interpretation
+  change. The `analyze` object is resolved with CLI override > curated
   config > legacy default; keep the Methods provenance and authoritative Done rerun
   wording aligned with that implementation.
 - Use Conventional Commits, following the parent dotfiles repository.
@@ -112,6 +146,6 @@ change; the Windows half of it can only be verified on a Windows runner.
   Surface degraded accuracy through the existing diagnostics and NaN behaviour.
 - Do not weaken noise, overlap, apex, humidity, blank-file, or sample/background checks
   merely to produce more populated output. These are scientific safeguards.
-- The skill replaces proprietary PTR-MS Viewer. Documentation must not instruct users to
+- Sniff replaces proprietary PTR-MS Viewer. Documentation must not instruct users to
   generate, validate, or repair results in that tool; an existing reference CSV may only
   be used for calibration or comparison.

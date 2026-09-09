@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **The Sniff mark now has a clear PTR-MS silhouette.** A quiet baseline and one narrow
+  peak sit beneath a warm, friendly nose profile with nostril and breath detail. The
+  same artwork is used by the compact web marks, hero, Dock icon and Windows icon, with
+  a trace-only version at small sizes.
+- **Opening a run now has a little more life and a smoother finish.** The progress sheet
+  carries restrained, accessible peak, ion and breath motion without covering the file,
+  stage, percentage, ETA or Cancel. Completion settles at 100%, hands off into the
+  review with a guarded zoom/fade transition, and respects reduced-motion preferences.
+- **Agent-facing workflow contracts now live in `AGENTS.md`.** The retired workflow
+  document no longer duplicated the CLI boundary, review ownership, peak scope, blank
+  handling,
+  diagnostic checks, range labels, concentration caveats or identification limits.
+
 - **Masses now use a conservative internal two-point axis correction.** Water-cluster
   (37.033) and iodobenzene (204.951) anchors define a separate affine mass-domain
   scale and offset only when both pass sub-bin prominence, S/N, ambiguity and

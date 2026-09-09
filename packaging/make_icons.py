@@ -28,9 +28,8 @@ import tempfile
 import zlib
 
 # ---------------------------------------------------------------------------
-# The artwork, in a 64x64 field. A rounded teal tile, the mass-spectrum trace
-# running along it, and one warm round nose above the tallest peak: breath, a
-# spectrum, and something that sniffs.
+# The artwork, in a 64x64 field. A rounded teal tile, a quiet spectrum baseline
+# with one narrow peak, and a warm side-profile nose with a small breath detail.
 # ---------------------------------------------------------------------------
 
 FIELD = 64.0
@@ -38,12 +37,18 @@ TILE = (0x1F, 0x6F, 0x6B, 255)
 TRACE_COLOUR = (0xEA, 0xFA, 0xF6, 255)
 NOSE_COLOUR = (0xFF, 0xD9, 0xA8, 255)
 RADIUS = 14.0                      # of the tile, in field units
-TRACE = [(6, 46), (18, 46), (23, 33), (28, 54), (33, 45), (38, 46), (58, 46)]
+TRACE = [(6, 46), (20, 46), (24, 46), (26, 27), (28, 46), (58, 46)]
 TRACE_WIDTH = 3.6
-NOSE = (23.0, 21.0, 6.6)           # centre x, centre y, radius
-SNORT = ((29.5, 15.0), (34.5, 13.0), (36.5, 17.5))   # the little curl of breath
-SNORT_WIDTH = 2.8
-SMALL_TRACE = [(6, 44), (20, 44), (26, 30), (32, 52), (38, 42), (44, 44), (58, 44)]
+# A filled, gently curved side profile; keeping these points here makes the bitmap
+# and SVG use the same silhouette without adding an image dependency.
+NOSE = [(20.5, 23.0), (20.3, 21.0), (21.0, 18.8), (22.5, 16.8),
+        (24.5, 15.5), (27.0, 14.8), (29.2, 15.2), (31.0, 16.5),
+        (31.6, 18.0), (30.7, 19.1), (28.8, 19.5), (27.3, 20.8),
+        (25.3, 21.8), (23.0, 22.5), (20.5, 23.0)]
+NOSTRIL = (28.9, 18.1, 1.05)        # centre x, centre y, radius
+BREATH = ((32.5, 14.5), (34.8, 13.0), (37.0, 13.8), (38.5, 15.8))
+BREATH_WIDTH = 1.8
+SMALL_TRACE = [(6, 46), (21, 46), (26, 27), (31, 46), (58, 46)]
 SMALL_WIDTH = 6.4
 # Below this the nose and the curl are fewer pixels than a stroke, so the mark
 # becomes just the trace: still recognisable, never mud.
@@ -122,6 +127,26 @@ def _stroke(buf, size, points, width, colour):
         _stamp(buf, size, x * scale, y * scale, w / 2.0, colour)
 
 
+def _polygon(buf, size, points, colour):
+    """Fill the nose silhouette in device pixels."""
+    scale = size / FIELD
+    scaled = [(x * scale, y * scale) for x, y in points]
+    lo_x = max(int(min(x for x, _ in scaled)) - 1, 0)
+    hi_x = min(int(max(x for x, _ in scaled)) + 2, size)
+    lo_y = max(int(min(y for _, y in scaled)) - 1, 0)
+    hi_y = min(int(max(y for _, y in scaled)) + 2, size)
+    for y in range(lo_y, hi_y):
+        for x in range(lo_x, hi_x):
+            inside = False
+            for (x0, y0), (x1, y1) in zip(scaled, scaled[1:] + scaled[:1]):
+                if (y0 > y + 0.5) != (y1 > y + 0.5):
+                    cross = (x1 - x0) * (y + 0.5 - y0) / (y1 - y0) + x0
+                    if x + 0.5 < cross:
+                        inside = not inside
+            if inside:
+                _blend(buf, size, x, y, colour, 1.0)
+
+
 def render(size, detail=None):
     """An RGBA byte string for one square icon of ``size`` pixels."""
     if detail is None:
@@ -145,9 +170,11 @@ def render(size, detail=None):
 
     if detail:
         paint(TRACE, TRACE_WIDTH, TRACE_COLOUR)
-        paint(SNORT, SNORT_WIDTH, NOSE_COLOUR)
+        _polygon(buf, size, NOSE, NOSE_COLOUR)
+        paint(BREATH, BREATH_WIDTH, NOSE_COLOUR)
         s = size / FIELD
-        _stamp(buf, size, NOSE[0] * s, NOSE[1] * s, max(NOSE[2] * s, 0.45), NOSE_COLOUR)
+        _stamp(buf, size, NOSTRIL[0] * s, NOSTRIL[1] * s,
+               max(NOSTRIL[2] * s, 0.45), TILE)
     else:
         paint(SMALL_TRACE, SMALL_WIDTH, TRACE_COLOUR)
     return bytes(buf)
@@ -230,9 +257,10 @@ def svg_text(size=FIELD):
         '  <rect width="64" height="64" rx="%g" fill="#1f6f6b"/>' % RADIUS,
         '  <polyline points="%s" fill="none" stroke="#eafaf6" stroke-width="%g"'
         ' stroke-linejoin="round" stroke-linecap="round"/>' % (pts(TRACE), TRACE_WIDTH),
+        '  <polygon points="%s" fill="#ffd9a8"/>' % pts(NOSE),
+        '  <circle cx="%g" cy="%g" r="%g" fill="#1f6f6b"/>' % NOSTRIL,
         '  <polyline points="%s" fill="none" stroke="#ffd9a8" stroke-width="%g"'
-        ' stroke-linejoin="round" stroke-linecap="round"/>' % (pts(SNORT), SNORT_WIDTH),
-        '  <circle cx="%g" cy="%g" r="%g" fill="#ffd9a8"/>' % NOSE,
+        ' stroke-linejoin="round" stroke-linecap="round"/>' % (pts(BREATH), BREATH_WIDTH),
         "</svg>",
     ]
     return "\n".join(body) + "\n"
