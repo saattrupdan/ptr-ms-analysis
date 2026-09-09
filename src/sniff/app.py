@@ -69,6 +69,7 @@ RECENT_LIMIT = 20
 # twice on a curated file (14.6 s streaming, 13.9 s re-centring the intervals), and
 # both belong on the axis.
 P_META = 0.03
+P_CAL = 0.06
 P_DETECT = 0.08
 P_BUILD = viz.PREP_FRACTION  # 0.11: where the streaming starts, here and in viz
 
@@ -179,7 +180,14 @@ def _instrument(f) -> str:
     return value.decode(errors="replace") if isinstance(value, bytes) else str(value)
 
 
-def bootstrap_config(h5_path: str, f=None, *, progress=None, should_stop=None) -> dict:
+def bootstrap_config(
+    h5_path: str,
+    f=None,
+    *,
+    mass_axis=None,
+    progress=None,
+    should_stop=None,
+) -> dict:
     """Build a config from the file alone, with no agent and no judgement calls.
 
     Peaks and intervals come from the deterministic pipeline; the checklist says
@@ -199,14 +207,32 @@ def bootstrap_config(h5_path: str, f=None, *, progress=None, should_stop=None) -
             raise ptrms.AnalysisCancelled("the analysis was cancelled")
 
     own = f is None
+    supplied_axis = mass_axis is not None
     source = h5py.File(h5_path, "r") if own else f
+    def _detect(function):
+        if not supplied_axis:
+            return function(source)
+        try:
+            return function(source, mass_axis=mass_axis)
+        except TypeError as exc:
+            # Preserve compatibility with callers that replace the detector with a
+            # one-argument test double; real detectors accept the threaded axis.
+            if "mass_axis" not in str(exc):
+                raise
+            return function(source)
+
     try:
         _say(0.0)
-        mass_axis = ptrms.load_mass_axis(source)
-        peaks = auto_peaks(source)
+        if mass_axis is None:
+            mass_axis = ptrms.load_mass_axis(
+                source, progress=progress, should_stop=should_stop
+            )
+        else:
+            ptrms.validate_mass_axis(mass_axis)
+        peaks = _detect(auto_peaks)
         _say(0.1)
         _halt()  # detection is the only cancellable gap before the review data
-        ranges = auto_ranges(source)
+        ranges = _detect(auto_ranges)
         _say(1.0)
         ncyc = int(source["SPECdata/Intensities"].shape[0])
         instrument = _instrument(source)
@@ -394,7 +420,13 @@ class Session:
             self._say(P_META)
             # Calibration is a gate: an old config must never be migrated before
             # both run-internal anchors have been proved.
-            mass_axis = ptrms.load_mass_axis(self._file)
+            self.stage = "Calibrating the mass axis"
+            mass_axis = ptrms.load_mass_axis(
+                self._file,
+                progress=self._band(P_META, P_CAL),
+                should_stop=self._cancel.is_set,
+            )
+            self._say(P_CAL)
             config = _read_json(config_path) if config_path.exists() else None
             if config is not None and not _valid_config(config):
                 raise ValueError(f"{config_path} is not a sniff config")
@@ -402,13 +434,14 @@ class Session:
                 config, migrated = ptrms.migrate_config_mass_axis(config, mass_axis)
                 if migrated:
                     _write_json(config_path, config)
-            prep_start = P_META
+            prep_start = P_CAL
             if config is None:
                 self.stage = "Detecting peaks and intervals"
                 config = bootstrap_config(
                     path,
                     f=self._file,
-                    progress=self._band(P_META, P_DETECT),
+                    mass_axis=mass_axis,
+                    progress=self._band(P_CAL, P_DETECT),
                     should_stop=self._cancel.is_set,
                 )
                 self._halt()  # a cancel must not leave a half-made config on disk
@@ -423,6 +456,7 @@ class Session:
             self.payload = self._payload(
                 path,
                 config,
+                mass_axis=mass_axis,
                 progress=self._build_sink(prep_start),
                 should_stop=self._cancel.is_set,
             )
@@ -506,12 +540,15 @@ class Session:
         _write_json(config_path, answer)
         return answer
 
-    def _payload(self, path, config, progress=None, should_stop=None):
+    def _payload(
+        self, path, config, *, mass_axis=None, progress=None, should_stop=None
+    ):
         settings = resolve_analysis_settings(config)
         return viz.build_viz_data(
             self._file,
             config.get("peaks", []),
             config.get("ranges", []),
+            mass_axis=mass_axis,
             analysis_settings=settings,
             config_base=config,
             checklist=config.get("checklist"),

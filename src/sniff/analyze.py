@@ -756,8 +756,9 @@ def cmd_peaks(args):
 def cmd_segments(args):
     with h5py.File(args.h5, "r") as f:
         ncyc = int(f["SPECdata/Intensities"].shape[0])
-        sig = assess_signal(f)
-        D = ptrms.build_discriminator(f)
+        mass_axis = ptrms.load_mass_axis(f)
+        sig = assess_signal(f, mass_axis=mass_axis)
+        D = ptrms.build_discriminator(f, mass_axis=mass_axis)
         segs = ptrms.detect_segments(
             f,
             discriminator=D,
@@ -839,8 +840,17 @@ def _merge_overlapping_windows(peaks, R=1200.0, thresh=0.6):
     return out
 
 
-def auto_peaks(f, *, min_height=1e-3, max_peaks=300, mz_min=15.0, mz_max=None,
-               R=None, R_phys=None):
+def auto_peaks(
+    f,
+    *,
+    min_height=1e-3,
+    max_peaks=300,
+    mz_min=15.0,
+    mz_max=None,
+    R=None,
+    R_phys=None,
+    mass_axis=None,
+):
     """Deterministic peak panel for a file: detect, annotate, drop instrument-noise
     artifacts, collapse windows that coincide, and carry the suggested name.
 
@@ -849,7 +859,8 @@ def auto_peaks(f, *, min_height=1e-3, max_peaks=300, mz_min=15.0, mz_max=None,
     must never be turned into a fabricated analyte list."""
     R = 1200.0 if R is None else R
     R_phys = 2400.0 if R_phys is None else R_phys
-    mass_axis = ptrms.load_mass_axis(f)
+    if mass_axis is None:
+        mass_axis = ptrms.load_mass_axis(f)
     a, b = mass_axis.a, mass_axis.b
     avg = np.where(
         np.isfinite(f["SPECdata/AverageSpec"][:]), f["SPECdata/AverageSpec"][:], 0.0
@@ -890,7 +901,15 @@ def auto_peaks(f, *, min_height=1e-3, max_peaks=300, mz_min=15.0, mz_max=None,
     return out
 
 
-def auto_ranges(f, *, min_duration=30, grad_thr=0.02, high_gap=None, low_gap=200):
+def auto_ranges(
+    f,
+    *,
+    min_duration=30,
+    grad_thr=0.02,
+    high_gap=None,
+    low_gap=200,
+    mass_axis=None,
+):
     """Deterministic interval list: stable plateaus, consolidated, and named
     `sample_NN` / `background_NN` in chronological order. The name carries the class,
     which is what the analysis blanks against, so these labels are load-bearing.
@@ -899,7 +918,7 @@ def auto_ranges(f, *, min_duration=30, grad_thr=0.02, high_gap=None, low_gap=200
     itself across ~60 s of acquisition; a number forces that cycle cap instead and 0
     never merges high plateaus. Merged gaps carry their provenance on the range as
     `merged_gaps`, which is what the review UI quotes back to the reviewer."""
-    D = ptrms.build_discriminator(f)
+    D = ptrms.build_discriminator(f, mass_axis=mass_axis)
     segs = ptrms.detect_segments(
         f, discriminator=D, min_duration=min_duration, grad_thr=grad_thr
     )
@@ -939,7 +958,7 @@ def auto_ranges_note(ranges):
     )
 
 
-def _auto_peaks(f, args, R=None, R_phys=None):
+def _auto_peaks(f, args, R=None, R_phys=None, mass_axis=None):
     """Peaks for the --auto-peaks fallback: detect, annotate, DROP instrument-noise
     artifacts (ringing combs / low-prominence ripples), and carry each peak's
     `suggested_label` so a headless one-shot `analyze` yields a clean, labelled panel
@@ -955,10 +974,11 @@ def _auto_peaks(f, args, R=None, R_phys=None):
         mz_max=args.mz_max,
         R=R,
         R_phys=R_phys,
+        mass_axis=mass_axis,
     )
 
 
-def _load_peaks(args, f, settings=None, config=None):
+def _load_peaks(args, f, settings=None, config=None, mass_axis=None):
     if args.peaks_json:
         return json.loads(args.peaks_json)
     if args.config:
@@ -971,11 +991,17 @@ def _load_peaks(args, f, settings=None, config=None):
     if getattr(args, "auto_peaks", False):
         if settings is None:
             settings = resolve_analysis_settings(_load_config(args), args)
-        return _auto_peaks(f, args, R=settings["R"], R_phys=settings["R_phys"])
+        return _auto_peaks(
+            f,
+            args,
+            R=settings["R"],
+            R_phys=settings["R_phys"],
+            mass_axis=mass_axis,
+        )
     return None
 
 
-def _load_ranges(args, f):
+def _load_ranges(args, f, mass_axis=None):
     if args.ranges_json:
         return json.loads(args.ranges_json)
     if args.config:
@@ -984,7 +1010,11 @@ def _load_ranges(args, f):
         if cfg.get("ranges"):
             return cfg["ranges"]
     if getattr(args, "auto_segments", False):
-        return auto_ranges(f, high_gap=getattr(args, "merge_high_gap", None))
+        return auto_ranges(
+            f,
+            high_gap=getattr(args, "merge_high_gap", None),
+            mass_axis=mass_axis,
+        )
     return None
 
 
@@ -1031,11 +1061,13 @@ def cmd_analyze(args):
         mass_axis = ptrms.load_mass_axis(f)
         config = _migrate_loaded_config(config, args, mass_axis)
         settings = resolve_analysis_settings(config, args)
-        peaks = _load_peaks(args, f, settings=settings, config=config)
+        peaks = _load_peaks(
+            args, f, settings=settings, config=config, mass_axis=mass_axis
+        )
         if not peaks:
             # distinguish a genuinely blank file from a missing peak list
             if getattr(args, "auto_peaks", False):
-                sig = assess_signal(f)
+                sig = assess_signal(f, mass_axis=mass_axis)
                 if not sig["signal_present"]:
                     _emit(
                         {
@@ -1064,7 +1096,7 @@ def cmd_analyze(args):
             float(p["mz"]): formula_id.identity_label(p.get("label"), p.get("formula"))
             for p in peaks
         }
-        ranges = _resolve_ranges(f, _load_ranges(args, f))
+        ranges = _resolve_ranges(f, _load_ranges(args, f, mass_axis=mass_axis))
 
         R = settings["R"]
         R_phys = settings["R_phys"]
@@ -1117,6 +1149,7 @@ def cmd_analyze(args):
             humidity_ratio=hum_ratio,
             humidity_ref=settings["humidity_ref"],
             humidity_p=settings["humidity_p"],
+            mass_axis=mass_axis,
         )
         apexes = {m: ap for m, (_, ap) in traces.items()}
         humidity_ref = settings["humidity_ref"]
@@ -1335,8 +1368,10 @@ def cmd_viz(args):
         mass_axis = ptrms.load_mass_axis(f)
         config = _migrate_loaded_config(config, args, mass_axis)
         settings = resolve_analysis_settings(config, args)
-        peaks = _load_peaks(args, f, settings=settings, config=config)
-        ranges_cfg = _load_ranges(args, f)
+        peaks = _load_peaks(
+            args, f, settings=settings, config=config, mass_axis=mass_axis
+        )
+        ranges_cfg = _load_ranges(args, f, mass_axis=mass_axis)
         if not peaks or not ranges_cfg:
             sys.exit(
                 "viz needs an explicit peak list AND time ranges — it does not "
@@ -1369,6 +1404,7 @@ def cmd_viz(args):
             x_axis_unit=x_axis_unit,
             checklist=_load_checklist(args),
             merge_note=config.get("merge_note") or "",
+            mass_axis=mass_axis,
         )
 
     serve_mode = args.serve if args.serve is not None else (not args.html)
@@ -1530,13 +1566,15 @@ def cmd_calibrate(args):
         mass_axis = ptrms.load_mass_axis(f)
         config = _migrate_loaded_config(config, args, mass_axis)
         settings = resolve_analysis_settings(config, args)
-        peaks = _load_peaks(args, f, settings=settings, config=config)
+        peaks = _load_peaks(
+            args, f, settings=settings, config=config, mass_axis=mass_axis
+        )
         # default: calibrate on whatever masses appear in the reference
         if not peaks:
             masses = sorted({mz for (mz, _) in ref_conc})
         else:
             masses = [float(p["mz"]) for p in peaks]
-        ranges = _resolve_ranges(f, _load_ranges(args, f))
+        ranges = _resolve_ranges(f, _load_ranges(args, f, mass_axis=mass_axis))
         if len(ranges) == 1 and "All" in ranges:
             # derive ranges from the reference's own labels via its Cycle rows
             ranges = _ranges_from_reference(args.reference)
@@ -1547,9 +1585,18 @@ def cmd_calibrate(args):
             f, masses, R=R, R_phys=R_phys, mass_axis=mass_axis
         )
         K, resid, n = ptrms.calibrate_K(
-            f, traces, ref_conc, ranges, primary_mz=primary_mz, R_used=R
+            f,
+            traces,
+            ref_conc,
+            ranges,
+            primary_mz=primary_mz,
+            R_used=R,
+            mass_axis=mass_axis,
         )
-        K_file = ptrms.derive_K(f, ptrms.extract_primary(f, primary_mz, R))
+        K_file = ptrms.derive_K(
+            f,
+            ptrms.extract_primary(f, primary_mz, R, mass_axis=mass_axis),
+        )
     _emit(
         {
             "K_calibrated": K,
@@ -1737,6 +1784,7 @@ def analyze_config_to_csv(h5_path, config, out, sep=";", include_cycle_rows=True
             humidity_ratio=hum_ratio,
             humidity_ref=settings["humidity_ref"],
             humidity_p=settings["humidity_p"],
+            mass_axis=mass_axis,
         )
         humidity_ref = settings["humidity_ref"]
         if humidity_ref is None and hum_ratio is not None:

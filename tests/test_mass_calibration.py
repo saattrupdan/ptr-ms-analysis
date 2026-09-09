@@ -342,6 +342,68 @@ class InternalMassAxisCalibrationTest(unittest.TestCase):
         self.assertEqual(diagnostics["anchors"][1]["status"], "missing")
         self.assertIn("iodobenzene anchor missing", diagnostics["fallback_reason"])
 
+    def test_supplied_axis_validation_rejects_contradictory_evidence(self):
+        import copy
+
+        with self._file(peaks=self._good_peaks()) as h5:
+            axis = ptrms.load_mass_axis(h5)
+        for field, value in (
+            ("scale", axis.scale + 0.01),
+            ("offset_da", axis.offset + 0.01),
+        ):
+            diagnostics = copy.deepcopy(axis.diagnostics)
+            diagnostics[field] = value
+            with self.subTest(field=field):
+                with self.assertRaises(ptrms.MassCalibrationError):
+                    ptrms.validate_mass_axis(
+                        ptrms.MassAxisCalibration(
+                            axis.a,
+                            axis.b,
+                            axis.scale,
+                            axis.offset,
+                            diagnostics,
+                        )
+                    )
+
+        diagnostics = copy.deepcopy(axis.diagnostics)
+        diagnostics["anchors"][0]["target_mz"] = 37.034
+        with self.assertRaises(ptrms.MassCalibrationError):
+            ptrms.validate_mass_axis(
+                ptrms.MassAxisCalibration(
+                    axis.a, axis.b, axis.scale, axis.offset, diagnostics
+                )
+            )
+
+        diagnostics = copy.deepcopy(axis.diagnostics)
+        persistence = diagnostics["anchors"][1]["persistence"]
+        persistence["fraction"] = 1.0
+        persistence["accepted_blocks"] = 7
+        with self.assertRaises(ptrms.MassCalibrationError):
+            ptrms.validate_mass_axis(
+                ptrms.MassAxisCalibration(
+                    axis.a, axis.b, axis.scale, axis.offset, diagnostics
+                )
+            )
+
+    def test_mass_axis_progress_is_monotonic_and_cancellable(self):
+        progress = []
+        with self._file(peaks=self._good_peaks()) as h5:
+            axis = ptrms.load_mass_axis(h5, progress=progress.append)
+        self.assertTrue(axis.applied)
+        self.assertEqual(progress[-1], 1.0)
+        self.assertEqual(progress, sorted(progress))
+
+        checks = []
+        with self._file(peaks=self._good_peaks()) as h5:
+            with self.assertRaises(ptrms.AnalysisCancelled):
+                ptrms.load_mass_axis(
+                    h5,
+                    progress=lambda value: checks.append(value),
+                    should_stop=lambda: len(checks) >= 2,
+                )
+        self.assertGreaterEqual(len(checks), 2)
+        self.assertEqual(checks, sorted(checks))
+
     def test_implausible_affine_solution_is_rejected(self):
         peaks = [
             (37.033 + 0.175, 1200.0),
