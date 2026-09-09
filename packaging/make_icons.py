@@ -29,30 +29,38 @@ import zlib
 
 # ---------------------------------------------------------------------------
 # The artwork, in a 64x64 field. A rounded teal tile, a quiet spectrum baseline
-# with one narrow peak, and a warm side-profile nose with a small breath detail.
+# with one narrow peak, and a deliberately small lab-coated mascot studying that
+# peak through a magnifying glass. These primitives are the canonical geometry for
+# both the bitmap and the SVG; keeping them here prevents the two marks drifting.
 # ---------------------------------------------------------------------------
 
 FIELD = 64.0
 TILE = (0x1F, 0x6F, 0x6B, 255)
 TRACE_COLOUR = (0xEA, 0xFA, 0xF6, 255)
-NOSE_COLOUR = (0xFF, 0xD9, 0xA8, 255)
+MASCOT_SKIN_COLOUR = (0xFF, 0xD9, 0xA8, 255)
+LAB_COAT_COLOUR = (0xF7, 0xFB, 0xFF, 255)
+COAT_ACCENT = (0x9B, 0xD9, 0xD5, 255)
+GLASS_COLOUR = (0xB8, 0xE8, 0xE4, 160)
 RADIUS = 14.0                      # of the tile, in field units
 TRACE = [(6, 46), (20, 46), (24, 46), (26, 27), (28, 46), (58, 46)]
 TRACE_WIDTH = 3.6
-# A filled, gently curved side profile; keeping these points here makes the bitmap
-# and SVG use the same silhouette without adding an image dependency.
-NOSE = [(20.5, 23.0), (20.3, 21.0), (21.0, 18.8), (22.5, 16.8),
-        (24.5, 15.5), (27.0, 14.8), (29.2, 15.2), (31.0, 16.5),
-        (31.6, 18.0), (30.7, 19.1), (28.8, 19.5), (27.3, 20.8),
-        (25.3, 21.8), (23.0, 22.5), (20.5, 23.0)]
-NOSTRIL = (28.9, 18.1, 1.05)        # centre x, centre y, radius
-BREATH = ((32.5, 14.5), (34.8, 13.0), (37.0, 13.8), (38.5, 15.8))
-BREATH_WIDTH = 1.8
+# The mascot is on the right and its eye is turned left, towards the spectrum peak.
+MASCOT_BODY = [(42, 29), (51, 29), (54, 34), (56, 46), (38, 46), (40, 34)]
+MASCOT_HEAD = (47.0, 22.0, 5.8)    # centre x, centre y, radius
+MASCOT_EYE = (43.6, 21.0, 1.45)    # the eye sits on the peak-facing side
+MASCOT_PUPIL = (43.0, 21.0, 0.62)
+COLLAR = [(44.8, 29), (48, 34), (51.0, 29)]
+COAT_SEAM = [(48, 34), (48, 45)]
+COAT_BUTTONS = ((49.7, 36.5, 0.72), (49.7, 40.0, 0.72))
+MAGNIFIER_LENS = (30.0, 31.0, 5.8)  # the lens sits over the spectrum peak
+MAGNIFIER_INNER = 4.15
+MAGNIFIER_HANDLE = [(34.0, 35.0), (42.0, 43.0)]
+MAGNIFIER_WIDTH = 2.2
 SMALL_TRACE = [(6, 46), (21, 46), (26, 27), (31, 46), (58, 46)]
 SMALL_WIDTH = 6.4
-# Below this the nose and the curl are fewer pixels than a stroke, so the mark
-# becomes just the trace: still recognisable, never mud.
-DETAIL_MIN = 48
+# At 32 px the mascot remains readable in a header/icon; at 16 px the trace alone
+# avoids turning the mark into an indistinct cluster of pixels.
+DETAIL_MIN = 24
 
 # iconutil accepts exactly these names. A 64x64 entry, however reasonable it looks,
 # makes it reject the whole iconset with "Invalid Iconset".
@@ -128,7 +136,7 @@ def _stroke(buf, size, points, width, colour):
 
 
 def _polygon(buf, size, points, colour):
-    """Fill the nose silhouette in device pixels."""
+    """Fill a closed silhouette in device pixels."""
     scale = size / FIELD
     scaled = [(x * scale, y * scale) for x, y in points]
     lo_x = max(int(min(x for x, _ in scaled)) - 1, 0)
@@ -170,11 +178,23 @@ def render(size, detail=None):
 
     if detail:
         paint(TRACE, TRACE_WIDTH, TRACE_COLOUR)
-        _polygon(buf, size, NOSE, NOSE_COLOUR)
-        paint(BREATH, BREATH_WIDTH, NOSE_COLOUR)
+        _polygon(buf, size, MASCOT_BODY, LAB_COAT_COLOUR)
+        _polygon(buf, size, COLLAR, COAT_ACCENT)
+        paint(COAT_SEAM, 1.0, COAT_ACCENT)
         s = size / FIELD
-        _stamp(buf, size, NOSTRIL[0] * s, NOSTRIL[1] * s,
-               max(NOSTRIL[2] * s, 0.45), TILE)
+        for x, y, radius in COAT_BUTTONS:
+            _stamp(buf, size, x * s, y * s, radius * s, TILE)
+        _stamp(buf, size, MASCOT_HEAD[0] * s, MASCOT_HEAD[1] * s,
+               MASCOT_HEAD[2] * s, MASCOT_SKIN_COLOUR)
+        _stamp(buf, size, MASCOT_EYE[0] * s, MASCOT_EYE[1] * s,
+               MASCOT_EYE[2] * s, LAB_COAT_COLOUR)
+        _stamp(buf, size, MASCOT_PUPIL[0] * s, MASCOT_PUPIL[1] * s,
+               MASCOT_PUPIL[2] * s, TILE)
+        paint(MAGNIFIER_HANDLE, MAGNIFIER_WIDTH, MASCOT_SKIN_COLOUR)
+        _stamp(buf, size, MAGNIFIER_LENS[0] * s, MAGNIFIER_LENS[1] * s,
+               MAGNIFIER_LENS[2] * s, MASCOT_SKIN_COLOUR)
+        _stamp(buf, size, MAGNIFIER_LENS[0] * s, MAGNIFIER_LENS[1] * s,
+               MAGNIFIER_INNER * s, GLASS_COLOUR)
     else:
         paint(SMALL_TRACE, SMALL_WIDTH, TRACE_COLOUR)
     return bytes(buf)
@@ -257,10 +277,22 @@ def svg_text(size=FIELD):
         '  <rect width="64" height="64" rx="%g" fill="#1f6f6b"/>' % RADIUS,
         '  <polyline points="%s" fill="none" stroke="#eafaf6" stroke-width="%g"'
         ' stroke-linejoin="round" stroke-linecap="round"/>' % (pts(TRACE), TRACE_WIDTH),
-        '  <polygon points="%s" fill="#ffd9a8"/>' % pts(NOSE),
-        '  <circle cx="%g" cy="%g" r="%g" fill="#1f6f6b"/>' % NOSTRIL,
+        '  <polygon points="%s" fill="#f7fbff"/>' % pts(MASCOT_BODY),
+        '  <polygon points="%s" fill="#9bd9d5"/>' % pts(COLLAR),
+        '  <polyline points="%s" fill="none" stroke="#9bd9d5" stroke-width="1"'
+        ' stroke-linejoin="round" stroke-linecap="round"/>' % pts(COAT_SEAM),
+        '  <circle cx="%g" cy="%g" r="%g" fill="#1f6f6b"/>' % COAT_BUTTONS[0],
+        '  <circle cx="%g" cy="%g" r="%g" fill="#1f6f6b"/>' % COAT_BUTTONS[1],
+        '  <circle cx="%g" cy="%g" r="%g" fill="#ffd9a8"/>' % MASCOT_HEAD,
+        '  <circle cx="%g" cy="%g" r="%g" fill="#f7fbff"/>' % MASCOT_EYE,
+        '  <circle cx="%g" cy="%g" r="%g" fill="#1f6f6b"/>' % MASCOT_PUPIL,
         '  <polyline points="%s" fill="none" stroke="#ffd9a8" stroke-width="%g"'
-        ' stroke-linejoin="round" stroke-linecap="round"/>' % (pts(BREATH), BREATH_WIDTH),
+        ' stroke-linejoin="round" stroke-linecap="round"/>' % (
+            pts(MAGNIFIER_HANDLE), MAGNIFIER_WIDTH),
+        '  <circle cx="%g" cy="%g" r="%g" fill="#ffd9a8"/>' % MAGNIFIER_LENS,
+        '  <circle cx="%g" cy="%g" r="%g" fill="#b8e8e4" fill-opacity="%g"/>' % (
+            MAGNIFIER_LENS[0], MAGNIFIER_LENS[1], MAGNIFIER_INNER,
+            GLASS_COLOUR[3] / 255),
         "</svg>",
     ]
     return "\n".join(body) + "\n"

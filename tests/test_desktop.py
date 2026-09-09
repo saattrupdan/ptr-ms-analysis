@@ -39,12 +39,13 @@ class _Event:
 
 
 class _FakeWindow:
-    def __init__(self, webview, title, url=None, width=0, height=0):
+    def __init__(self, webview, title, url=None, width=0, height=0, maximized=False):
         self.webview = webview
         self.title = title
         self.url = url
         self.width = width
         self.height = height
+        self.maximized = maximized
         self.events = types.SimpleNamespace(closed=_Event())
         self.dialogs = []
         self.dialog_result = None
@@ -72,8 +73,15 @@ class _FakeWebview:
         self.fire_closed = fire_closed
         self._released = threading.Event()
 
-    def create_window(self, title, url=None, width=0, height=0, **_kwargs):
-        window = _FakeWindow(self, title, url=url, width=width, height=height)
+    def create_window(self, title, url=None, width=0, height=0, maximized=False, **_kwargs):
+        window = _FakeWindow(
+            self,
+            title,
+            url=url,
+            width=width,
+            height=height,
+            maximized=maximized,
+        )
         self.windows.append(window)
         return window
 
@@ -246,6 +254,7 @@ def test_the_window_is_asked_for_once_with_the_url_and_no_chrome(monkeypatch):
     assert window.url == "http://127.0.0.1:8/"
     assert window.title == desktop.DEFAULT_TITLE
     assert (window.width, window.height) == (1024, 700)
+    assert window.maximized is True
     assert desktop.close_window() is True
     worker.join(TIMEOUT)
     assert not worker.is_alive()

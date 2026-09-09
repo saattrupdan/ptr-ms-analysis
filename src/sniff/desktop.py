@@ -124,6 +124,7 @@ def run_window(
     on_close=None,
     width: int = DEFAULT_WIDTH,
     height: int = DEFAULT_HEIGHT,
+    maximized: bool = True,
 ):
     """Open ``url`` in one window with no navigation chrome and block in the loop.
 
@@ -133,14 +134,21 @@ def run_window(
     which case ``on_close`` is *not* called and the session stays alive.
 
     The native loop takes over the calling thread, so this belongs on the main thread
-    with the server running behind it on a daemon thread.
+    with the server running behind it on a daemon thread. Set ``maximized=False``
+    when a caller needs the explicit ``width`` and ``height`` as the window frame.
     """
     global _active
     webview = _import_webview()
     try:
         # No menu and no toolbar: pywebview windows carry neither, which is the point
         # of a window that is an app rather than a browser tab.
-        window = webview.create_window(title, url=url, width=width, height=height)
+        window = webview.create_window(
+            title,
+            url=url,
+            width=width,
+            height=height,
+            maximized=maximized,
+        )
     except Exception as exc:
         raise DesktopUnavailable(f"could not open a window ({_describe(exc)})") from exc
     if window is None:

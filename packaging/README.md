@@ -215,11 +215,12 @@ installs cleanly and does nothing.
 ## The icon, and what a rename costs
 
 The mark is not a file in the repo. `packaging/make_icons.py` holds the geometry
-— a rounded teal tile, the mass-spectrum trace, one warm nose over the tallest
-peak — and draws it twice: as SVG (`gfx/sniff.svg`, and the same string in
-`sniff/brand.py`, which is what the pages show) and as a bitmap. The
-spec calls it during the build, so the macOS job gets a `sniff.icns` through
-`iconutil` and the Windows job gets a `sniff.ico`, both from the same run.
+— a rounded teal tile, the mass-spectrum trace, and a deliberately small lab-coated
+mascot studying the peak through a magnifying glass — and draws it twice: as SVG
+(`gfx/sniff.svg`, and the same geometry in `sniff/brand.py`, which is what the pages
+show) and as a bitmap. The spec calls it during the build, so the macOS job gets a
+`sniff.icns` through `iconutil` and the Windows job gets a `sniff.ico`, both from the
+same run.
 
 ```bash
 uv run python packaging/make_icons.py --svg gfx/sniff.svg      # the drawing, as SVG
