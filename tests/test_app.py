@@ -106,6 +106,25 @@ def test_legacy_product_config_is_recognised_without_clobbering_neighbours(tmp_p
     }
 
 
+def test_open_calibrates_once_for_new_and_existing_configs(tmp_path):
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    session = app.Session()
+    with (
+        mock.patch.object(
+            app.ptrms, "load_mass_axis", return_value=identity_mass_axis()
+        ) as load_axis,
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", payload_stub),
+    ):
+        session.open(str(h5))
+        assert load_axis.call_count == 1
+        load_axis.reset_mock()
+        session.open(str(h5))
+        assert load_axis.call_count == 1
+
+
 def test_config_written_on_open_is_reread_on_the_next_open(tmp_path):
     h5 = tmp_path / "run.h5"
     make_h5(h5)

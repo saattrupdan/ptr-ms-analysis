@@ -103,6 +103,7 @@ def build_viz_data(
     x_axis_unit="cycle",
     merge_note="",
     *,
+    mass_axis=None,
     progress=None,
     should_stop=None,
 ):
@@ -158,7 +159,10 @@ def build_viz_data(
         _say(PREP_FRACTION + (1.0 - PREP_FRACTION) * done)
 
     _say(0.0)
-    mass_axis = ptrms.load_mass_axis(f)
+    if mass_axis is None:
+        mass_axis = ptrms.load_mass_axis(f)
+    else:
+        ptrms.validate_mass_axis(mass_axis)
     a, b = mass_axis.a, mass_axis.b
     tm, tf = ptrms.load_transmission(f)
     inten = f["SPECdata/Intensities"]

@@ -45,6 +45,52 @@ def _file(spectrum):
     return handle
 
 
+def valid_axis(scale=SCALE, offset=OFFSET):
+    return ptrms.MassAxisCalibration(
+        A,
+        B,
+        scale=scale,
+        offset=offset,
+        diagnostics={
+            "model": "m_corrected = scale*m_file + offset",
+            "applied": True,
+            "scale": scale,
+            "offset_da": offset,
+            "file_calibration": {"a": A, "b": B},
+            "anchors": [
+                {
+                    "name": "water_cluster",
+                    "target_mz": 37.033,
+                    "status": "accepted",
+                    "observed_file_mz": (37.033 - offset) / scale,
+                    "corrected_mz": 37.033,
+                    "persistence": {
+                        "available": True,
+                        "blocks": 8,
+                        "accepted_blocks": 8,
+                        "fraction": 1.0,
+                        "statuses": ["accepted"] * 8,
+                    },
+                },
+                {
+                    "name": "iodobenzene",
+                    "target_mz": 204.951,
+                    "status": "accepted",
+                    "observed_file_mz": (204.951 - offset) / scale,
+                    "corrected_mz": 204.951,
+                    "persistence": {
+                        "available": True,
+                        "blocks": 8,
+                        "accepted_blocks": 8,
+                        "fraction": 1.0,
+                        "statuses": ["accepted"] * 8,
+                    },
+                },
+            ],
+        },
+    )
+
+
 def test_missing_required_anchor_is_a_structured_calibration_error():
     with (
         _file(_spectrum(include_iodobenzene=False)) as handle,
@@ -71,9 +117,7 @@ def test_raw_cycle_persistence_is_required_when_available():
 
 
 def test_old_config_migrates_absolute_masses_and_widths_once():
-    axis = ptrms.MassAxisCalibration(
-        A, B, scale=SCALE, offset=OFFSET, diagnostics={"applied": True}
-    )
+    axis = valid_axis()
     old = {
         "peaks": [
             {
@@ -109,14 +153,12 @@ def test_migration_refuses_an_uncalibrated_axis():
     axis = ptrms.MassAxisCalibration(
         A, B, diagnostics={"applied": False, "fallback_reason": "missing"}
     )
-    with pytest.raises(ptrms.MassCalibrationError, match="before required"):
+    with pytest.raises(ptrms.MassCalibrationError, match="not an applied"):
         ptrms.migrate_config_mass_axis({"peaks": [{"mz": 42.0}]}, axis)
 
 
 def test_direct_cli_config_migration_persists_the_marker(tmp_path):
-    axis = ptrms.MassAxisCalibration(
-        A, B, scale=SCALE, offset=OFFSET, diagnostics={"applied": True}
-    )
+    axis = valid_axis()
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"peaks": [{"mz": 100.0}]}), encoding="utf-8")
     args = Namespace(config=str(path))
@@ -133,9 +175,7 @@ def test_direct_cli_config_migration_persists_the_marker(tmp_path):
 
 
 def test_identity_migration_only_adds_the_marker():
-    axis = ptrms.MassAxisCalibration(
-        A, B, diagnostics={"applied": True, "scale": 1.0, "offset_da": 0.0}
-    )
+    axis = valid_axis(scale=1.0, offset=0.0)
     old = {"peaks": [{"mz": 42.0, "window": 0.2}]}
     migrated, changed = ptrms.migrate_config_mass_axis(old, axis)
 

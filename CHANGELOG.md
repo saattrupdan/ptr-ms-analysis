@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Mass-axis calibration is now one validated, cancellable operation per open.** Its
+  progress is included in the opening bar, raw-cycle persistence is scanned once, and
+  the validated axis is reused by detection, review preparation and extraction.
 - **Calibration and review round-trips now fail closed and preserve provenance.** Raw
   cycle persistence is mandatory for both internal anchors, caller-supplied axes must
   be applied internal calibrations, and browser saves retain authored peak/range fields

@@ -332,9 +332,11 @@ Before peak detection or extraction, Sniff requires an internal two-point mass-a
 check. It detects the operational water calibrant at 37.033 and protonated
 iodobenzene at 204.951 in the sanitised run-average spectrum using the file's own
 HDF5 timebin calibration. Sub-bin centres must be prominent, high-S/N, unambiguous,
-within a conservative proximity window and, when raw spectra exist, persistent in at
-least five of eight deterministic cycle blocks. The accepted correction is separate
-from the file's `a,b` coefficients: `m_corrected = scale*m_file + offset`, so it
+within a conservative proximity window and persistent in at least five of eight
+deterministic raw-cycle blocks. Raw-cycle persistence is mandatory: files without a
+valid `SPECdata/Intensities` block set cannot be calibrated or analysed. The accepted
+correction is separate from the file's `a,b` coefficients:
+`m_corrected = scale*m_file + offset`, so it
 translates and scales the whole axis rather than moving only selected targets. If
 either mandatory anchor is missing, weak, ambiguous or implausible, analysis stops
 with a structured calibration error; it never silently falls back to the HDF5 axis.
@@ -377,10 +379,10 @@ carries the same attribution.
 
 ## How it works
 
-The baseline timebin calibration, transmission, concentration constant K and molar
-volume are read from the `.h5`. A separate, conservative water/iodobenzene affine
-correction aligns the mass domain when both internal references pass; otherwise the
-file mass axis is used unchanged. Isolated peaks use an apex-centred resolution window;
+The baseline timebin calibration, transmission, concentration constant K and molar volume are read from the `.h5`. A separate, conservative water/iodobenzene affine
+correction aligns the mass domain only after both internal references and their mandatory
+raw-cycle persistence pass; otherwise analysis stops with a structured calibration
+error. Isolated peaks use an apex-centred resolution window;
 overlapping peaks are separated by linear Gaussian deconvolution. Time segments are
 found by log-space plateau detection on a composite VOC signal. Compound identification enumerates candidate molecular formulas offline (no
 external database) and ranks them by exact-mass error, the measured vs predicted
