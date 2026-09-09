@@ -56,14 +56,22 @@ def valid_axis(scale=SCALE, offset=OFFSET):
             "applied": True,
             "scale": scale,
             "offset_da": offset,
-            "file_calibration": {"a": A, "b": B},
+            "file_calibration": {
+                "model": "timebin = a*sqrt(m_file) + b",
+                "a": A,
+                "b": B,
+            },
             "anchors": [
                 {
                     "name": "water_cluster",
                     "target_mz": 37.033,
                     "status": "accepted",
+                    "reason": "",
                     "observed_file_mz": (37.033 - offset) / scale,
                     "corrected_mz": 37.033,
+                    "timebin": A * ((37.033 - offset) / scale) ** 0.5 + B,
+                    "prominence": 100.0,
+                    "snr": 100.0,
                     "persistence": {
                         "available": True,
                         "blocks": 8,
@@ -76,8 +84,12 @@ def valid_axis(scale=SCALE, offset=OFFSET):
                     "name": "iodobenzene",
                     "target_mz": 204.951,
                     "status": "accepted",
+                    "reason": "",
                     "observed_file_mz": (204.951 - offset) / scale,
                     "corrected_mz": 204.951,
+                    "timebin": A * ((204.951 - offset) / scale) ** 0.5 + B,
+                    "prominence": 100.0,
+                    "snr": 100.0,
                     "persistence": {
                         "available": True,
                         "blocks": 8,
@@ -89,6 +101,88 @@ def valid_axis(scale=SCALE, offset=OFFSET):
             ],
         },
     )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda axis: axis.diagnostics.update(
+            model="m_corrected = scale*m_file + offset + forged"
+        ),
+        lambda axis: axis.diagnostics["file_calibration"].update(
+            model="timebin = a*sqrt(m_file) + forged"
+        ),
+        lambda axis: axis.diagnostics.update(fallback_reason="contradictory"),
+        lambda axis: axis.diagnostics["anchors"][0].update(reason="failed"),
+        lambda axis: axis.diagnostics["anchors"][0].update(prominence=0.0),
+        lambda axis: axis.diagnostics["anchors"][1].update(snr=0.0),
+        lambda axis: axis.diagnostics["anchors"][0].update(timebin=0.0),
+        lambda axis: axis.diagnostics["anchors"][1].update(
+            observed_file_mz=204.951 + ptrms.INTERNAL_ANCHOR_SEARCH_DA + 0.001
+        ),
+        lambda axis: axis.diagnostics["anchors"][0].update(target_mz=37.034),
+        lambda axis: axis.diagnostics["anchors"].__setitem__(
+            1, axis.diagnostics["anchors"][0].copy()
+        ),
+    ],
+    ids=[
+        "correction-model",
+        "file-model",
+        "fallback-reason",
+        "anchor-reason",
+        "prominence",
+        "snr",
+        "timebin",
+        "search-window",
+        "target",
+        "duplicate-anchor",
+    ],
+)
+def test_mass_axis_validator_rejects_forged_anchor_evidence(mutation):
+    axis = valid_axis()
+    mutation(axis)
+    with pytest.raises(ptrms.MassCalibrationError):
+        ptrms.validate_mass_axis(axis)
+
+
+@pytest.mark.parametrize(
+    ("scale", "offset"),
+    [(2.0, OFFSET), (SCALE, -37.033)],
+    ids=["reviewer-scale", "reviewer-offset"],
+)
+def test_mass_axis_validator_rejects_implausible_affine_correction(scale, offset):
+    axis = valid_axis(scale=scale, offset=offset)
+    with pytest.raises(ptrms.MassCalibrationError):
+        ptrms.validate_mass_axis(axis)
+
+
+def test_mass_axis_validator_rejects_bad_persistence_arithmetic():
+    axis = valid_axis()
+    persistence = axis.diagnostics["anchors"][0]["persistence"]
+    persistence["accepted_blocks"] = 7
+    persistence["fraction"] = 1.0
+    with pytest.raises(ptrms.MassCalibrationError):
+        ptrms.validate_mass_axis(axis)
+
+
+def test_mass_axis_validator_rejects_nonfinite_and_unphysical_coefficients():
+    for coefficient, value in (("a", 0.0), ("a", np.inf), ("b", np.nan)):
+        axis = valid_axis()
+        setattr(axis, coefficient, value)
+        with pytest.raises(ptrms.MassCalibrationError):
+            ptrms.validate_mass_axis(axis)
+
+
+def test_mass_axis_validator_rejects_missing_or_misordered_anchor_identity():
+    axis = valid_axis()
+    axis.diagnostics["anchors"] = list(reversed(axis.diagnostics["anchors"]))
+    # Names make a deliberately reversed list unambiguous and therefore valid.
+    ptrms.validate_mass_axis(axis)
+
+    axis = valid_axis()
+    axis.diagnostics["anchors"][0]["name"] = "not_water"
+    with pytest.raises(ptrms.MassCalibrationError):
+        ptrms.validate_mass_axis(axis)
 
 
 def test_missing_required_anchor_is_a_structured_calibration_error():
