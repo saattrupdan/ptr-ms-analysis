@@ -321,17 +321,25 @@ An analysis config may include an `analyze` object with `R`, `R_phys`, `K`,
 `humidity_ref`, and `whole_run_windows`. Omitted CLI options do not replace these
 curated values: precedence is **CLI override > `analyze` config > legacy default**.
 The same resolver is used by `analyze`, browser initial state, live-save, and Done.
-Unknown top-level and nested config fields survive browser round trips.
+Unknown top-level and nested config fields survive browser round trips. New detected and
+saved configs carry `mass_axis_domain: "corrected"` and
+`mass_axis_version: 1`. When an older unmarked config is opened, Sniff first proves
+both internal anchors, then migrates every saved absolute mass and mass width from the
+file axis exactly once and persists the marker; cycle ranges and unknown fields are
+unchanged.
 
-Before peak detection or extraction, Sniff applies an internal two-point mass-axis
-check. It detects the water-cluster ion at 37.033 and iodobenzene at 204.951 in the
-sanitised run-average spectrum using the file's own HDF5 timebin calibration. Sub-bin
-centres are accepted only when both peaks are prominent, high-S/N, unambiguous and give
-a plausible affine correction. The accepted correction is separate from the file's
-`a,b` coefficients: `m_corrected = scale*m_file + offset`, so it translates and scales
-the whole axis rather than moving only selected targets. If either anchor fails, the
-valid file calibration is retained unchanged and JSON/Methods diagnostics state the
-precise reason; no one-point extrapolation is attempted.
+Before peak detection or extraction, Sniff requires an internal two-point mass-axis
+check. It detects the operational water calibrant at 37.033 and protonated
+iodobenzene at 204.951 in the sanitised run-average spectrum using the file's own
+HDF5 timebin calibration. Sub-bin centres must be prominent, high-S/N, unambiguous,
+within a conservative proximity window and, when raw spectra exist, persistent in at
+least five of eight deterministic cycle blocks. The accepted correction is separate
+from the file's `a,b` coefficients: `m_corrected = scale*m_file + offset`, so it
+translates and scales the whole axis rather than moving only selected targets. If
+either mandatory anchor is missing, weak, ambiguous or implausible, analysis stops
+with a structured calibration error; it never silently falls back to the HDF5 axis.
+The 37.033 value is the operational calibration water peak; humidity-sensitive
+water-cluster ratios are reported separately and are not calibration evidence.
 
 By default `analyze` integrates each interval with each isolated peak's apex/window
 **re-centred on that interval's own spectrum** — peaks drift between intervals (a

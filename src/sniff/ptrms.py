@@ -11,6 +11,7 @@ User inputs (experiment-specific, not in the raw file):
   - time ranges (labelled cycle windows)
 """
 
+import copy
 import json
 from importlib import resources
 
@@ -34,12 +35,32 @@ INTERNAL_ANCHOR_SEARCH_DA = 0.20
 INTERNAL_ANCHOR_MIN_PROMINENCE = 8.0
 INTERNAL_ANCHOR_MIN_SNR = 8.0
 INTERNAL_ANCHOR_AMBIGUITY_RATIO = 0.50
+INTERNAL_ANCHOR_BLOCKS = 8
+INTERNAL_ANCHOR_MIN_PERSISTENCE = 0.625
+INTERNAL_ANCHOR_PROXIMITY_DA = 0.025
 INTERNAL_MASS_SCALE_LIMIT = 0.005
 INTERNAL_MASS_OFFSET_LIMIT_DA = 0.25
 
 
+MASS_AXIS_CONFIG_DOMAIN = "corrected"
+MASS_AXIS_CONFIG_VERSION = 1
+
+
+class MassCalibrationError(ValueError):
+    """Raised when a run cannot prove both required internal mass anchors.
+
+    Attributes:
+        diagnostics:
+            JSON-serialisable calibration evidence, including failed anchors.
+    """
+
+    def __init__(self, message, diagnostics):
+        self.diagnostics = diagnostics
+        super().__init__(f"mass calibration failed: {message}")
+
+
 class MassAxisCalibration:
-    """File timebin calibration plus an optional affine mass-domain correction."""
+    """File timebin calibration plus an affine mass-domain correction."""
 
     def __init__(self, a, b, scale=1.0, offset=0.0, diagnostics=None):
         self.a = float(a)
@@ -73,6 +94,72 @@ class MassAxisCalibration:
     def to_dict(self):
         """Return deterministic JSON-safe calibration provenance."""
         return dict(self.diagnostics)
+
+
+def migrate_config_mass_axis(config, mass_axis):
+    """Migrate an unmarked config from file masses to corrected masses.
+
+    The migration is deliberately limited to the documented config schema. Unknown
+    fields are copied unchanged so an agent's provenance and review notes survive.
+    A marked config is returned untouched, making repeated opens a no-op.
+
+    Returns:
+        A ``(config, migrated)`` pair. ``migrated`` is true when the marker was added.
+
+    Raises:
+        ValueError:
+            If a config carries an unsupported mass-axis marker.
+    """
+    if not mass_axis.applied:
+        raise MassCalibrationError(
+            "cannot migrate a config before required internal calibration succeeds",
+            mass_axis.to_dict(),
+        )
+    result = copy.deepcopy(config)
+    domain = result.get("mass_axis_domain")
+    version = result.get("mass_axis_version")
+    if domain is not None or version is not None:
+        if domain != MASS_AXIS_CONFIG_DOMAIN or version != MASS_AXIS_CONFIG_VERSION:
+            raise ValueError(
+                "unsupported config mass axis marker: "
+                f"domain={domain!r}, version={version!r}"
+            )
+        return result, False
+
+    def corrected(value):
+        return float(mass_axis.file_to_corrected(float(value)))
+
+    def width(value):
+        return float(value) * mass_axis.scale
+
+    for peak in result.get("peaks", []):
+        if not isinstance(peak, dict):
+            continue
+        if "mz" in peak:
+            peak["mz"] = corrected(peak["mz"])
+        # These fields are emitted by older review payloads and are absolute m/z
+        # coordinates, unlike cycle ranges and labels.
+        for key in ("apex", "mass", "center"):
+            if key in peak:
+                peak[key] = corrected(peak[key])
+        if "window" in peak:
+            window = peak["window"]
+            if isinstance(window, dict):
+                for key in ("left", "right"):
+                    if key in window:
+                        window[key] = width(window[key])
+            elif isinstance(window, (int, float)):
+                peak["window"] = width(window)
+        for key in ("win_l", "win_r"):
+            if key in peak:
+                peak[key] = width(peak[key])
+
+    analysis = result.get("analyze")
+    if isinstance(analysis, dict) and "primary_mz" in analysis:
+        analysis["primary_mz"] = corrected(analysis["primary_mz"])
+    result["mass_axis_domain"] = MASS_AXIS_CONFIG_DOMAIN
+    result["mass_axis_version"] = MASS_AXIS_CONFIG_VERSION
+    return result, True
 
 
 class AnalysisCancelled(Exception):
@@ -246,15 +333,35 @@ def load_mass_cal(f):
 
 
 def load_mass_axis(f):
-    """Build the corrected mass axis from conservative internal-reference peaks.
+    """Build the corrected mass axis from both required internal references.
 
     The HDF5 ``a,b`` calibration remains the timebin mapping. Water-cluster and
     iodobenzene centres are detected independently on that baseline axis; only two
     accepted anchors enable ``m_corrected = scale*m_file + offset``. Any malformed,
-    missing, weak, ambiguous, or physically implausible result is an explicit
-    identity-correction fallback rather than a partial calibration.
+    missing, weak, ambiguous, or physically implausible result raises
+    :class:`MassCalibrationError`; silently using the HDF5 axis would make every
+    downstream absolute m/z value scientifically unsafe.
     """
-    a, b = load_mass_cal(f)
+    try:
+        a, b = load_mass_cal(f)
+    except ValueError as exc:
+        diagnostics = {
+            "model": "m_corrected = scale*m_file + offset",
+            "applied": False,
+            "scale": 1.0,
+            "offset_da": 0.0,
+            "fallback_reason": str(exc),
+            "anchors": [
+                {
+                    "name": name,
+                    "target_mz": target,
+                    "status": "unavailable",
+                    "reason": "file mass calibration is unavailable",
+                }
+                for name, target in INTERNAL_MASS_ANCHORS
+            ],
+        }
+        raise MassCalibrationError(str(exc), diagnostics) from exc
     base = {
         "model": "m_corrected = scale*m_file + offset",
         "applied": False,
@@ -266,16 +373,24 @@ def load_mass_axis(f):
             "a": a,
             "b": b,
         },
-        "anchors": [],
+        "anchors": [
+            {
+                "name": name,
+                "target_mz": float(target_mz),
+                "status": "unavailable",
+                "reason": "anchor search did not run",
+            }
+            for name, target_mz in INTERNAL_MASS_ANCHORS
+        ],
     }
     try:
         raw = np.asarray(f["SPECdata/AverageSpec"][:], dtype=np.float64)
     except (KeyError, OSError, TypeError, ValueError) as exc:
-        return _mass_axis_fallback(
+        _mass_axis_failure(
             a, b, base, f"average spectrum is unavailable or malformed: {exc}"
         )
     if raw.ndim != 1 or raw.size < 3:
-        return _mass_axis_fallback(
+        _mass_axis_failure(
             a,
             b,
             base,
@@ -284,7 +399,7 @@ def load_mass_axis(f):
         )
     finite = np.isfinite(raw)
     if not finite.any():
-        return _mass_axis_fallback(
+        _mass_axis_failure(
             a, b, base, "average spectrum is malformed: it has no finite bins"
         )
     avg = np.where(finite & (raw > 0), raw, 0.0)
@@ -299,6 +414,7 @@ def load_mass_axis(f):
         )
         for name, target_mz in INTERNAL_MASS_ANCHORS
     ]
+    _add_anchor_persistence(f, avg, a, b, anchors)
     base["anchors"] = anchors
     failures = [anchor for anchor in anchors if anchor["status"] != "accepted"]
     if failures:
@@ -306,14 +422,14 @@ def load_mass_axis(f):
             f"{anchor['name']} anchor {anchor['status']}: {anchor['reason']}"
             for anchor in failures
         )
-        return _mass_axis_fallback(a, b, base, reasons)
+        _mass_axis_failure(a, b, base, reasons)
 
     observed_lo = anchors[0]["observed_file_mz"]
     observed_hi = anchors[1]["observed_file_mz"]
     target_lo = anchors[0]["target_mz"]
     target_hi = anchors[1]["target_mz"]
     if observed_hi <= observed_lo:
-        return _mass_axis_fallback(
+        _mass_axis_failure(
             a,
             b,
             base,
@@ -322,11 +438,11 @@ def load_mass_axis(f):
     scale = (target_hi - target_lo) / (observed_hi - observed_lo)
     offset = target_lo - scale * observed_lo
     if not np.isfinite([scale, offset]).all() or scale <= 0:
-        return _mass_axis_fallback(
+        _mass_axis_failure(
             a, b, base, "internal affine correction is non-finite or non-monotonic"
         )
     if abs(scale - 1.0) > INTERNAL_MASS_SCALE_LIMIT:
-        return _mass_axis_fallback(
+        _mass_axis_failure(
             a,
             b,
             base,
@@ -335,7 +451,7 @@ def load_mass_axis(f):
             f"{INTERNAL_MASS_SCALE_LIMIT * 100:.2f}%",
         )
     if abs(offset) > INTERNAL_MASS_OFFSET_LIMIT_DA:
-        return _mass_axis_fallback(
+        _mass_axis_failure(
             a,
             b,
             base,
@@ -359,7 +475,7 @@ def load_mass_axis(f):
     return MassAxisCalibration(a, b, scale=scale, offset=offset, diagnostics=base)
 
 
-def _mass_axis_fallback(a, b, diagnostics, reason):
+def _mass_axis_failure(a, b, diagnostics, reason):
     diagnostics.update(
         {
             "applied": False,
@@ -368,7 +484,78 @@ def _mass_axis_fallback(a, b, diagnostics, reason):
             "fallback_reason": reason,
         }
     )
-    return MassAxisCalibration(a, b, diagnostics=diagnostics)
+    raise MassCalibrationError(reason, diagnostics)
+
+
+def _add_anchor_persistence(f, avg, a, b, anchors):
+    """Check accepted average-spectrum anchors in deterministic raw cycle blocks."""
+    dataset = f.get("SPECdata/Intensities")
+    if dataset is None or len(getattr(dataset, "shape", ())) != 2:
+        for anchor in anchors:
+            anchor["persistence"] = {
+                "available": False,
+                "reason": "raw cycle spectra are unavailable",
+            }
+        return
+    ncyc = int(dataset.shape[0])
+    if ncyc < 2:
+        for anchor in anchors:
+            anchor["persistence"] = {
+                "available": False,
+                "reason": "fewer than two raw cycle spectra are available",
+            }
+        return
+    for anchor in anchors:
+        if anchor["status"] != "accepted":
+            anchor["persistence"] = {
+                "available": True,
+                "checked": False,
+                "reason": "average-spectrum checks failed first",
+            }
+            continue
+        target = float(anchor["target_mz"])
+        tlo = max(1, int(np.floor(m_to_tb(target - INTERNAL_ANCHOR_SEARCH_DA, a, b))))
+        thi = min(
+            int(dataset.shape[1]) - 2,
+            int(np.ceil(m_to_tb(target + INTERNAL_ANCHOR_SEARCH_DA, a, b))),
+        )
+        if thi <= tlo:
+            anchor["status"] = "implausible"
+            anchor["reason"] = "raw persistence window falls outside the spectrum"
+            continue
+        block_count = min(INTERNAL_ANCHOR_BLOCKS, ncyc)
+        edges = np.linspace(0, ncyc, block_count + 1, dtype=int)
+        statuses = []
+        for start, end in zip(edges[:-1], edges[1:]):
+            section = np.asarray(dataset[start:end, tlo : thi + 1], dtype=np.float64)
+            block = np.zeros(int(dataset.shape[1]), dtype=np.float64)
+            if section.size:
+                finite_section = np.where(np.isfinite(section), section, 0.0)
+                block[tlo : thi + 1] = finite_section.mean(axis=0)
+            candidate = _detect_internal_anchor(
+                avg=np.nan_to_num(block, nan=0.0, posinf=0.0, neginf=0.0),
+                a=a,
+                b=b,
+                name=anchor["name"],
+                target_mz=target,
+            )
+            statuses.append(candidate["status"])
+        accepted = statuses.count("accepted")
+        fraction = accepted / len(statuses)
+        anchor["persistence"] = {
+            "available": True,
+            "blocks": len(statuses),
+            "accepted_blocks": accepted,
+            "fraction": float(fraction),
+            "statuses": statuses,
+        }
+        if fraction < INTERNAL_ANCHOR_MIN_PERSISTENCE:
+            anchor["status"] = "ambiguous"
+            anchor["reason"] = (
+                f"raw-spectrum persistence is {fraction:.0%} "
+                f"({accepted}/{len(statuses)} blocks); requires at least "
+                f"{INTERNAL_ANCHOR_MIN_PERSISTENCE:.0%}"
+            )
 
 
 def _detect_internal_anchor(avg, a, b, name, target_mz):
@@ -472,6 +659,17 @@ def _detect_internal_anchor(avg, a, b, name, target_mz):
             {
                 "status": "implausible",
                 "reason": "sub-bin centre lies outside the allowed search window",
+            }
+        )
+        return result
+    if min(
+        observed - (target_mz - INTERNAL_ANCHOR_SEARCH_DA),
+        (target_mz + INTERNAL_ANCHOR_SEARCH_DA) - observed,
+    ) < INTERNAL_ANCHOR_PROXIMITY_DA:
+        result.update(
+            {
+                "status": "ambiguous",
+                "reason": "candidate is too close to the search-window boundary",
             }
         )
         return result
