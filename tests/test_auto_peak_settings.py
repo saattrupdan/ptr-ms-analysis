@@ -9,6 +9,7 @@ from unittest import mock
 
 import h5py
 import numpy as np
+from calibration_helpers import identity_mass_axis
 
 from sniff import analyze
 
@@ -46,7 +47,9 @@ class AutoPeakSettingsTest(unittest.TestCase):
             with (
                 self._spectrum() as h5,
                 mock.patch.object(
-                    analyze.ptrms, "load_mass_cal", return_value=(1.0, 0.0)
+                    analyze.ptrms,
+                    "load_mass_axis",
+                    return_value=identity_mass_axis(1.0, 0.0),
                 ),
                 mock.patch.object(
                     analyze, "assess_signal", return_value={"signal_present": True}
@@ -78,7 +81,9 @@ class AutoPeakSettingsTest(unittest.TestCase):
             with (
                 self._spectrum() as h5,
                 mock.patch.object(
-                    analyze.ptrms, "load_mass_cal", return_value=(1.0, 0.0)
+                    analyze.ptrms,
+                    "load_mass_axis",
+                    return_value=identity_mass_axis(1.0, 0.0),
                 ),
                 mock.patch.object(
                     analyze, "assess_signal", return_value={"signal_present": True}

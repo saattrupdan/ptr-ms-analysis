@@ -73,11 +73,22 @@ P_DETECT = 0.08
 P_BUILD = viz.PREP_FRACTION  # 0.11: where the streaming starts, here and in viz
 
 
-def _valid_config(value) -> bool:
-    """True if a mapping looks like one of our configs, rather than some unrelated
-    JSON file that happens to share the h5 file's stem. Key presence is the test, not
-    truthiness: a reviewed-but-empty config is still a config."""
-    return isinstance(value, dict) and ("peaks" in value or "ranges" in value)
+def _valid_config(value, *, require_mass_axis=False) -> bool:
+    """True if a mapping is a current Sniff config.
+
+    Loading still accepts an unmarked legacy config so it can be migrated after the
+    file has passed calibration. Writes, however, must carry the corrected mass-axis
+    marker; otherwise the next open could interpret the saved m/z values in the wrong
+    domain.
+    """
+    if not isinstance(value, dict) or not ("peaks" in value or "ranges" in value):
+        return False
+    if not require_mass_axis:
+        return True
+    return (
+        value.get("mass_axis_domain") == ptrms.MASS_AXIS_CONFIG_DOMAIN
+        and value.get("mass_axis_version") == ptrms.MASS_AXIS_CONFIG_VERSION
+    )
 
 
 def _read_json(path: Path):
@@ -1253,8 +1264,14 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 if not session.config_path:
                     self._send(409, {"error": "no file is open"})
                     return
-                if not _valid_config(body):
-                    self._send(400, {"error": "config must contain peaks or ranges"})
+                if not _valid_config(body, require_mass_axis=True):
+                    self._send(
+                        400,
+                        {
+                            "error": "config must contain peaks or ranges and the "
+                            "current mass-axis marker"
+                        },
+                    )
                     return
                 try:
                     _write_json(session.config_path, body)
@@ -1274,8 +1291,12 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                     return
                 # The page posts the config it is showing. Autosave is debounced, so
                 # exporting whatever happens to be on disk can describe an earlier
-                # state than the one the reviewer just looked at.
-                if _valid_config(body):
+                # state than the one the reviewer just looked at. An omitted body is
+                # retained for API callers that simply request the last saved export.
+                if body and not _valid_config(body, require_mass_axis=True):
+                    self._send(400, {"error": "export config has an invalid mass-axis marker"})
+                    return
+                if body:
                     try:
                         _write_json(session.config_path, body)
                     except OSError as exc:

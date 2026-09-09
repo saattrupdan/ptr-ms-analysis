@@ -6,11 +6,21 @@ from unittest import mock
 
 import h5py
 import numpy as np
+from calibration_helpers import identity_mass_axis
 
 from sniff import ptrms, viz
 
 
 class VizDataTest(unittest.TestCase):
+    def setUp(self):
+        self._calibration = mock.patch.object(
+            ptrms, "load_mass_axis", return_value=identity_mass_axis()
+        )
+        self._calibration.start()
+
+    def tearDown(self):
+        self._calibration.stop()
+
     def test_nonfinite_average_spectrum_bins_are_zero_filled(self):
         with h5py.File("in-memory", "w", driver="core", backing_store=False) as h5:
             h5.create_dataset("SPECdata/Intensities", data=np.zeros((2, 5)))
@@ -44,7 +54,7 @@ class VizDataTest(unittest.TestCase):
 
         self.assertEqual(data["spectrum"], [1, 0, 0, 0, 5])
         self.assertIn("mass_axis_calibration", data["meta"])
-        self.assertFalse(data["meta"]["mass_axis_calibration"]["applied"])
+        self.assertTrue(data["meta"]["mass_axis_calibration"]["applied"])
         json.dumps(data, allow_nan=False)
 
     def test_peak_abundance_is_mean_integrated_raw_signal(self):

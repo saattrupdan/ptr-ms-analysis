@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   handling,
   diagnostic checks, range labels, concentration caveats or identification limits.
 
+- **Review saves now require the corrected-axis marker.** Legacy configs remain
+  readable only long enough to migrate after successful calibration; new saves and
+  exports cannot silently reintroduce file-axis masses.
 - **Mass calibration now fails closed on two required internal standards.** The
   operational water calibrant (37.033) and protonated iodobenzene (204.951) must both
   pass prominence, S/N, ambiguity, proximity and raw-cycle persistence checks. Missing

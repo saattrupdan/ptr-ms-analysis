@@ -12,6 +12,7 @@ from unittest import mock
 
 import h5py
 import numpy as np
+from calibration_helpers import identity_mass_axis
 
 from sniff import ptrms, viz
 
@@ -42,7 +43,10 @@ def _write(h5, data):
 
 def _run(h5, **kwargs):
     """Five blocks of ten cycles, so the progress axis has five honest steps."""
-    return ptrms.extract_traces(h5, _MASSES, block=10, **kwargs)
+    with mock.patch.object(
+        ptrms, "load_mass_axis", return_value=identity_mass_axis(_A, _B)
+    ):
+        return ptrms.extract_traces(h5, _MASSES, block=10, **kwargs)
 
 
 class StreamingPassTest(unittest.TestCase):
@@ -129,6 +133,11 @@ class BuildVizDataProgressTest(unittest.TestCase):
             h5.create_dataset("SPECdata/Intensities", data=np.zeros((4, 5)))
             h5.create_dataset("SPECdata/AverageSpec", data=np.ones(5))
             with (
+                mock.patch.object(
+                    ptrms,
+                    "load_mass_axis",
+                    return_value=identity_mass_axis(10.0, 1.0),
+                ),
                 mock.patch.object(ptrms, "load_mass_cal", return_value=(10.0, 1.0)),
                 mock.patch.object(
                     ptrms,

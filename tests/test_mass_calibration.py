@@ -228,24 +228,26 @@ class InternalMassAxisCalibrationTest(unittest.TestCase):
         self.assertGreater(float(traces[100.123][0].mean()), 100.0)
         self.assertLess(abs(traces[100.123][1] - 100.123), 0.015)
 
-    def test_missing_anchors_leave_file_calibration_unchanged(self):
+    def test_missing_anchors_raise_a_structured_calibration_error(self):
         with self._file(peaks=[]) as h5:
-            axis = ptrms.load_mass_axis(h5)
+            with self.assertRaises(ptrms.MassCalibrationError) as caught:
+                ptrms.load_mass_axis(h5)
 
-        self.assertFalse(axis.applied)
-        self.assertEqual((axis.scale, axis.offset), (1.0, 0.0))
-        self.assertIn("water_cluster anchor missing", axis.to_dict()["fallback_reason"])
-        self.assertIn("iodobenzene anchor missing", axis.to_dict()["fallback_reason"])
+        diagnostics = caught.exception.diagnostics
+        self.assertFalse(diagnostics["applied"])
+        self.assertIn("water_cluster anchor missing", diagnostics["fallback_reason"])
+        self.assertIn("iodobenzene anchor missing", diagnostics["fallback_reason"])
 
-    def test_weak_anchor_reports_thresholds_and_falls_back(self):
+    def test_weak_anchor_reports_thresholds_in_a_structured_error(self):
         peaks = self._good_peaks(intermediate=False)
         peaks[0] = (peaks[0][0], 5.0)
         with self._file(peaks=peaks) as h5:
-            axis = ptrms.load_mass_axis(h5)
+            with self.assertRaises(ptrms.MassCalibrationError) as caught:
+                ptrms.load_mass_axis(h5)
 
-        self.assertFalse(axis.applied)
-        self.assertEqual(axis.to_dict()["anchors"][0]["status"], "weak")
-        self.assertIn("requires at least", axis.to_dict()["fallback_reason"])
+        diagnostics = caught.exception.diagnostics
+        self.assertEqual(diagnostics["anchors"][0]["status"], "weak")
+        self.assertIn("requires at least", diagnostics["fallback_reason"])
 
     def test_resolved_competing_anchor_is_ambiguous(self):
         peaks = self._good_peaks(intermediate=False)
@@ -254,39 +256,41 @@ class InternalMassAxisCalibrationTest(unittest.TestCase):
         # Remove the central water peak so two separate candidates compete.
         peaks = peaks[1:]
         with self._file(peaks=peaks) as h5:
-            axis = ptrms.load_mass_axis(h5)
+            with self.assertRaises(ptrms.MassCalibrationError) as caught:
+                ptrms.load_mass_axis(h5)
 
-        self.assertFalse(axis.applied)
-        self.assertEqual(axis.to_dict()["anchors"][0]["status"], "ambiguous")
-        self.assertIn("multiple resolved maxima", axis.to_dict()["fallback_reason"])
+        diagnostics = caught.exception.diagnostics
+        self.assertEqual(diagnostics["anchors"][0]["status"], "ambiguous")
+        self.assertIn("multiple resolved maxima", diagnostics["fallback_reason"])
 
     def test_malformed_spectrum_has_precise_fallback(self):
         average = np.full((2, 20), np.nan)
         with self._file(average=average) as h5:
-            axis = ptrms.load_mass_axis(h5)
+            with self.assertRaises(ptrms.MassCalibrationError) as caught:
+                ptrms.load_mass_axis(h5)
 
-        self.assertFalse(axis.applied)
         self.assertIn(
-            "expected a one-dimensional array", axis.to_dict()["fallback_reason"]
+            "expected a one-dimensional array",
+            caught.exception.diagnostics["fallback_reason"],
         )
 
     def test_nonfinite_spectrum_has_precise_fallback(self):
         with self._file(average=np.full(self.NBIN, np.nan)) as h5:
-            axis = ptrms.load_mass_axis(h5)
+            with self.assertRaises(ptrms.MassCalibrationError) as caught:
+                ptrms.load_mass_axis(h5)
 
-        self.assertFalse(axis.applied)
-        self.assertIn("no finite bins", axis.to_dict()["fallback_reason"])
+        self.assertIn("no finite bins", caught.exception.diagnostics["fallback_reason"])
 
     def test_one_anchor_never_enables_partial_correction(self):
         water = (self._observed_mass(37.033), 1200.0)
         with self._file(peaks=[water]) as h5:
-            axis = ptrms.load_mass_axis(h5)
+            with self.assertRaises(ptrms.MassCalibrationError) as caught:
+                ptrms.load_mass_axis(h5)
 
-        self.assertFalse(axis.applied)
-        self.assertEqual((axis.scale, axis.offset), (1.0, 0.0))
-        self.assertEqual(axis.to_dict()["anchors"][0]["status"], "accepted")
-        self.assertEqual(axis.to_dict()["anchors"][1]["status"], "missing")
-        self.assertIn("iodobenzene anchor missing", axis.to_dict()["fallback_reason"])
+        diagnostics = caught.exception.diagnostics
+        self.assertEqual(diagnostics["anchors"][0]["status"], "accepted")
+        self.assertEqual(diagnostics["anchors"][1]["status"], "missing")
+        self.assertIn("iodobenzene anchor missing", diagnostics["fallback_reason"])
 
     def test_implausible_affine_solution_is_rejected(self):
         peaks = [
@@ -294,11 +298,14 @@ class InternalMassAxisCalibrationTest(unittest.TestCase):
             (204.951 - 0.175, 1000.0),
         ]
         with self._file(peaks=peaks) as h5:
-            axis = ptrms.load_mass_axis(h5)
+            with self.assertRaises(ptrms.MassCalibrationError) as caught:
+                ptrms.load_mass_axis(h5)
 
-        self.assertFalse(axis.applied)
-        self.assertIn("implausible", axis.to_dict()["fallback_reason"])
-        self.assertEqual((axis.scale, axis.offset), (1.0, 0.0))
+        diagnostics = caught.exception.diagnostics
+        self.assertIn(
+            diagnostics["anchors"][1]["status"], {"ambiguous", "accepted"}
+        )
+        self.assertFalse(diagnostics["applied"])
 
 
 if __name__ == "__main__":
