@@ -693,46 +693,75 @@ def _add_anchor_persistence(
             anchor["status"] = "implausible"
             anchor["reason"] = "raw persistence window falls outside the spectrum"
 
-    usable_total = 0
+    usable_totals = {anchor["name"]: 0 for anchor in anchors}
     for block_index, (start, end) in enumerate(zip(edges[:-1], edges[1:]), 1):
         if should_stop is not None and should_stop():
             raise AnalysisCancelled("the analysis was cancelled")
-        try:
-            section = np.asarray(dataset[start:end, :], dtype=np.float64)
-        except (OSError, TypeError, ValueError):
-            reason = "raw cycle spectra are unavailable or malformed"
-            break
-        if not np.isfinite(section).all():
-            reason = "raw cycle spectra contain non-finite values"
-            break
-        usable_total += int((section > 0).any(axis=1).sum())
-        if usable_total < 2 and block_index == block_count:
-            reason = "fewer than two usable raw cycle spectra are available"
-            break
         for anchor in anchors:
+            name = anchor["name"]
             if anchor["status"] != "accepted":
-                statuses[anchor["name"]].append("missing")
+                statuses[name].append("missing")
                 continue
-            tlo, thi = windows[anchor["name"]]
+            tlo, thi = windows[name]
+            if thi <= tlo:
+                statuses[name].append("missing")
+                continue
+            try:
+                window = np.asarray(dataset[start:end, tlo : thi + 1], dtype=np.float64)
+            except (OSError, TypeError, ValueError):
+                reason = f"{name} anchor persistence window is unavailable or malformed"
+                break
+            finite = np.isfinite(window)
+            usable_rows = (finite & (window > 0)).any(axis=1)
+            usable_totals[name] += int(usable_rows.sum())
+            if not usable_rows.any():
+                statuses[name].append("missing")
+                continue
+
+            usable = window[usable_rows]
+            finite_usable = np.isfinite(usable)
+            counts = finite_usable.sum(axis=0)
+            totals = np.where(finite_usable, usable, 0.0).sum(axis=0)
+            block_mean = np.divide(
+                totals,
+                counts,
+                out=np.zeros_like(totals),
+                where=counts > 0,
+            )
             block = np.zeros(int(dataset.shape[1]), dtype=np.float64)
-            block[tlo : thi + 1] = section[:, tlo : thi + 1].mean(axis=0)
+            block[tlo : thi + 1] = block_mean
             candidate = _detect_internal_anchor(
                 avg=block,
                 a=a,
                 b=b,
-                name=anchor["name"],
+                name=name,
                 target_mz=float(anchor["target_mz"]),
             )
-            statuses[anchor["name"]].append(candidate["status"])
+            statuses[name].append(candidate["status"])
+        if reason is not None:
+            break
         if progress is not None:
             progress(0.1 + 0.9 * block_index / block_count)
 
     if reason is not None:
         for anchor in anchors:
-            anchor["persistence"] = {"available": False, "reason": reason}
+            anchor["persistence"] = {
+                "available": False,
+                "reason": reason,
+            }
         return
     for anchor in anchors:
-        block_statuses = statuses[anchor["name"]]
+        name = anchor["name"]
+        if usable_totals[name] < 2:
+            anchor["persistence"] = {
+                "available": False,
+                "reason": (
+                    f"{name} anchor persistence window has fewer than two usable "
+                    f"raw cycles (found {usable_totals[name]}); requires at least 2"
+                ),
+            }
+            continue
+        block_statuses = statuses[name]
         accepted = block_statuses.count("accepted")
         fraction = accepted / block_count
         anchor["persistence"] = {
