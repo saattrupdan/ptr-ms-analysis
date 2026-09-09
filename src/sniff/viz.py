@@ -158,7 +158,8 @@ def build_viz_data(
         _say(PREP_FRACTION + (1.0 - PREP_FRACTION) * done)
 
     _say(0.0)
-    a, b = ptrms.load_mass_cal(f)
+    mass_axis = ptrms.load_mass_axis(f)
+    a, b = mass_axis.a, mass_axis.b
     tm, tf = ptrms.load_transmission(f)
     inten = f["SPECdata/Intensities"]
     ncyc = int(inten.shape[0])
@@ -171,13 +172,17 @@ def build_viz_data(
     if x_axis_unit == "absolute" and not x_axis["absolute_available"]:
         x_axis_unit = "cycle"
 
-    primary = ptrms.extract_primary(f, primary_mz=primary_mz, R=R)
+    primary = ptrms.extract_primary(
+        f, primary_mz=primary_mz, R=R, mass_axis=mass_axis
+    )
     _phase(0)
     _halt()
-    humidity = ptrms.water_cluster_ratio(f, primary_mz=primary_mz, R=R)
+    humidity = ptrms.water_cluster_ratio(
+        f, primary_mz=primary_mz, R=R, mass_axis=mass_axis
+    )
     _phase(1)
     _halt()
-    discriminator = ptrms.build_discriminator(f)
+    discriminator = ptrms.build_discriminator(f, mass_axis=mass_axis)
     _phase(2)
     _halt()
     file_molar_volume, file_molar_volume_source = ptrms.derive_molar_volume_info(f)
@@ -246,6 +251,7 @@ def build_viz_data(
             per_range=per_range,
             progress=_stream,
             should_stop=should_stop,
+            mass_axis=mass_axis,
         )
         apexes = {m: ap for m, (_, ap) in traces.items()}
         raw_traces = {m: raw for m, (raw, _) in traces.items()}
@@ -258,12 +264,16 @@ def build_viz_data(
 
     # run mass scale (measured apex / assigned m/z) for formula candidate matching
     drift_vals = [apexes[m] / m for m in masses if apexes.get(m)]
-    drift = float(np.median(drift_vals)) if drift_vals else 1.0
+    drift = (
+        1.0
+        if mass_axis.applied
+        else (float(np.median(drift_vals)) if drift_vals else 1.0)
+    )
     sorted_mz = sorted(masses)
 
     def obs_ratios(apex):
         def wsum(center):
-            wl, wr = ptrms.peak_window(center, a, b, R)
+            wl, wr = ptrms.peak_window(center, a, b, R, mass_axis)
             lo, hi = max(0, wl), min(len(avg), wr)
             return float(avg[lo:hi].sum()) if hi > lo else 0.0
 
@@ -378,6 +388,9 @@ def build_viz_data(
             "x_axis": x_axis,
             "a": a,
             "b": b,
+            "mass_scale": mass_axis.scale,
+            "mass_offset": mass_axis.offset,
+            "mass_axis_calibration": mass_axis.to_dict(),
             "R": R,
             "R_phys": R_phys,
             "primary_mz": primary_mz,
@@ -1125,7 +1138,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <p class="lead" style="font-size:11.5px">How this tool turns the raw IONICON <code>.h5</code> into the concentrations you review here. Everything instrument-specific is read from the file; you curate the chemistry.</p>
 
   <h3>1 · Mass calibration &amp; drift</h3>
-  <p>The instrument stores two or more calibration anchors in <code>CALdata/Mapping</code> giving <b>timebin = a·√(m/z) + b</b>. Two anchors determine the coefficients directly; three or more valid, well-conditioned anchors are fit by least squares and accepted only when their reconstructed masses have finite absolute relative errors of at most 100 ppm. This is a deliberately generous corruption/model-consistency ceiling, not an accuracy claim. Invalid or physically inconsistent Mapping data falls back to usable per-cycle <code>CALdata/Spectrum</code> coefficients. Over a long run the true masses drift slightly, so we estimate one global scale factor (the median of measured-apex ÷ theoretical-mass across all peaks, ≈1.0008 here) and remove it. Each isolated peak then gets a tight local apex search to snap onto its exact centre. Clustered peaks instead use scale-corrected theoretical model centres so they don't jump onto a neighbour.</p>
+  <p>The instrument stores two or more calibration anchors in <code>CALdata/Mapping</code> giving <b>timebin = a·√(m<sub>file</sub>) + b</b>. Two anchors determine the coefficients directly; three or more valid, well-conditioned anchors are fit by least squares and accepted only when their reconstructed masses have finite absolute relative errors of at most 100 ppm. Invalid or physically inconsistent Mapping data falls back to usable per-cycle <code>CALdata/Spectrum</code> coefficients. On top of that file mapping, Sniff detects the water-cluster (37.033) and iodobenzene (204.951) peaks in the sanitised average spectrum with sub-bin centring. Only two prominent, high-S/N, unambiguous and physically plausible anchors enable the separate correction <b>m<sub>corrected</sub> = scale·m<sub>file</sub> + offset</b>; otherwise the valid file axis is left unchanged and the precise reason is reported. This correction translates and scales the whole axis independently of the selected compound panel. Each isolated peak retains a tight local apex refinement; clustered components stay at corrected theoretical model centres so they do not jump onto a neighbour.</p>
 
   <h3>2 · Peak detection &amp; identification</h3>
   <p>Peaks are local maxima of the average spectrum above a relative-height threshold. For each, candidate <b>molecular formulas</b> are enumerated offline (all plausible CHNOPS+halogen formulas within ~12 mDa) and ranked by three independent lines of evidence: exact-mass error, the measured-vs-predicted <b>¹³C (M+1) and heteroatom (M+2, e.g. S/Cl) isotope pattern</b>, and plausibility (integer ring+double-bond equivalents, the nitrogen rule, element ratios). Near-isobars are told apart by composition, not "nearest mass". Names and isomer labels come from the bundled PTR Library mapping when the formula is known; formula ranking cannot determine structural isomers.</p>
@@ -1155,7 +1168,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <li><b>Single sensitivity K</b> unless per-compound kinetic mode is on; the shared-K assumption is only exact for compounds with similar reaction rate constants.</li>
     <li><b>No fragmentation correction</b> — each peak is treated as a parent ion. Compounds that fragment (flagged where known) spread signal across masses that this tool does not recombine.</li>
     <li><b>Humidity dependence</b> is an optional, empirical normalisation, not a full ion-chemistry model; leave it off unless you have reason to apply it.</li>
-    <li><b>Transmission and mass calibration</b> come from the file — if the instrument's stored values are off, so are the derived numbers.</li>
+    <li><b>Mass-axis correction needs both internal references</b> — if either water-cluster or iodobenzene is absent, weak or ambiguous, Sniff deliberately retains the file calibration rather than extrapolating from one point.</li>
     <li><b>Identification is a ranking, not proof</b>: candidate percentages are relative score/share, not calibrated identification confidence; unresolved overlaps are flagged and the expert makes the final call.</li>
   </ul>
 
@@ -1171,8 +1184,8 @@ const SERVED = location.protocol.indexOf("http") === 0;
 // App mode: one long-lived server, so the primary action exports and keeps going.
 const APPMODE = /*__APPMODE__*/;
 const M = DATA.meta, PC = DATA.per_cycle, SPEC = DATA.spectrum;
-const A = M.a, B = M.b, NCYC = M.ncyc, NBIN = SPEC.length;
-const m2tb = m => A*Math.sqrt(m)+B;
+const A = M.a, B = M.b, MS = M.mass_scale||1, MO = M.mass_offset||0, NCYC = M.ncyc, NBIN = SPEC.length;
+const m2tb = m => A*Math.sqrt((m-MO)/MS)+B;
 const AXIS = M.x_axis || {relative:[], absolute:null, absolute_available:false};
 let xAxisUnit = M.x_axis_unit || "cycle";
 function axisValues(){
@@ -1206,7 +1219,7 @@ function renderXAxis(){ const el=document.getElementById("xaxisunit"); if(!el) r
   const unit=document.getElementById("rngunit"); if(unit) unit.textContent=axisUnitLabel();
 }
 function formatRange(r){ return formatAxis(axisAtCycle(r.start),true)+"–"+formatAxis(axisAtCycle(r.end),true); }
-const tb2m = tb => Math.pow((tb-B)/A, 2);
+const tb2m = tb => MS*Math.pow((tb-B)/A, 2)+MO;
 
 // Intervals are always listed in x-axis order. Cycle order is the same order for
 // relative and absolute time, so one chronological sort serves every display unit.
@@ -2549,8 +2562,14 @@ function updateMethods(){
   const conc=concentrationAvailable?"available":"unavailable (primary-ion signal or K is missing)";
   const kinetic=cfg.kinetic?"on":"off";
   const windows=cfg.wholewindows?"one whole-run window per compound":"isolated per-interval windows";
+  const mc=M.mass_axis_calibration||{applied:false,scale:1,offset_da:0,fallback_reason:"not reported"};
+  const htmlText=s=>String(s).replace(/[&<>\"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
+  const massAxis=mc.applied
+    ? `applied; scale = ${Number(mc.scale).toFixed(9)}, offset = ${Number(mc.offset_da).toFixed(6)} Da; both internal anchors passed`
+    : `identity fallback; ${htmlText(mc.fallback_reason||"internal anchors did not pass")}`;
   live.innerHTML=staleHtml(stale)+`
     <h3>Effective settings</h3>
+    <p><b>Mass axis:</b> ${massAxis}. The HDF5 a,b timebin mapping remains unchanged.</p>
     <p><b>R integration windows:</b> R = ${cfg.R} (${rSource}); manual peak windows override the default.
     <b>R<sub>phys</sub> Gaussian/deconvolution resolution:</b> ${cfg.Rphys} (${rPhysSource}).</p>
     <p><b>K:</b> ${fmt(cfg.K)} (${effectiveKSource}); <b>molar volume:</b> ${fmt(cfg.Vm)} L/mol (${effectiveVmSource});

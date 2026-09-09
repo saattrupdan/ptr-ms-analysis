@@ -5,7 +5,7 @@ import unittest
 import h5py
 import numpy as np
 
-from sniff import ptrms
+from sniff import analyze, ptrms
 
 # In-memory reproduction of the three-anchor calibration used by Data_10_26_33.
 # Keeping these values here avoids depending on the external measurement file.
@@ -148,6 +148,157 @@ class MassCalibrationTest(unittest.TestCase):
             ValueError, "no mass calibration"
         ):
             ptrms.load_mass_cal(h5)
+
+
+class InternalMassAxisCalibrationTest(unittest.TestCase):
+    A = 1000.0
+    B = 0.0
+    SCALE = 1.0007
+    OFFSET = -0.020
+    NBIN = 15000
+
+    @classmethod
+    def _observed_mass(cls, corrected_mass):
+        return (corrected_mass - cls.OFFSET) / cls.SCALE
+
+    @classmethod
+    def _spectrum(cls, peaks):
+        spectrum = np.full(cls.NBIN, 4.0, dtype=np.float64)
+        for mass, height in peaks:
+            centre = cls.A * np.sqrt(mass) + cls.B
+            lo = max(0, int(np.floor(centre)) - 5)
+            hi = min(cls.NBIN, int(np.floor(centre)) + 7)
+            bins = np.arange(lo, hi, dtype=np.float64)
+            # A sampled parabola gives a known non-integer vertex, exercising the
+            # sub-bin centre calculation without requiring SciPy fitting.
+            shape = np.maximum(0.0, height * (1.0 - ((bins - centre) / 3.5) ** 2))
+            spectrum[lo:hi] += shape
+        return spectrum
+
+    @classmethod
+    def _file(cls, peaks=None, average=None):
+        h5 = h5py.File("mass-axis", "w", driver="core", backing_store=False)
+        h5.create_dataset("CALdata/Spectrum", data=np.array([[cls.A, cls.B]]))
+        if average is None:
+            average = cls._spectrum(peaks or [])
+        h5.create_dataset("SPECdata/AverageSpec", data=average)
+        if np.asarray(average).ndim == 1:
+            h5.create_dataset(
+                "SPECdata/Intensities",
+                data=np.vstack([average, average]),
+            )
+        return h5
+
+    @classmethod
+    def _good_peaks(cls, intermediate=True):
+        peaks = [
+            (cls._observed_mass(37.033), 1200.0),
+            (cls._observed_mass(204.951), 1000.0),
+        ]
+        if intermediate:
+            peaks.append((cls._observed_mass(100.123), 800.0))
+        return peaks
+
+    def test_two_anchors_apply_shift_and_scale_to_the_whole_axis(self):
+        with self._file(peaks=self._good_peaks()) as h5:
+            axis = ptrms.load_mass_axis(h5)
+            detected = analyze.detect_peaks(h5, mass_axis=axis)
+            traces, _ = ptrms.extract_traces(
+                h5, [100.123], R=1200.0, mass_axis=axis
+            )
+
+        self.assertTrue(axis.applied)
+        self.assertNotEqual(axis.scale, 1.0)
+        self.assertNotEqual(axis.offset, 0.0)
+        self.assertAlmostEqual(axis.scale, self.SCALE, places=9)
+        self.assertAlmostEqual(axis.offset, self.OFFSET, places=9)
+        for anchor in axis.to_dict()["anchors"]:
+            self.assertAlmostEqual(
+                anchor["corrected_mz"], anchor["target_mz"], places=12
+            )
+            self.assertNotEqual(anchor["timebin"], round(anchor["timebin"]))
+        intermediate_file_mass = self._observed_mass(100.123)
+        self.assertAlmostEqual(
+            float(axis.file_to_corrected(intermediate_file_mass)), 100.123, places=9
+        )
+        self.assertAlmostEqual(
+            float(axis.tb_to_m(axis.m_to_tb(100.123))), 100.123, places=12
+        )
+        self.assertTrue(any(abs(peak["mz"] - 100.123) < 0.012 for peak in detected))
+        self.assertGreater(float(traces[100.123][0].mean()), 100.0)
+        self.assertLess(abs(traces[100.123][1] - 100.123), 0.015)
+
+    def test_missing_anchors_leave_file_calibration_unchanged(self):
+        with self._file(peaks=[]) as h5:
+            axis = ptrms.load_mass_axis(h5)
+
+        self.assertFalse(axis.applied)
+        self.assertEqual((axis.scale, axis.offset), (1.0, 0.0))
+        self.assertIn("water_cluster anchor missing", axis.to_dict()["fallback_reason"])
+        self.assertIn("iodobenzene anchor missing", axis.to_dict()["fallback_reason"])
+
+    def test_weak_anchor_reports_thresholds_and_falls_back(self):
+        peaks = self._good_peaks(intermediate=False)
+        peaks[0] = (peaks[0][0], 5.0)
+        with self._file(peaks=peaks) as h5:
+            axis = ptrms.load_mass_axis(h5)
+
+        self.assertFalse(axis.applied)
+        self.assertEqual(axis.to_dict()["anchors"][0]["status"], "weak")
+        self.assertIn("requires at least", axis.to_dict()["fallback_reason"])
+
+    def test_resolved_competing_anchor_is_ambiguous(self):
+        peaks = self._good_peaks(intermediate=False)
+        water = self._observed_mass(37.033)
+        peaks.extend([(water - 0.08, 900.0), (water + 0.08, 850.0)])
+        # Remove the central water peak so two separate candidates compete.
+        peaks = peaks[1:]
+        with self._file(peaks=peaks) as h5:
+            axis = ptrms.load_mass_axis(h5)
+
+        self.assertFalse(axis.applied)
+        self.assertEqual(axis.to_dict()["anchors"][0]["status"], "ambiguous")
+        self.assertIn("multiple resolved maxima", axis.to_dict()["fallback_reason"])
+
+    def test_malformed_spectrum_has_precise_fallback(self):
+        average = np.full((2, 20), np.nan)
+        with self._file(average=average) as h5:
+            axis = ptrms.load_mass_axis(h5)
+
+        self.assertFalse(axis.applied)
+        self.assertIn(
+            "expected a one-dimensional array", axis.to_dict()["fallback_reason"]
+        )
+
+    def test_nonfinite_spectrum_has_precise_fallback(self):
+        with self._file(average=np.full(self.NBIN, np.nan)) as h5:
+            axis = ptrms.load_mass_axis(h5)
+
+        self.assertFalse(axis.applied)
+        self.assertIn("no finite bins", axis.to_dict()["fallback_reason"])
+
+    def test_one_anchor_never_enables_partial_correction(self):
+        water = (self._observed_mass(37.033), 1200.0)
+        with self._file(peaks=[water]) as h5:
+            axis = ptrms.load_mass_axis(h5)
+
+        self.assertFalse(axis.applied)
+        self.assertEqual((axis.scale, axis.offset), (1.0, 0.0))
+        self.assertEqual(axis.to_dict()["anchors"][0]["status"], "accepted")
+        self.assertEqual(axis.to_dict()["anchors"][1]["status"], "missing")
+        self.assertIn("iodobenzene anchor missing", axis.to_dict()["fallback_reason"])
+
+    def test_implausible_affine_solution_is_rejected(self):
+        peaks = [
+            (37.033 + 0.175, 1200.0),
+            (204.951 - 0.175, 1000.0),
+        ]
+        with self._file(peaks=peaks) as h5:
+            axis = ptrms.load_mass_axis(h5)
+
+        self.assertFalse(axis.applied)
+        self.assertIn("implausible", axis.to_dict()["fallback_reason"])
+        self.assertEqual((axis.scale, axis.offset), (1.0, 0.0))
 
 
 if __name__ == "__main__":

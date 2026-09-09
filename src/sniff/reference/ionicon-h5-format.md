@@ -73,12 +73,32 @@ m/z = ((timebin − b) / a)²
 ```
 
 If `CALdata/Mapping` is absent or unusable, fall back to usable per-cycle
-`CALdata/Spectrum` coefficients. **Drift caveat:** a global Mapping calibration
-drifts over a long run; measured peak apexes sit ~0.0007·m above the nominal masses.
-The pipeline corrects this with a robust global mass-scale factor (median
-apex/nominal over all target peaks) and then apex-snaps each isolated peak. Per-cycle
-`MassCal_a/b` exist in `AddTraces/DataCollection` but barely differ from the global
-fit here.
+`CALdata/Spectrum` coefficients. These `a,b` values remain the baseline timebin
+mapping; the internal correction does not pretend that a mass-domain translation can
+be represented by changing them.
+
+The run-average `SPECdata/AverageSpec` is sanitised by replacing non-finite and
+negative bins with zero. On the baseline file axis, Sniff searches conservatively for
+the water-cluster ion at 37.033 and iodobenzene at 204.951. Each centre is refined to
+sub-bin precision and must pass local prominence, robust S/N, resolved-competitor and
+search-window checks. Both anchors must pass, and their solution must be finite,
+monotonic, close to unit scale and limited in offset. The accepted mapping is:
+
+```
+m_corrected = scale·m_file + offset
+m_file = (m_corrected − offset) / scale
+```
+
+The forward mapping is used for timebin-to-mass displays and detected peaks; the
+inverse is used for target-to-timebin windows. The two accepted observed centres map
+exactly to 37.033 and 204.951, while every intermediate compound receives the same
+translation and scale. This replaces the former target-panel-derived multiplicative
+drift, avoiding a second correction whose value depended on the selected compounds.
+A missing, weak, ambiguous, malformed or physically implausible anchor leaves
+`scale = 1` and `offset = 0`: the valid file calibration is retained, with the precise
+fallback and per-anchor evidence exposed in diagnostics. Per-cycle `MassCal_a/b` also
+exist in `AddTraces/DataCollection`, but barely differ from the global fit in the
+examined files.
 
 ## The four quantities
 

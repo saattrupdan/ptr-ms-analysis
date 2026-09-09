@@ -321,9 +321,19 @@ curated values: precedence is **CLI override > `analyze` config > legacy default
 The same resolver is used by `analyze`, browser initial state, live-save, and Done.
 Unknown top-level and nested config fields survive browser round trips.
 
+Before peak detection or extraction, Sniff applies an internal two-point mass-axis
+check. It detects the water-cluster ion at 37.033 and iodobenzene at 204.951 in the
+sanitised run-average spectrum using the file's own HDF5 timebin calibration. Sub-bin
+centres are accepted only when both peaks are prominent, high-S/N, unambiguous and give
+a plausible affine correction. The accepted correction is separate from the file's
+`a,b` coefficients: `m_corrected = scale*m_file + offset`, so it translates and scales
+the whole axis rather than moving only selected targets. If either anchor fails, the
+valid file calibration is retained unchanged and JSON/Methods diagnostics state the
+precise reason; no one-point extrapolation is attempted.
+
 By default `analyze` integrates each interval with each isolated peak's apex/window
-**re-centred on that interval's own spectrum** — peaks drift between intervals (mass-cal
-drift; a compound may be absent in a background), so one whole-run window sits off-peak
+**re-centred on that interval's own spectrum** — peaks drift between intervals (a
+compound may be absent in a background), so one whole-run window sits off-peak
 elsewhere. Clustered peaks are Gaussian/deconvolved fitted components at fixed model
 centres, so their centre is not a measured apex and may not be a visible local maximum in
 every interval. The delivered CSV is unchanged in shape (still one row per compound ×
@@ -357,11 +367,12 @@ carries the same attribution.
 
 ## How it works
 
-Everything instrument-specific (mass calibration, transmission, concentration constant
-K, molar volume from drift temperature) is read from the `.h5`. Isolated peaks use an
-apex-centred resolution window; overlapping peaks are separated by linear Gaussian
-deconvolution. Time segments are found by log-space plateau detection on a composite VOC
-signal. Compound identification enumerates candidate molecular formulas offline (no
+The baseline timebin calibration, transmission, concentration constant K and molar
+volume are read from the `.h5`. A separate, conservative water/iodobenzene affine
+correction aligns the mass domain when both internal references pass; otherwise the
+file mass axis is used unchanged. Isolated peaks use an apex-centred resolution window;
+overlapping peaks are separated by linear Gaussian deconvolution. Time segments are
+found by log-space plateau detection on a composite VOC signal. Compound identification enumerates candidate molecular formulas offline (no
 external database) and ranks them by exact-mass error, the measured vs predicted
 ¹³C(M+1)/heteroatom(M+2, e.g. S/Cl) isotope pattern, and plausibility (integer DBE,
 nitrogen rule, element ratios) — so near-isobars are told apart by composition, not

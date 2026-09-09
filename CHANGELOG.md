@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Masses now use a conservative internal two-point axis correction.** Water-cluster
+  (37.033) and iodobenzene (204.951) anchors define a separate affine mass-domain
+  scale and offset only when both pass sub-bin prominence, S/N, ambiguity and
+  plausibility checks. Otherwise the valid HDF5 calibration is retained with a precise
+  fallback diagnostic. The corrected forward/inverse mapping is shared by detection,
+  extraction, identification, analysis and browser interaction.
 - **The product is now Sniff.** The installable package and source directory are
   `sniff`, and the command is `sniff`. Desktop state lives under `~/.sniff`; existing
   `~/.ptr-ms/recent.json` and beside-file `.ptr.json` data remain readable and are never
