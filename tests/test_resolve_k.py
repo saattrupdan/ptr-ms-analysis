@@ -129,6 +129,7 @@ class HumidityDiagnosticTest(unittest.TestCase):
             config_path = tmp_path / "config.json"
             with h5py.File(h5_path, "w") as h5:
                 h5.create_dataset("SPECdata/Intensities", data=np.ones((4, 2)))
+                h5.create_dataset("CALdata/Spectrum", data=np.array([[1.0, 0.0]]))
             config_path.write_text(
                 json.dumps(
                     {
@@ -206,6 +207,7 @@ class HumidityDiagnosticTest(unittest.TestCase):
         self.assertEqual(payload["humidity"]["humid_compounds"], ["29.039"])
         self.assertEqual(payload["kinetic"]["resolved"]["29.039"]["source"], "explicit")
         self.assertIn("humidity_warning", payload["kinetic"])
+        self.assertFalse(payload["params"]["mass_axis_calibration"]["applied"])
 
 
 if __name__ == "__main__":

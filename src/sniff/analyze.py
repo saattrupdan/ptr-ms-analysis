@@ -166,6 +166,7 @@ def detect_peaks(
     mz_max=None,
     R_phys=2400.0,
     noise_sigma=6.0,
+    mass_axis=None,
 ):
     """Untargeted peak detection on the average spectrum.
 
@@ -183,7 +184,9 @@ def detect_peaks(
     dominates on real spectra; the noise floor stops a low-count/blank file — where
     amax itself is noise — from returning hundreds of spurious maxima. Non-finite
     bins (rare file corruption) are treated as zero rather than poisoning amax."""
-    a, b = ptrms.load_mass_cal(f)
+    if mass_axis is None:
+        mass_axis = ptrms.load_mass_axis(f)
+    a, b = mass_axis.a, mass_axis.b
     avg = np.asarray(f["SPECdata/AverageSpec"][:], dtype=np.float64)
     avg = np.where(np.isfinite(avg), avg, 0.0)
     amax = float(avg.max())
@@ -193,7 +196,7 @@ def detect_peaks(
     thr = max(amax * min_rel_height, med + noise_sigma * sigma)
     hi = (avg[1:-1] > avg[:-2]) & (avg[1:-1] >= avg[2:]) & (avg[1:-1] > thr)
     idx = np.where(hi)[0] + 1
-    mz = ptrms.tb_to_m(idx, a, b)
+    mz = ptrms.tb_to_m(idx, a, b, mass_axis)
     keep = mz >= mz_min
     if mz_max:
         keep &= mz <= mz_max
@@ -214,7 +217,7 @@ def detect_peaks(
 
     def prominence(i):
         # half-window ≈ 1 FWHM in timebins: d(bin)/d(mz)=a/(2√mz), FWHM_mz=mz/R_phys
-        m = ptrms.tb_to_m(i, a, b)
+        m = ptrms.tb_to_m(i, a, b, mass_axis)
         w = max(2, round(a * np.sqrt(m) / (2 * R_phys)))
         lo, hiw = max(0, i - w), min(len(avg), i + w + 1)
         base = max(float(avg[lo : i + 1].min()), float(avg[i:hiw].min()))
@@ -235,10 +238,10 @@ def detect_peaks(
 
 # reagent (primary) ions: at least one dominates every real PTR spectrum —
 # H3O+ isotope at m/z 21 (H3O+ mode), or NO+/O2+ in switched-reagent modes.
-_PRIMARY_MZ = (21.022, 30.994, 31.989, 33.994, 37.028)
+_PRIMARY_MZ = (21.022, 30.994, 31.989, 33.994, 37.033)
 
 
-def assess_signal(f, avg=None, a=None, b=None):
+def assess_signal(f, avg=None, a=None, b=None, mass_axis=None):
     """Judge whether a file holds real measurement signal or is a blank capture.
 
     Every real PTR run is dominated by its reagent (primary) ion, which towers over
@@ -260,11 +263,13 @@ def assess_signal(f, avg=None, a=None, b=None):
     med = float(np.median(finite))
     mad = float(np.median(np.abs(finite - med)))
     sigma = 1.4826 * mad if mad > 0 else (float(finite.std()) or 1e-9)
+    if mass_axis is None:
+        mass_axis = ptrms.load_mass_axis(f)
     if a is None:
-        a, b = ptrms.load_mass_cal(f)
+        a, b = mass_axis.a, mass_axis.b
 
     def local_max(mz):
-        tb = int(ptrms.m_to_tb(mz, a, b))
+        tb = int(ptrms.m_to_tb(mz, a, b, mass_axis))
         w = avg[max(0, tb - 30) : tb + 30]
         w = w[np.isfinite(w)]
         return float(w.max()) if w.size else med
@@ -291,7 +296,8 @@ def assess_signal(f, avg=None, a=None, b=None):
 # ----------------------------- commands -----------------------------
 def cmd_inspect(args):
     with h5py.File(args.h5, "r") as f:
-        a, b = ptrms.load_mass_cal(f)
+        mass_axis = ptrms.load_mass_axis(f)
+        a, b = mass_axis.a, mass_axis.b
         tm, tf = ptrms.load_transmission(f)
         ncyc = int(f["SPECdata/Intensities"].shape[0])
         dur = ptrms.spec_duration_s(f)
@@ -309,12 +315,17 @@ def cmd_inspect(args):
                 "cycle_duration_s": dur,
                 "duration_min": round(ncyc * dur / 60, 1),
                 "n_spectrum_bins": int(f["SPECdata/Intensities"].shape[1]),
-                "mass_cal": {"model": "timebin = a*sqrt(mz) + b", "a": a, "b": b},
+                "mass_cal": {
+                    "model": "timebin = a*sqrt(m_file) + b",
+                    "a": a,
+                    "b": b,
+                },
+                "mass_axis_calibration": mass_axis.to_dict(),
                 "transmission_available": ptrms.has_transmission(f),
                 "transmission_masses": [round(x, 3) for x in tm.tolist()],
                 "transmission_factors": [round(x, 4) for x in tf.tolist()],
                 "concentration_K_from_file": ptrms.derive_K(
-                    f, ptrms.extract_primary(f)
+                    f, ptrms.extract_primary(f, mass_axis=mass_axis)
                 ),
                 "molar_volume_L_per_mol": round(
                     ptrms.derive_molar_volume_info(f)[0], 3
@@ -350,7 +361,14 @@ _REAGENT_MZ = {
 
 
 def annotate_peaks(
-    peaks, avgspec=None, a=None, b=None, R=1200.0, R_phys=2400.0, elements=None
+    peaks,
+    avgspec=None,
+    a=None,
+    b=None,
+    R=1200.0,
+    R_phys=2400.0,
+    elements=None,
+    mass_axis=None,
 ):
     """Enrich detected peaks with candidate FORMULA assignments (scored by mass +
     isotope pattern + plausibility) and artifact flags, so the agent/expert can
@@ -362,10 +380,12 @@ def annotate_peaks(
     `avgspec`+`a`+`b` are supplied the isotope ratios are measured from the average
     spectrum; without them the ranking falls back to mass + plausibility only.
 
-    Returns (drift, annotated_peaks). `drift` is the run's global mass scale
-    (measured apex / true m/z ≈ 1.0008); each candidate's `delta_mDa` is the exact
-    -mass residual after removing that drift, plus predicted/observed isotope
-    ratios and a normalised candidate score/share (`probability`). It is not a
+    Returns (drift, annotated_peaks). On an accepted affine mass axis, `drift` is
+    exactly 1 because the correction has already moved every peak; on file-axis
+    fallback it retains the legacy library-derived multiplicative estimate. Each
+    candidate's `delta_mDa` is the exact-mass residual after that handling, plus
+    predicted/observed isotope ratios and a normalised candidate score/share
+    (`probability`). It is not a
     calibrated identification probability; conservative assignment gates below
     deliberately require multiple candidates."""
     tbl = ptrms.load_rate_constants()
@@ -375,7 +395,11 @@ def annotate_peaks(
         near = [c for c in comps if abs(c["mz"] - p["mz"]) < 0.08]
         if len(near) == 1:
             ratios.append(p["mz"] / near[0]["mz"])
-    drift = float(np.median(ratios)) if ratios else 1.0
+    drift = (
+        1.0
+        if mass_axis is not None and mass_axis.applied
+        else (float(np.median(ratios)) if ratios else 1.0)
+    )
 
     have_spec = avgspec is not None and a is not None and b is not None
 
@@ -384,7 +408,7 @@ def annotate_peaks(
             return None
 
         def wsum(center):
-            wl, wr = ptrms.peak_window(center, a, b, R)
+            wl, wr = ptrms.peak_window(center, a, b, R, mass_axis)
             lo, hi = max(0, wl), min(len(avgspec), wr)
             return float(avgspec[lo:hi].sum()) if hi > lo else 0.0
 
@@ -589,17 +613,19 @@ def _compact_peak(e):
 
 def cmd_peaks(args):
     with h5py.File(args.h5, "r") as f:
-        a, b = ptrms.load_mass_cal(f)
+        mass_axis = ptrms.load_mass_axis(f)
+        a, b = mass_axis.a, mass_axis.b
         avg = np.where(
             np.isfinite(f["SPECdata/AverageSpec"][:]), f["SPECdata/AverageSpec"][:], 0.0
         )
-        sig = assess_signal(f, avg=avg, a=a, b=b)
+        sig = assess_signal(f, avg=avg, a=a, b=b, mass_axis=mass_axis)
         if not sig["signal_present"]:
             _emit(
                 {
                     "n_peaks": 0,
                     "signal_present": False,
                     "primary_ion_snr": sig["primary_snr"],
+                    "mass_axis_calibration": mass_axis.to_dict(),
                     "note": "No significant signal. "
                     + sig["reason"]
                     + " Report this file as a blank/no-beam capture — do not "
@@ -611,10 +637,21 @@ def cmd_peaks(args):
             return
         R_phys = getattr(args, "R_phys", None) or 2400.0
         peaks = detect_peaks(
-            f, args.min_height, args.max_peaks, args.mz_min, args.mz_max, R_phys=R_phys
+            f,
+            args.min_height,
+            args.max_peaks,
+            args.mz_min,
+            args.mz_max,
+            R_phys=R_phys,
+            mass_axis=mass_axis,
         )
     drift, peaks = annotate_peaks(
-        peaks, avgspec=avg, a=a, b=b, R_phys=(getattr(args, "R_phys", None) or 2400.0)
+        peaks,
+        avgspec=avg,
+        a=a,
+        b=b,
+        R_phys=(getattr(args, "R_phys", None) or 2400.0),
+        mass_axis=mass_axis,
     )
     # By default the menu excludes instrument-noise artifacts (ringing combs,
     # low-prominence ripples, reagent saturation-region skirt) so that copying the
@@ -689,6 +726,7 @@ def cmd_peaks(args):
             "n_peaks": len(peaks),
             "n_noise_dropped": (0 if include_art else n_noise),
             "mass_drift": round(drift, 6),
+            "mass_axis_calibration": mass_axis.to_dict(),
             "n_ambiguous": n_amb,
             "n_overlapping": n_ovl,
             "n_window_overlap_pairs": len(dup_pairs),
@@ -795,14 +833,33 @@ def auto_peaks(f, *, min_height=1e-3, max_peaks=300, mz_min=15.0, mz_max=None,
     must never be turned into a fabricated analyte list."""
     R = 1200.0 if R is None else R
     R_phys = 2400.0 if R_phys is None else R_phys
-    a, b = ptrms.load_mass_cal(f)
+    mass_axis = ptrms.load_mass_axis(f)
+    a, b = mass_axis.a, mass_axis.b
     avg = np.where(
         np.isfinite(f["SPECdata/AverageSpec"][:]), f["SPECdata/AverageSpec"][:], 0.0
     )
-    if not assess_signal(f, avg=avg, a=a, b=b)["signal_present"]:
+    if not assess_signal(
+        f, avg=avg, a=a, b=b, mass_axis=mass_axis
+    )["signal_present"]:
         return []
-    peaks = detect_peaks(f, min_height, max_peaks, mz_min, mz_max, R_phys=R_phys)
-    _, peaks = annotate_peaks(peaks, avgspec=avg, a=a, b=b, R=R, R_phys=R_phys)
+    peaks = detect_peaks(
+        f,
+        min_height,
+        max_peaks,
+        mz_min,
+        mz_max,
+        R_phys=R_phys,
+        mass_axis=mass_axis,
+    )
+    _, peaks = annotate_peaks(
+        peaks,
+        avgspec=avg,
+        a=a,
+        b=b,
+        R=R,
+        R_phys=R_phys,
+        mass_axis=mass_axis,
+    )
     peaks = [p for p in peaks if not _is_noise_artifact(p.get("likely_artifact"))]
     peaks = _merge_overlapping_windows(peaks, R=R)
     out = []
@@ -954,6 +1011,7 @@ def cmd_analyze(args):
     config = _load_config(args)
     settings = resolve_analysis_settings(config, args)
     with h5py.File(args.h5, "r") as f:
+        mass_axis = ptrms.load_mass_axis(f)
         peaks = _load_peaks(args, f, settings=settings)
         if not peaks:
             # distinguish a genuinely blank file from a missing peak list
@@ -967,6 +1025,7 @@ def cmd_analyze(args):
                             "n_peaks": 0,
                             "signal_present": False,
                             "primary_ion_snr": sig["primary_snr"],
+                            "mass_axis_calibration": mass_axis.to_dict(),
                             "note": "No output written. "
                             + sig["reason"]
                             + " Report this file as a blank/no-beam capture.",
@@ -1004,7 +1063,9 @@ def cmd_analyze(args):
         # humidity proxy (per-cycle water-cluster ratio) — always computed if any
         # humid compound is present, so it can be reported as a diagnostic
         hum_ratio = (
-            ptrms.water_cluster_ratio(f, primary_mz=primary_mz, R=R)
+            ptrms.water_cluster_ratio(
+                f, primary_mz=primary_mz, R=R, mass_axis=mass_axis
+            )
             if humid_masses
             else None
         )
@@ -1023,6 +1084,7 @@ def cmd_analyze(args):
             R_phys=R_phys,
             windows=_peak_windows(peaks) or None,
             per_range=per_range,
+            mass_axis=mass_axis,
         )
         rows, params = ptrms.quantify(
             traces,
@@ -1058,6 +1120,7 @@ def cmd_analyze(args):
                 "humidity_ref_source": sources["humidity_ref"],
                 "molar_volume_source": sources["molar_volume"],
                 "sources": sources,
+                "mass_axis_calibration": mass_axis.to_dict(),
             }
         )
 
@@ -1097,18 +1160,21 @@ def cmd_analyze(args):
         include_cycle_rows=args.include_cycle_rows,
     )
 
-    # agent-facing quality flags: peaks whose measured apex deviates from the
-    # systematic calibration drift (median apex/nominal) — a sign the peak snapped
-    # to a neighbour, is missing, or is mis-assigned. The uniform drift is expected.
+    # Peaks beyond the shared correction may have snapped to a neighbour, be absent,
+    # or be mis-assigned. On fallback, retain the legacy median-relative diagnostic.
     warn = []
     rel = np.array([apexes[m] / m for m in masses])
-    drift = float(np.median(rel))
+    drift = 1.0 if mass_axis.applied else float(np.median(rel))
     for m in masses:
-        resid = apexes[m] / m - drift
-        if abs(resid) * m > 0.03:  # residual beyond the shared drift, in Da
+        resid_da = (
+            apexes[m] - m
+            if mass_axis.applied
+            else (apexes[m] / m - drift) * m
+        )
+        if abs(resid_da) > 0.03:
             warn.append(
                 f"m{m:.3f}: apex {apexes[m]:.4f} deviates "
-                f"{resid * m:+.3f} Da beyond the run's mass drift "
+                f"{resid_da:+.3f} Da beyond the run's mass-axis correction "
                 f"(check assignment / possible peak overlap)"
             )
     note = None
@@ -1584,6 +1650,7 @@ def analyze_config_to_csv(h5_path, config, out, sep=";", include_cycle_rows=True
     peaks = config["peaks"]
     ranges_cfg = config.get("ranges") or []
     with h5py.File(h5_path, "r") as f:
+        mass_axis = ptrms.load_mass_axis(f)
         masses = [float(p["mz"]) for p in peaks]
         labels = {
             float(p["mz"]): formula_id.identity_label(
@@ -1601,7 +1668,9 @@ def analyze_config_to_csv(h5_path, config, out, sep=";", include_cycle_rows=True
             m for m, info in resolved.items() if "humid" in info.get("flags", [])
         }
         hum_ratio = (
-            ptrms.water_cluster_ratio(f, primary_mz=primary_mz, R=R)
+            ptrms.water_cluster_ratio(
+                f, primary_mz=primary_mz, R=R, mass_axis=mass_axis
+            )
             if humid_masses
             else None
         )
@@ -1622,7 +1691,13 @@ def analyze_config_to_csv(h5_path, config, out, sep=";", include_cycle_rows=True
             ranges if (ranges_cfg and settings["per_interval_windows"]) else None
         )
         traces, _ = ptrms.extract_traces(
-            f, masses, R=R, R_phys=R_phys, windows=windows or None, per_range=per_range
+            f,
+            masses,
+            R=R,
+            R_phys=R_phys,
+            windows=windows or None,
+            per_range=per_range,
+            mass_axis=mass_axis,
         )
         rows, params = ptrms.quantify(
             traces,
@@ -1657,6 +1732,7 @@ def analyze_config_to_csv(h5_path, config, out, sep=";", include_cycle_rows=True
                 "humidity_ref_source": sources["humidity_ref"],
                 "molar_volume_source": sources["molar_volume"],
                 "sources": sources,
+                "mass_axis_calibration": mass_axis.to_dict(),
             }
         )
     _write_csv(

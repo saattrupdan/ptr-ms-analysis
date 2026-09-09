@@ -24,6 +24,56 @@ _JS_NORMAL_YEAR_10000_START_S = 253402300800.0
 
 K_ANCHOR_DEFAULT = 2.0  # 1e-9 cm3/s: the single k a non-kinetic calibration assumes
 
+# Run-internal reference ions. Their centres are measured on the file's unmodified
+# timebin calibration, then define a separate affine correction in the mass domain.
+INTERNAL_MASS_ANCHORS = (
+    ("water_cluster", 37.033),
+    ("iodobenzene", 204.951),
+)
+INTERNAL_ANCHOR_SEARCH_DA = 0.20
+INTERNAL_ANCHOR_MIN_PROMINENCE = 8.0
+INTERNAL_ANCHOR_MIN_SNR = 8.0
+INTERNAL_ANCHOR_AMBIGUITY_RATIO = 0.50
+INTERNAL_MASS_SCALE_LIMIT = 0.005
+INTERNAL_MASS_OFFSET_LIMIT_DA = 0.25
+
+
+class MassAxisCalibration:
+    """File timebin calibration plus an optional affine mass-domain correction."""
+
+    def __init__(self, a, b, scale=1.0, offset=0.0, diagnostics=None):
+        self.a = float(a)
+        self.b = float(b)
+        self.scale = float(scale)
+        self.offset = float(offset)
+        self.diagnostics = diagnostics or {}
+
+    @property
+    def applied(self):
+        """Whether both internal anchors produced an accepted correction."""
+        return bool(self.diagnostics.get("applied", False))
+
+    def corrected_to_file(self, mass):
+        """Map a corrected m/z value back onto the file's baseline mass domain."""
+        return (np.asarray(mass) - self.offset) / self.scale
+
+    def file_to_corrected(self, mass):
+        """Map a baseline file m/z value onto the corrected mass domain."""
+        return self.scale * np.asarray(mass) + self.offset
+
+    def m_to_tb(self, mass):
+        """Convert corrected m/z to a file timebin."""
+        return self.a * np.sqrt(self.corrected_to_file(mass)) + self.b
+
+    def tb_to_m(self, timebin):
+        """Convert a file timebin to corrected m/z."""
+        file_mass = ((np.asarray(timebin) - self.b) / self.a) ** 2
+        return self.file_to_corrected(file_mass)
+
+    def to_dict(self):
+        """Return deterministic JSON-safe calibration provenance."""
+        return dict(self.diagnostics)
+
 
 class AnalysisCancelled(Exception):
     """Raised when a caller's ``should_stop`` callback asks for a pass to stop.
@@ -195,11 +245,265 @@ def load_mass_cal(f):
     )
 
 
-def m_to_tb(m, a, b):
+def load_mass_axis(f):
+    """Build the corrected mass axis from conservative internal-reference peaks.
+
+    The HDF5 ``a,b`` calibration remains the timebin mapping. Water-cluster and
+    iodobenzene centres are detected independently on that baseline axis; only two
+    accepted anchors enable ``m_corrected = scale*m_file + offset``. Any malformed,
+    missing, weak, ambiguous, or physically implausible result is an explicit
+    identity-correction fallback rather than a partial calibration.
+    """
+    a, b = load_mass_cal(f)
+    base = {
+        "model": "m_corrected = scale*m_file + offset",
+        "applied": False,
+        "scale": 1.0,
+        "offset_da": 0.0,
+        "fallback_reason": None,
+        "file_calibration": {
+            "model": "timebin = a*sqrt(m_file) + b",
+            "a": a,
+            "b": b,
+        },
+        "anchors": [],
+    }
+    try:
+        raw = np.asarray(f["SPECdata/AverageSpec"][:], dtype=np.float64)
+    except (KeyError, OSError, TypeError, ValueError) as exc:
+        return _mass_axis_fallback(
+            a, b, base, f"average spectrum is unavailable or malformed: {exc}"
+        )
+    if raw.ndim != 1 or raw.size < 3:
+        return _mass_axis_fallback(
+            a,
+            b,
+            base,
+            "average spectrum is malformed: expected a one-dimensional array with "
+            "at least three bins",
+        )
+    finite = np.isfinite(raw)
+    if not finite.any():
+        return _mass_axis_fallback(
+            a, b, base, "average spectrum is malformed: it has no finite bins"
+        )
+    avg = np.where(finite & (raw > 0), raw, 0.0)
+
+    anchors = [
+        _detect_internal_anchor(
+            avg=avg,
+            a=a,
+            b=b,
+            name=name,
+            target_mz=target_mz,
+        )
+        for name, target_mz in INTERNAL_MASS_ANCHORS
+    ]
+    base["anchors"] = anchors
+    failures = [anchor for anchor in anchors if anchor["status"] != "accepted"]
+    if failures:
+        reasons = "; ".join(
+            f"{anchor['name']} anchor {anchor['status']}: {anchor['reason']}"
+            for anchor in failures
+        )
+        return _mass_axis_fallback(a, b, base, reasons)
+
+    observed_lo = anchors[0]["observed_file_mz"]
+    observed_hi = anchors[1]["observed_file_mz"]
+    target_lo = anchors[0]["target_mz"]
+    target_hi = anchors[1]["target_mz"]
+    if observed_hi <= observed_lo:
+        return _mass_axis_fallback(
+            a,
+            b,
+            base,
+            "internal anchors are physically implausible: mass order reversed",
+        )
+    scale = (target_hi - target_lo) / (observed_hi - observed_lo)
+    offset = target_lo - scale * observed_lo
+    if not np.isfinite([scale, offset]).all() or scale <= 0:
+        return _mass_axis_fallback(
+            a, b, base, "internal affine correction is non-finite or non-monotonic"
+        )
+    if abs(scale - 1.0) > INTERNAL_MASS_SCALE_LIMIT:
+        return _mass_axis_fallback(
+            a,
+            b,
+            base,
+            "internal affine correction is implausible: "
+            f"scale {scale:.9f} differs from unity by more than "
+            f"{INTERNAL_MASS_SCALE_LIMIT * 100:.2f}%",
+        )
+    if abs(offset) > INTERNAL_MASS_OFFSET_LIMIT_DA:
+        return _mass_axis_fallback(
+            a,
+            b,
+            base,
+            "internal affine correction is implausible: "
+            f"offset {offset:+.6f} Da exceeds "
+            f"{INTERNAL_MASS_OFFSET_LIMIT_DA:.2f} Da",
+        )
+
+    base.update(
+        {
+            "applied": True,
+            "scale": float(scale),
+            "offset_da": float(offset),
+            "fallback_reason": None,
+        }
+    )
+    for anchor in anchors:
+        anchor["corrected_mz"] = float(
+            scale * anchor["observed_file_mz"] + offset
+        )
+    return MassAxisCalibration(a, b, scale=scale, offset=offset, diagnostics=base)
+
+
+def _mass_axis_fallback(a, b, diagnostics, reason):
+    diagnostics.update(
+        {
+            "applied": False,
+            "scale": 1.0,
+            "offset_da": 0.0,
+            "fallback_reason": reason,
+        }
+    )
+    return MassAxisCalibration(a, b, diagnostics=diagnostics)
+
+
+def _detect_internal_anchor(avg, a, b, name, target_mz):
+    tlo = max(1, int(np.floor(m_to_tb(target_mz - INTERNAL_ANCHOR_SEARCH_DA, a, b))))
+    thi = min(
+        avg.size - 2,
+        int(np.ceil(m_to_tb(target_mz + INTERNAL_ANCHOR_SEARCH_DA, a, b))),
+    )
+    result = {
+        "name": name,
+        "target_mz": float(target_mz),
+        "status": "missing",
+        "reason": "search window falls outside the recorded spectrum",
+        "observed_file_mz": None,
+        "corrected_mz": None,
+        "timebin": None,
+        "prominence": None,
+        "snr": None,
+    }
+    if thi <= tlo:
+        return result
+
+    section = avg[tlo : thi + 1]
+    maxima = np.where(
+        (section[1:-1] > section[:-2]) & (section[1:-1] >= section[2:])
+    )[0] + tlo + 1
+    if maxima.size == 0:
+        result["reason"] = (
+            f"no local maximum within +-{INTERNAL_ANCHOR_SEARCH_DA:.2f} Da"
+        )
+        return result
+
+    low = section[section <= np.percentile(section, 70.0)]
+    baseline = float(np.median(low)) if low.size else 0.0
+    mad = float(np.median(np.abs(low - baseline))) if low.size else 0.0
+    sigma = max(1.4826 * mad, np.sqrt(max(baseline, 1.0)), 1e-9)
+    fwhm_tb = max(2.0, a * np.sqrt(target_mz) / (2.0 * 2400.0))
+
+    # Multiple sampled maxima inside one physical linewidth are one peak, not
+    # competing anchors. Keep the tallest representative before ambiguity checks.
+    ordered = sorted(maxima.tolist(), key=lambda idx: float(avg[idx]), reverse=True)
+    representatives = []
+    for idx in ordered:
+        if all(abs(idx - kept) >= fwhm_tb for kept in representatives):
+            representatives.append(idx)
+
+    candidates = []
+    for idx in representatives:
+        radius = max(3, int(np.ceil(2.5 * fwhm_tb)))
+        left = avg[max(tlo, idx - radius) : idx + 1]
+        right = avg[idx : min(thi, idx + radius) + 1]
+        local_floor = max(float(left.min()), float(right.min()))
+        prominence = max(0.0, float(avg[idx]) - local_floor)
+        snr = prominence / sigma
+        candidates.append((idx, prominence, snr))
+    candidates.sort(
+        key=lambda item: (item[1], -abs(item[0] - m_to_tb(target_mz, a, b))),
+        reverse=True,
+    )
+    idx, prominence, snr = candidates[0]
+    result.update({"prominence": float(prominence), "snr": float(snr)})
+    if prominence < INTERNAL_ANCHOR_MIN_PROMINENCE or snr < INTERNAL_ANCHOR_MIN_SNR:
+        result.update(
+            {
+                "status": "weak",
+                "reason": (
+                    f"best local maximum has prominence {prominence:.2f} cps and "
+                    f"S/N {snr:.2f}; requires at least "
+                    f"{INTERNAL_ANCHOR_MIN_PROMINENCE:.1f} cps and "
+                    f"S/N {INTERNAL_ANCHOR_MIN_SNR:.1f}"
+                ),
+            }
+        )
+        return result
+    strong = [
+        item
+        for item in candidates[1:]
+        if item[1] >= INTERNAL_ANCHOR_MIN_PROMINENCE
+        and item[2] >= INTERNAL_ANCHOR_MIN_SNR
+        and item[1] >= INTERNAL_ANCHOR_AMBIGUITY_RATIO * prominence
+    ]
+    if strong:
+        result.update(
+            {
+                "status": "ambiguous",
+                "reason": (
+                    "multiple resolved maxima pass the anchor checks; the second "
+                    f"has {strong[0][1] / prominence:.0%} of the leading prominence"
+                ),
+            }
+        )
+        return result
+
+    centre_tb = _sub_bin_centre(avg, idx)
+    observed = float(tb_to_m(centre_tb, a, b))
+    if (
+        not np.isfinite(observed)
+        or abs(observed - target_mz) > INTERNAL_ANCHOR_SEARCH_DA
+    ):
+        result.update(
+            {
+                "status": "implausible",
+                "reason": "sub-bin centre lies outside the allowed search window",
+            }
+        )
+        return result
+    result.update(
+        {
+            "status": "accepted",
+            "reason": "",
+            "observed_file_mz": observed,
+            "timebin": float(centre_tb),
+        }
+    )
+    return result
+
+
+def _sub_bin_centre(spectrum, index):
+    left, centre, right = (float(x) for x in spectrum[index - 1 : index + 2])
+    curvature = left - 2.0 * centre + right
+    if curvature >= 0 or not np.isfinite(curvature):
+        return float(index)
+    delta = 0.5 * (left - right) / curvature
+    return float(index + np.clip(delta, -0.5, 0.5))
+
+
+def m_to_tb(m, a, b, mass_axis=None):
+    if mass_axis is not None:
+        return mass_axis.m_to_tb(m)
     return a * np.sqrt(m) + b
 
 
-def tb_to_m(tb, a, b):
+def tb_to_m(tb, a, b, mass_axis=None):
+    if mass_axis is not None:
+        return mass_axis.tb_to_m(tb)
     return ((tb - b) / a) ** 2
 
 
@@ -260,7 +564,9 @@ def derive_sensitivity_percycle(f, min_corrected=1000.0):
     return s
 
 
-def extract_primary(f, primary_mz=21.022, R=1200.0, block=400):
+def extract_primary(
+    f, primary_mz=21.022, R=1200.0, block=400, mass_axis=None
+):
     """Per-cycle primary-ion (reagent-ion) signal used to normalise concentration.
 
     In H3O+ mode the primary ion is monitored via its H3(18O)+ isotope at m/z ~21
@@ -271,17 +577,24 @@ def extract_primary(f, primary_mz=21.022, R=1200.0, block=400):
     if "TRACEdata/TraceRaw" in f and "TRACEdata/TraceInfo" in f:
         ti = f["TRACEdata/TraceInfo"][:]
         centers = np.array([float(ti[2, c]) for c in range(ti.shape[1])])
+        if mass_axis is None:
+            mass_axis = load_mass_axis(f)
+        centers = mass_axis.file_to_corrected(centers)
         j = int(np.argmin(np.abs(centers - primary_mz)))
         if abs(centers[j] - primary_mz) < 0.1:
             return np.asarray(f["TRACEdata/TraceRaw"][:, j], dtype=np.float64)
     try:
-        (traces, _) = extract_traces(f, [primary_mz], R=R, block=block)
+        (traces, _) = extract_traces(
+            f, [primary_mz], R=R, block=block, mass_axis=mass_axis
+        )
         return traces[primary_mz][0]
     except (IndexError, KeyError, OSError, TypeError, ValueError):
         return None
 
 
-def water_cluster_ratio(f, cluster_mz=37.028, primary_mz=21.022, R=1200.0):
+def water_cluster_ratio(
+    f, cluster_mz=37.033, primary_mz=21.022, R=1200.0, mass_axis=None
+):
     """Per-cycle humidity proxy X(t) = I(first water cluster) / I(primary isotope).
 
     The standard PTR-MS humidity measure is I(H3O+.H2O)/I(H3O+) = m/z 37 / m/z 19,
@@ -294,11 +607,13 @@ def water_cluster_ratio(f, cluster_mz=37.028, primary_mz=21.022, R=1200.0):
         if "TRACEdata/TraceRaw" in f and "TRACEdata/TraceInfo" in f:
             ti = f["TRACEdata/TraceInfo"][:]
             centers = np.array([float(ti[2, c]) for c in range(ti.shape[1])])
+            axis = mass_axis or load_mass_axis(f)
+            centers = axis.file_to_corrected(centers)
             j = int(np.argmin(np.abs(centers - mz)))
             if abs(centers[j] - mz) < 0.1:
                 return np.asarray(f["TRACEdata/TraceRaw"][:, j], dtype=np.float64)
         try:
-            return extract_traces(f, [mz], R=R)[0][mz][0]
+            return extract_traces(f, [mz], R=R, mass_axis=mass_axis)[0][mz][0]
         except (IndexError, KeyError, OSError, TypeError, ValueError):
             return None
 
@@ -373,16 +688,16 @@ def derive_molar_volume(f):
 
 
 # ---------- peak extraction ----------
-def find_apex(avgspec, a, b, target_m, tol=0.15):
-    tlo = max(0, int(m_to_tb(target_m - tol, a, b)))
-    thi = min(len(avgspec), int(m_to_tb(target_m + tol, a, b)))
+def find_apex(avgspec, a, b, target_m, tol=0.15, mass_axis=None):
+    tlo = max(0, int(m_to_tb(target_m - tol, a, b, mass_axis)))
+    thi = min(len(avgspec), int(m_to_tb(target_m + tol, a, b, mass_axis)))
     if thi <= tlo:
         return target_m, tlo, thi
     apex_tb = tlo + int(np.argmax(avgspec[tlo:thi]))
-    return tb_to_m(apex_tb, a, b), tlo, thi
+    return tb_to_m(apex_tb, a, b, mass_axis), tlo, thi
 
 
-def refine_apex_local(avgspec, a, b, apex0, tol=0.035):
+def refine_apex_local(avgspec, a, b, apex0, tol=0.035, mass_axis=None):
     """Re-centre a peak on THIS spectrum's real maximum near a known apex.
 
     Peak positions drift between time intervals (mass-cal drift; a compound may be
@@ -391,8 +706,11 @@ def refine_apex_local(avgspec, a, b, apex0, tol=0.035):
     otherwise None, meaning keep the canonical position (so a background where the
     compound is absent does NOT chase an unrelated neighbour). Mirrors the viz
     per-interval overlay exactly so the delivered CSV matches what was reviewed."""
-    lo = max(0, int(np.floor(m_to_tb(apex0 - tol, a, b))))
-    hi = min(len(avgspec) - 1, int(np.ceil(m_to_tb(apex0 + tol, a, b))))
+    lo = max(0, int(np.floor(m_to_tb(apex0 - tol, a, b, mass_axis))))
+    hi = min(
+        len(avgspec) - 1,
+        int(np.ceil(m_to_tb(apex0 + tol, a, b, mass_axis))),
+    )
     if hi - lo < 2:
         return None
     bi = lo + int(np.argmax(avgspec[lo : hi + 1]))
@@ -401,36 +719,22 @@ def refine_apex_local(avgspec, a, b, apex0, tol=0.035):
         return None
     floor = max(float(avgspec[lo]), float(avgspec[hi]))
     if bv >= 3 and bv >= 1.25 * floor:
-        return tb_to_m(bi, a, b)
+        return tb_to_m(bi, a, b, mass_axis)
     return None
 
 
-def estimate_mass_scale(avgspec, a, b, target_masses, tol=0.15):
-    """Robust global mass-scale correction (apex_m / nominal_m).
-
-    A simple 2-point calibration drifts over a long run, leaving a near-constant
-    relative offset between theoretical peak masses and measured apexes. We
-    estimate that single factor from the median over all requested peaks (robust
-    to peaks whose free apex-search jumps to a strong neighbour)."""
-    ratios = []
-    for m in target_masses:
-        apex_m, _, _ = find_apex(avgspec, a, b, m, tol)
-        ratios.append(apex_m / m)
-    return float(np.median(ratios)) if ratios else 1.0
-
-
-def peak_window(apex_m, a, b, R):
+def peak_window(apex_m, a, b, R, mass_axis=None):
     hw = apex_m / (2 * R)
-    wl = int(np.floor(m_to_tb(apex_m - hw, a, b)))
-    wr = int(np.ceil(m_to_tb(apex_m + hw, a, b)))
+    wl = int(np.floor(m_to_tb(apex_m - hw, a, b, mass_axis)))
+    wr = int(np.ceil(m_to_tb(apex_m + hw, a, b, mass_axis)))
     return wl, wr
 
 
-def peak_window_lr(apex_m, a, b, hwL, hwR):
+def peak_window_lr(apex_m, a, b, hwL, hwR, mass_axis=None):
     """Integration window from explicit left/right half-widths in m/z (per-peak,
     possibly asymmetric — the window need not be centred on the apex)."""
-    wl = int(np.floor(m_to_tb(apex_m - hwL, a, b)))
-    wr = int(np.ceil(m_to_tb(apex_m + hwR, a, b)))
+    wl = int(np.floor(m_to_tb(apex_m - hwL, a, b, mass_axis)))
+    wr = int(np.ceil(m_to_tb(apex_m + hwR, a, b, mass_axis)))
     return wl, wr
 
 
@@ -460,14 +764,27 @@ def _cluster(masses, gap=0.20):
     return groups
 
 
-def _sigma_tb(mu_m, a, R_phys):
+def _sigma_tb(mu_m, a, R_phys, mass_axis=None):
     """Gaussian sigma in timebins for a peak at mu_m given physical resolution."""
     sigma_m = mu_m / (2.3548 * R_phys)
-    dtb_dm = a / (2 * np.sqrt(mu_m))  # d(timebin)/d(m)
+    if mass_axis is None:
+        dtb_dm = a / (2 * np.sqrt(mu_m))
+    else:
+        file_mass = mass_axis.corrected_to_file(mu_m)
+        dtb_dm = a / (2 * mass_axis.scale * np.sqrt(file_mass))
     return sigma_m * dtb_dm
 
 
-def _cluster_design(centers_m, a, b, R=1200.0, R_phys=2400.0, windows=None, nbin=None):
+def _cluster_design(
+    centers_m,
+    a,
+    b,
+    R=1200.0,
+    R_phys=2400.0,
+    windows=None,
+    nbin=None,
+    mass_axis=None,
+):
     """Precompute the Gaussian-unmixing design for one cluster of overlapping peaks.
 
     Returns (tlo, thi, P, norm): the timebin span to read, the projection matrix P
@@ -476,8 +793,10 @@ def _cluster_design(centers_m, a, b, R=1200.0, R_phys=2400.0, windows=None, nbin
     out from deconvolve_cluster so many clusters can be applied in a single shared
     streaming pass (a gzip-compressed file decompresses whole rows, so a per-cluster
     pass would re-decompress the entire dataset once per cluster)."""
-    centers_tb = np.array([m_to_tb(m, a, b) for m in centers_m])
-    sig_tb = np.array([_sigma_tb(m, a, R_phys) for m in centers_m])
+    centers_tb = np.array([m_to_tb(m, a, b, mass_axis) for m in centers_m])
+    sig_tb = np.array(
+        [_sigma_tb(m, a, R_phys, mass_axis=mass_axis) for m in centers_m]
+    )
     tlo = int(np.floor(centers_tb.min() - 6 * sig_tb.max()))
     thi = int(np.ceil(centers_tb.max() + 6 * sig_tb.max()))
     tlo = max(0, tlo)
@@ -491,22 +810,40 @@ def _cluster_design(centers_m, a, b, R=1200.0, R_phys=2400.0, windows=None, nbin
     norm = np.zeros(len(centers_m))
     for k, m in enumerate(centers_m):
         hwL, hwR = _hw_for(m, m, R, windows)
-        wl, wr = peak_window_lr(m, a, b, hwL, hwR)
+        wl, wr = peak_window_lr(m, a, b, hwL, hwR, mass_axis)
         xx = np.arange(wl, wr)
         norm[k] = np.exp(-0.5 * ((xx - centers_tb[k]) / sig_tb[k]) ** 2).sum()
     return tlo, thi, P, norm
 
 
 def deconvolve_cluster(
-    f, centers_m, a, b, R=1200.0, R_phys=2400.0, block=400, windows=None
+    f,
+    centers_m,
+    a,
+    b,
+    R=1200.0,
+    R_phys=2400.0,
+    block=400,
+    windows=None,
+    mass_axis=None,
 ):
     """Separate overlapping peaks by vectorised linear least-squares Gaussian
     unmixing. Returns dict center_m -> raw_trace (scaled to match the window-sum
     definition so isolated and deconvolved peaks share one Raw scale)."""
+    if mass_axis is None:
+        mass_axis = load_mass_axis(f)
+    a, b = mass_axis.a, mass_axis.b
     inten = f["SPECdata/Intensities"]
     ncyc = inten.shape[0]
     tlo, thi, P, norm = _cluster_design(
-        centers_m, a, b, R, R_phys, windows, nbin=inten.shape[1]
+        centers_m,
+        a,
+        b,
+        R,
+        R_phys,
+        windows,
+        nbin=inten.shape[1],
+        mass_axis=mass_axis,
     )
     traces = np.empty((ncyc, len(centers_m)))
     for i in range(0, ncyc, block):
@@ -531,15 +868,17 @@ def extract_traces(
     per_range=None,
     range_refine_tol=0.035,
     *,
+    mass_axis=None,
     progress=None,
     should_stop=None,
 ):
     """Return dict m -> (raw_trace[ncycles], apex_m). One streaming pass.
 
-    Peak centring is two-stage: (1) a robust global mass-scale correction aligns
-    theoretical masses to measured apexes; (2) a tight local apex search
-    (+-refine_tol) around the corrected position snaps to the exact peak without
-    jumping to a close neighbour. This lets closely-spaced peaks be resolved.
+    Peak centring is two-stage: (1) the run's accepted two-anchor affine mass-axis
+    correction aligns every timebin, independently of the selected panel; (2) a tight
+    local apex search (+-refine_tol) around the corrected position snaps isolated
+    peaks to their exact centres. This lets closely-spaced peaks be resolved without
+    applying the former target-panel-derived multiplicative drift a second time.
 
     windows: optional {target_mass: half_width_m} to override the R-derived
     integration window for specific peaks (from an expert's viz adjustment).
@@ -559,41 +898,37 @@ def extract_traces(
     should_stop: optional callback polled once per block in both passes; when it
     returns true the pass raises AnalysisCancelled. Both default to None, which
     changes nothing — no arithmetic and no ordering depends on them."""
-    a, b = load_mass_cal(f)
+    if mass_axis is None:
+        mass_axis = load_mass_axis(f)
+    a, b = mass_axis.a, mass_axis.b
     inten = f["SPECdata/Intensities"]
     ncyc = inten.shape[0]
     avg = np.asarray(f["SPECdata/AverageSpec"][:], dtype=np.float64)
     avg = np.where(np.isfinite(avg), avg, 0.0)  # tolerate rare corrupt bins
     nbin = avg.shape[0]
 
-    scale = estimate_mass_scale(avg, a, b, target_masses)
+    # The run-wide correction is already encoded in ``mass_axis``. Applying the
+    # old target-panel-derived multiplicative drift here as well would scale the
+    # axis twice and make the result depend on which compounds were selected.
 
     # isolated peaks -> window-sum; clustered peaks -> Gaussian deconvolution
     groups = _cluster(target_masses, gap=cluster_gap)
     isolated = [g[0] for g in groups if len(g) == 1]
     clusters = [g for g in groups if len(g) > 1]
 
-    # Isolated peaks: free apex search corrects any residual per-peak offset.
-    # Search the UNION of the nominal and scale-corrected positions, not just a
-    # tight window around the scaled one. The global scale is fit mostly from
-    # low/mid-mass peaks and, being multiplicative, over-extrapolates at high m/z
-    # (e.g. a +0.076% scale = +0.25 Da at m/z 331) — so a tight search around the
-    # scaled position lands off a high-mass peak. It is also wrong when the config
-    # mass is already the measured apex (unknowns), where no correction is due.
-    # Spanning both positions recovers the true apex in every case; isolated peaks
-    # are >= cluster_gap from any configured neighbour, so the widened search is
-    # safe and simply snaps to the strongest local maximum.
-    # Clustered peaks: use the robust scale-corrected theoretical position, since
-    # a free apex search would drift onto the dominant neighbour.
+    # Isolated peaks retain a tight local snap after the shared axis correction.
+    # On fallback, use the legacy broad search so a valid but drifted file remains
+    # quantifiable. Clustered model centres always stay on the common mass axis.
     apexes = {}
+    search_tol = refine_tol if mass_axis.applied else max(0.15, refine_tol)
     for m in isolated:
-        lo = min(m, m * scale) - refine_tol
-        hi = max(m, m * scale) + refine_tol
-        apex_m, _, _ = find_apex(avg, a, b, 0.5 * (lo + hi), tol=0.5 * (hi - lo))
+        apex_m, _, _ = find_apex(
+            avg, a, b, m, tol=search_tol, mass_axis=mass_axis
+        )
         apexes[m] = apex_m
     for g in clusters:
         for m in g:
-            apexes[m] = m * scale
+            apexes[m] = m
 
     # per-range average-spectrum accumulators, filled during the isolated pass so
     # interval re-centring costs no extra read of the whole run
@@ -612,7 +947,13 @@ def extract_traces(
     # of full-file decompression passes into a single pass (the dominant cost on
     # dense breath spectra: ~15 clusters was ~15x slower).
     win_tb = {
-        m: peak_window_lr(apexes[m], a, b, *_hw_for(m, apexes[m], R, windows))
+        m: peak_window_lr(
+            apexes[m],
+            a,
+            b,
+            *_hw_for(m, apexes[m], R, windows),
+            mass_axis=mass_axis,
+        )
         for m in isolated
     }
     iso_buf = {m: np.empty(ncyc) for m in isolated}
@@ -621,7 +962,16 @@ def extract_traces(
     for g, caps in zip(clusters, cluster_apex):
         apex_hw = {ap: _hw_for(m, ap, R, windows) for m, ap in zip(g, caps)}
         cluster_design.append(
-            _cluster_design(caps, a, b, R, R_phys, apex_hw, nbin=nbin)
+            _cluster_design(
+                caps,
+                a,
+                b,
+                R,
+                R_phys,
+                apex_hw,
+                nbin=nbin,
+                mass_axis=mass_axis,
+            )
         )
     cluster_buf = [np.empty((ncyc, len(g))) for g in clusters]
 
@@ -673,10 +1023,23 @@ def extract_traces(
         for m in isolated:
             if windows and m in windows:
                 continue  # hand-placed window: keep it everywhere (matches viz winManual)
-            ap = refine_apex_local(avg_r, a, b, apexes[m], tol=range_refine_tol)
+            ap = refine_apex_local(
+                avg_r,
+                a,
+                b,
+                apexes[m],
+                tol=range_refine_tol,
+                mass_axis=mass_axis,
+            )
             if ap is None:
                 continue  # no clear interval peak -> keep whole-run window
-            rwin[m] = peak_window_lr(ap, a, b, *_hw_for(m, ap, R, windows))
+            rwin[m] = peak_window_lr(
+                ap,
+                a,
+                b,
+                *_hw_for(m, ap, R, windows),
+                mass_axis=mass_axis,
+            )
         if not rwin:
             continue
         for i in range(lo - 1, hi, block):
@@ -717,7 +1080,9 @@ MERGE_REASON_ADJACENT = "adjacent"
 MERGE_REASON_LENGTH = "length only"
 
 
-def build_discriminator(f, mz_lo=40.0, mz_hi=200.0, block=400):
+def build_discriminator(
+    f, mz_lo=40.0, mz_hi=200.0, block=400, mass_axis=None
+):
     """Per-cycle composite VOC signal, ~1 at background and high during samples.
 
     Fast path uses the pre-computed TraceRaw (normalising each strong VOC trace to
@@ -726,6 +1091,9 @@ def build_discriminator(f, mz_lo=40.0, mz_hi=200.0, block=400):
     if "TRACEdata/TraceRaw" in f and "TRACEdata/TraceInfo" in f:
         ti = f["TRACEdata/TraceInfo"][:]
         centers = np.array([float(ti[2, c]) for c in range(ti.shape[1])])
+        if mass_axis is None:
+            mass_axis = load_mass_axis(f)
+        centers = mass_axis.file_to_corrected(centers)
         band = np.where((centers >= mz_lo) & (centers <= mz_hi))[0]
         R = np.asarray(f["TRACEdata/TraceRaw"][:, band], dtype=np.float64)
         med = np.median(R, axis=0)
@@ -736,11 +1104,13 @@ def build_discriminator(f, mz_lo=40.0, mz_hi=200.0, block=400):
                 Rs = R[:, strong] / med[strong]
                 return Rs.mean(axis=1)
     # fallback: total ion current in a VOC timebin band, streamed
-    a, b = load_mass_cal(f)
+    if mass_axis is None:
+        mass_axis = load_mass_axis(f)
+    a, b = mass_axis.a, mass_axis.b
     inten = f["SPECdata/Intensities"]
     ncyc = inten.shape[0]
-    tlo = max(0, int(m_to_tb(mz_lo, a, b)))
-    thi = min(inten.shape[1], int(m_to_tb(mz_hi, a, b)))
+    tlo = max(0, int(m_to_tb(mz_lo, a, b, mass_axis)))
+    thi = min(inten.shape[1], int(m_to_tb(mz_hi, a, b, mass_axis)))
     tic = np.empty(ncyc)
     for i in range(0, ncyc, block):
         j = min(i + block, ncyc)
