@@ -218,7 +218,15 @@ def build_viz_data(
                 if str(r["label"]).lower().startswith("background")
                 else "sample"
             )
-        ranges.append({"label": r["label"], "start": lo, "end": hi, "class": cls})
+        ranges.append(
+            {
+                "_config_original": dict(r),
+                "label": r["label"],
+                "start": lo,
+                "end": hi,
+                "class": cls,
+            }
+        )
 
     masses = [float(p["mz"]) for p in peaks_cfg]
 
@@ -333,6 +341,10 @@ def build_viz_data(
         name = formula_id.identity_label(p.get("label"), p.get("formula"))
         peaks.append(
             {
+                # Keep the authored object separate from preview-only fields. The
+                # browser merges it back on save so migrations and future schema keys
+                # survive a review round-trip.
+                "_config_original": dict(p),
                 "id": idx,
                 "mz": round(m, 4),
                 "apex": round(apex, 4),
@@ -347,7 +359,9 @@ def build_viz_data(
                 "formula": p.get("formula", ""),
                 # which sample intervals this compound is part of; null means every
                 # sample interval, which is what pre-sample-specific configs meant
-                "samples": list(p["samples"]) if isinstance(p.get("samples"), list) else None,
+                "samples": list(p["samples"])
+                if isinstance(p.get("samples"), list)
+                else None,
                 "k": p.get("k") if p.get("k") is not None else info.get("k"),
                 "k_estimated": (
                     bool(p.get("k_estimated"))
@@ -1177,7 +1191,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <li><b>Single sensitivity K</b> unless per-compound kinetic mode is on; the shared-K assumption is only exact for compounds with similar reaction rate constants.</li>
     <li><b>No fragmentation correction</b> — each peak is treated as a parent ion. Compounds that fragment (flagged where known) spread signal across masses that this tool does not recombine.</li>
     <li><b>Humidity dependence</b> is an optional, empirical normalisation, not a full ion-chemistry model; leave it off unless you have reason to apply it.</li>
-    <li><b>Mass-axis correction needs both internal references</b> — if either water-cluster or iodobenzene is absent, weak or ambiguous, Sniff deliberately retains the file calibration rather than extrapolating from one point.</li>
+    <li><b>Mass-axis correction needs both internal references</b> — if either water-cluster or iodobenzene is absent, weak, ambiguous or not persistent across raw cycles, Sniff stops with structured diagnostics rather than retaining an unsafe file calibration.</li>
     <li><b>Identification is a ranking, not proof</b>: candidate percentages are relative score/share, not calibrated identification confidence; unresolved overlaps are flagged and the expert makes the final call.</li>
   </ul>
 
@@ -2258,14 +2272,20 @@ function jumpToInterval(r){ const pad=Math.max(8,(r.end-r.start)*0.6);
 // ---- config / save ----
 function buildConfig(){ return {
   ...DATA.config_base,
-  peaks: peaks.filter(p=>p.use).map(p=>{ const o={mz:p.mz,   // a stand-in name is display only
+  peaks: peaks.filter(p=>p.use).map(p=>{ const o={...(p._config_original||{}), mz:p.mz,
       label:(p.labelAuto!==undefined && p.label===p.labelAuto) ? "" : p.label};
-    if(p.formula)o.formula=p.formula; if(p.k){o.k=p.k; o.k_estimated=!!p.k_estimated;}
+    delete o._config_original; delete o.id; delete o.use;
+    if(p.formula)o.formula=p.formula; else delete o.formula;
+    if(p.k!=null && p.k!==""){o.k=p.k; o.k_estimated=!!p.k_estimated;}
+    else { delete o.k; delete o.k_estimated; }
     const k=sampleLabels(), sel=selectedSamples(p);   // all samples is the implicit default, as in older configs
-    if(sel.length<k.length) o.samples=sel.slice();
+    if(sel.length<k.length) o.samples=sel.slice(); else delete o.samples;
     if(p.winManual){ if(Math.abs(p.winL-p.winR)<1e-6) o.window=+(p.winL*2).toFixed(5);
-      else o.window={left:+p.winL.toFixed(5),right:+p.winR.toFixed(5)}; } return o; }),
-  ranges: ranges.map(r=>({label:r.label,start:r.start,end:r.end,unit:"cycle"})),
+      else o.window={left:+p.winL.toFixed(5),right:+p.winR.toFixed(5)}; }
+    else delete o.window;
+    return o; }),
+  ranges: ranges.map(r=>({...(r._config_original||{}), label:r.label,start:r.start,end:r.end,
+    unit:"cycle", class:r.class})),
   viz:{ ...((DATA.config_base||{}).viz||{}), x_axis_unit:xAxisUnit, peak_order:peakOrder,
     show_disc:showDisc },
   analyze:{ ...((DATA.config_base||{}).analyze||{}), R:cfg.R, R_phys:cfg.Rphys,
@@ -2575,7 +2595,7 @@ function updateMethods(){
   const htmlText=s=>String(s).replace(/[&<>\"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
   const massAxis=mc.applied
     ? `applied; scale = ${Number(mc.scale).toFixed(9)}, offset = ${Number(mc.offset_da).toFixed(6)} Da; both internal anchors passed`
-    : `identity fallback; ${htmlText(mc.fallback_reason||"internal anchors did not pass")}`;
+    : `calibration unavailable; ${htmlText(mc.fallback_reason||"internal calibration did not pass")}`;
   live.innerHTML=staleHtml(stale)+`
     <h3>Effective settings</h3>
     <p><b>Mass axis:</b> ${massAxis}. The HDF5 a,b timebin mapping remains unchanged.</p>

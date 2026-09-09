@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Calibration and review round-trips now fail closed and preserve provenance.** Raw
+  cycle persistence is mandatory for both internal anchors, caller-supplied axes must
+  be applied internal calibrations, and browser saves retain authored peak/range fields
+  while updating only the fields edited in the review.
 - **The Sniff mark now has a clear PTR-MS silhouette.** A quiet baseline and one narrow
   peak sit beneath a warm, friendly nose profile with nostril and breath detail. The
   same artwork is used by the compact web marks, hero, Dock icon and Windows icon, with

@@ -13,6 +13,19 @@ def identity_mass_axis(a=10.0, b=1.0):
             "applied": True,
             "scale": 1.0,
             "offset_da": 0.0,
-            "anchors": [],
+            "anchors": [
+                {
+                    "name": "water_cluster",
+                    "target_mz": 37.033,
+                    "status": "accepted",
+                    "persistence": {"available": True, "accepted_blocks": 8},
+                },
+                {
+                    "name": "iodobenzene",
+                    "target_mz": 204.951,
+                    "status": "accepted",
+                    "persistence": {"available": True, "accepted_blocks": 8},
+                },
+            ],
         },
     )

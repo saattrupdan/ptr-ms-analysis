@@ -197,6 +197,8 @@ def detect_peaks(
     bins (rare file corruption) are treated as zero rather than poisoning amax."""
     if mass_axis is None:
         mass_axis = ptrms.load_mass_axis(f)
+    else:
+        ptrms.validate_mass_axis(mass_axis)
     a, b = mass_axis.a, mass_axis.b
     avg = np.asarray(f["SPECdata/AverageSpec"][:], dtype=np.float64)
     avg = np.where(np.isfinite(avg), avg, 0.0)
@@ -276,6 +278,8 @@ def assess_signal(f, avg=None, a=None, b=None, mass_axis=None):
     sigma = 1.4826 * mad if mad > 0 else (float(finite.std()) or 1e-9)
     if mass_axis is None:
         mass_axis = ptrms.load_mass_axis(f)
+    if mass_axis is not None:
+        ptrms.validate_mass_axis(mass_axis)
     if a is None:
         a, b = mass_axis.a, mass_axis.b
 
@@ -392,13 +396,14 @@ def annotate_peaks(
     spectrum; without them the ranking falls back to mass + plausibility only.
 
     Returns (drift, annotated_peaks). On an accepted affine mass axis, `drift` is
-    exactly 1 because the correction has already moved every peak; on file-axis
-    fallback it retains the legacy library-derived multiplicative estimate. Each
-    candidate's `delta_mDa` is the exact-mass residual after that handling, plus
+    exactly 1 because the correction has already moved every peak. Each candidate's
+    `delta_mDa` is the exact-mass residual after that handling, plus
     predicted/observed isotope ratios and a normalised candidate score/share
     (`probability`). It is not a
     calibrated identification probability; conservative assignment gates below
     deliberately require multiple candidates."""
+    if mass_axis is not None:
+        ptrms.validate_mass_axis(mass_axis)
     tbl = ptrms.load_rate_constants()
     comps = tbl["compounds"] if tbl else []
     ratios = []
@@ -1056,9 +1061,7 @@ def cmd_analyze(args):
             )
         masses = [float(p["mz"]) for p in peaks]
         labels = {
-            float(p["mz"]): formula_id.identity_label(
-                p.get("label"), p.get("formula")
-            )
+            float(p["mz"]): formula_id.identity_label(p.get("label"), p.get("formula"))
             for p in peaks
         }
         ranges = _resolve_ranges(f, _load_ranges(args, f))
@@ -1676,9 +1679,7 @@ def analyze_config_to_csv(h5_path, config, out, sep=";", include_cycle_rows=True
         ranges_cfg = config.get("ranges") or []
         masses = [float(p["mz"]) for p in peaks]
         labels = {
-            float(p["mz"]): formula_id.identity_label(
-                p.get("label"), p.get("formula")
-            )
+            float(p["mz"]): formula_id.identity_label(p.get("label"), p.get("formula"))
             for p in peaks
         }
         ranges = _resolve_ranges(f, ranges_cfg)
