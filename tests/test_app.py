@@ -17,8 +17,17 @@ from unittest import mock
 import h5py
 import numpy as np
 import pytest
+from calibration_helpers import identity_mass_axis
 
 from sniff import app, viz
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_files_have_explicit_calibration():
+    with mock.patch.object(
+        app.ptrms, "load_mass_axis", return_value=identity_mass_axis()
+    ):
+        yield
 
 
 def make_h5(path, *, cycles=4, mz_count=8, signal=True):
@@ -435,9 +444,17 @@ def test_save_rejects_a_body_that_is_not_a_config(server, tmp_path):
     code, _ = api.post("/save", {"nothing": True})
     assert code == 400
     code, _ = api.post("/save", {"peaks": [{"mz": 1.0}]})
+    assert code == 400
+    valid = {
+        "peaks": [{"mz": 1.0}],
+        "ranges": [],
+        "mass_axis_domain": "corrected",
+        "mass_axis_version": 1,
+    }
+    code, _ = api.post("/save", valid)
     assert code == 200
     on_disk = json.loads((tmp_path / "run.json").read_text(encoding="utf-8"))
-    assert on_disk["peaks"] == [{"mz": 1.0}]
+    assert on_disk["peaks"] == valid["peaks"]
 
 
 def test_open_reports_a_missing_file_without_touching_the_session(server):
@@ -571,7 +588,12 @@ def test_export_uses_the_config_the_page_posted(server, tmp_path):
         Path(out).write_text("compound\n", encoding="utf-8")
         return {"n_rows": 0}
 
-    edited = {"peaks": [{"mz": 99.0, "label": "edited by the reviewer"}], "ranges": []}
+    edited = {
+        "peaks": [{"mz": 99.0, "label": "edited by the reviewer"}],
+        "ranges": [],
+        "mass_axis_domain": "corrected",
+        "mass_axis_version": 1,
+    }
     with mock.patch.object(app, "analyze_config_to_csv", side_effect=fake_analysis):
         code, _ = api.post("/export", edited)
         assert code == 202

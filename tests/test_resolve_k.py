@@ -15,7 +15,7 @@ import numpy as np
 
 analyze = importlib.import_module("sniff.analyze")
 ptrms = importlib.import_module("sniff.ptrms")
-
+from calibration_helpers import identity_mass_axis
 
 RATE_TABLE = {
     "compounds": [
@@ -199,6 +199,9 @@ class HumidityDiagnosticTest(unittest.TestCase):
                 ),
                 mock.patch.object(analyze.ptrms, "quantify", return_value=([], params)),
                 mock.patch.object(analyze, "_write_csv"),
+                mock.patch.object(
+                    analyze.ptrms, "load_mass_axis", return_value=identity_mass_axis()
+                ),
                 redirect_stdout(output),
             ):
                 analyze.cmd_analyze(args)
@@ -207,7 +210,7 @@ class HumidityDiagnosticTest(unittest.TestCase):
         self.assertEqual(payload["humidity"]["humid_compounds"], ["29.039"])
         self.assertEqual(payload["kinetic"]["resolved"]["29.039"]["source"], "explicit")
         self.assertIn("humidity_warning", payload["kinetic"])
-        self.assertFalse(payload["params"]["mass_axis_calibration"]["applied"])
+        self.assertTrue(payload["params"]["mass_axis_calibration"]["applied"])
 
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@ import unittest
 from argparse import Namespace
 from unittest import mock
 
+from calibration_helpers import identity_mass_axis
+
 from sniff import analyze
 
 _KEYS = {
@@ -108,6 +110,9 @@ class AnalysisSettingsTest(unittest.TestCase):
                 analyze, "_resolve_ranges", return_value={"sample": (1, 2)}
             ),
             mock.patch.object(analyze.h5py, "File", return_value=fake_file),
+            mock.patch.object(
+                analyze.ptrms, "load_mass_axis", return_value=identity_mass_axis()
+            ),
             mock.patch.object(
                 analyze.ptrms, "extract_traces", return_value=({30.0: ([], 30.0)}, None)
             ) as extract,

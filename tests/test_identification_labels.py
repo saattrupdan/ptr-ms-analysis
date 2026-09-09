@@ -17,6 +17,7 @@ from unittest import mock
 
 import h5py
 import numpy as np
+from calibration_helpers import identity_mass_axis
 
 from sniff import formula_id, ptrms, viz
 
@@ -79,7 +80,9 @@ def _payload(peaks_cfg, candidates=None):
         h5.create_dataset("SPECdata/Intensities", data=np.zeros((2, 5)))
         h5.create_dataset("SPECdata/AverageSpec", data=np.ones(5))
         with (
-            mock.patch.object(ptrms, "load_mass_cal", return_value=(10.0, 1.0)),
+            mock.patch.object(
+                ptrms, "load_mass_axis", return_value=identity_mass_axis()
+            ),
             mock.patch.object(
                 ptrms,
                 "load_transmission",
