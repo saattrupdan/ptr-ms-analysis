@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-10
+
 ### Fixed
 
 - **Review edits now survive immediate closes and app restarts.** Autosave flushes the
