@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Reopening an unchanged H5 in the app now reuses the fully validated mass-axis
+  calibration stored in its config. A versioned file-identity fingerprint prevents a
+  changed, replaced or copied H5 from inheriting stale calibration evidence; uncertain
+  and legacy cases still recalibrate. The opening stage now distinguishes loading H5
+  data for a saved review from computing data for a new one.
 - Removed the browser review checklist. New configs no longer generate checklist data,
   and older top-level or nested checklist fields are discarded while unrelated config
   fields are preserved.

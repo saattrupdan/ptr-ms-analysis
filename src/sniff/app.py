@@ -13,6 +13,7 @@ call is to an agent endpoint the user supplied.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -80,6 +81,8 @@ ACTIVE_PATH = _active_path()
 ONBOARDING_PATH = _onboarding_path()
 LEGACY_RECENT_PATH = Path.home() / ".ptr-ms" / "recent.json"
 RECENT_LIMIT = 20
+MASS_AXIS_FINGERPRINT_VERSION = 1
+_MASS_AXIS_CACHE_FIELDS = ("mass_axis_calibration", "mass_axis_h5_fingerprint")
 
 # Where an open's phases sit on its progress axis, measured on the real 2 GB /
 # 20,725-cycle fixture rather than guessed: opening the h5 file and reading its
@@ -126,6 +129,76 @@ def _config_key(config) -> str:
     return json.dumps(config, sort_keys=True, separators=(",", ":"))
 
 
+def _h5_fingerprint(path: Path):
+    """Return a cheap identity for deciding whether saved calibration is reusable.
+
+    Stable filesystem identity and timestamps catch normal edits and replacements. A
+    bounded content sample keeps the check useful on filesystems that report no inode,
+    without hashing a multi-gigabyte measurement on every open.
+    """
+    stat = path.stat()
+    if not path.is_file():
+        return None
+    sample_size = 64 * 1024
+    offsets = sorted(
+        {
+            0,
+            max(0, stat.st_size // 2 - sample_size // 2),
+            max(0, stat.st_size - sample_size),
+        }
+    )
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for offset in offsets:
+            handle.seek(offset)
+            digest.update(handle.read(sample_size))
+    return {
+        "version": MASS_AXIS_FINGERPRINT_VERSION,
+        "path": os.path.normcase(str(path.resolve())),
+        "device": int(stat.st_dev),
+        "inode": int(stat.st_ino),
+        "size": int(stat.st_size),
+        "mtime_ns": int(stat.st_mtime_ns),
+        "ctime_ns": int(stat.st_ctime_ns),
+        "sample_sha256": digest.hexdigest(),
+    }
+
+
+def _h5_still_matches(path: Path, fingerprint) -> bool:
+    """Check that an H5 still has its complete opening fingerprint."""
+    if fingerprint is None:
+        return False
+    try:
+        return _h5_fingerprint(path) == fingerprint
+    except OSError:
+        return False
+
+
+def _cached_mass_axis(config, fingerprint):
+    """Return a fully validated saved axis only for the unchanged source H5."""
+    if (
+        fingerprint is None
+        or not _valid_config(config, require_mass_axis=True)
+        or config.get("mass_axis_h5_fingerprint") != fingerprint
+    ):
+        return None
+    try:
+        return ptrms.mass_axis_from_dict(config.get("mass_axis_calibration"))
+    except ptrms.MassCalibrationError:
+        return None
+
+
+def _with_mass_axis_cache(config, mass_axis, fingerprint):
+    """Attach server-owned calibration evidence and its source identity."""
+    result = dict(config)
+    result["mass_axis_calibration"] = mass_axis.to_dict()
+    if fingerprint is None:
+        result.pop("mass_axis_h5_fingerprint", None)
+    else:
+        result["mass_axis_h5_fingerprint"] = fingerprint
+    return result
+
+
 def _scrub_retired_review_fields(config):
     """Remove the retired checklist fields without discarding unknown config data."""
     cleaned = dict(config)
@@ -144,26 +217,74 @@ def _scrub_retired_review_fields(config):
 
 
 def _write_json(path: Path, value) -> None:
-    """Durably replace a JSON file without exposing a partial write.
-
-    A private temporary name prevents concurrent review tabs from publishing one
-    another's bytes. Flushing it before the atomic replace means a successful save has
-    reached the filesystem before the app reports it, including across a laptop
-    shutdown immediately afterwards.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    """Durably replace a JSON file without exposing a partial write."""
+    tmp = _stage_json(path, value)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(value, handle, indent=2)
-            handle.flush()
-            os.fsync(handle.fileno())
         os.replace(tmp, path)
     finally:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
+        _remove_staged_json(tmp)
+
+
+def _write_json_for_source(path: Path, value, source: Path, fingerprint) -> bool:
+    """Publish JSON only while its source H5 retains the opening fingerprint."""
+    previous = path.read_bytes() if path.exists() else None
+    tmp = _stage_json(path, value)
+    try:
+        if not _h5_still_matches(source, fingerprint):
+            return False
+        os.replace(tmp, path)
+        if _h5_still_matches(source, fingerprint):
+            return True
+        if previous is None:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+        else:
+            _write_bytes(path, previous)
+        return False
+    finally:
+        _remove_staged_json(tmp)
+
+
+def _stage_json(path: Path, value) -> Path:
+    """Write and flush JSON to a private file ready for atomic publication."""
+    return _stage_bytes(path, json.dumps(value, indent=2).encode("utf-8"))
+
+
+def _write_bytes(path: Path, value: bytes) -> None:
+    """Durably replace a file with already serialised bytes."""
+    tmp = _stage_bytes(path, value)
+    try:
+        os.replace(tmp, path)
+    finally:
+        _remove_staged_json(tmp)
+
+
+def _stage_bytes(path: Path, value: bytes) -> Path:
+    """Write and flush bytes to a private file beside their destination."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, raw_tmp = tempfile.mkstemp(
+        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
+    )
+    tmp = Path(raw_tmp)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(value)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        _remove_staged_json(tmp)
+        raise
+    return tmp
+
+
+def _remove_staged_json(path: Path) -> None:
+    """Remove a private staged file if it has not already been published."""
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def _replace_from(tmp, target: Path) -> None:
@@ -495,26 +616,38 @@ class Session:
             self.agent_status = None
             self.export_result = None
             path = str(Path(path).expanduser().resolve())
+            source_path = Path(path)
             config_path = config_path_for(path)
-            self._file = h5py.File(path, "r")
-            self._say(P_META)
-            # Calibration is a gate: an old config must never be migrated before
-            # both run-internal anchors have been proved.
-            self.stage = "Calibrating the mass axis"
-            mass_axis = ptrms.load_mass_axis(
-                self._file,
-                progress=self._band(P_META, P_CAL),
-                should_stop=self._cancel.is_set,
-            )
-            self._say(P_CAL)
             config = _read_json(config_path) if config_path.exists() else None
             if config is not None and not _valid_config(config):
                 raise ValueError(f"{config_path} is not a sniff config")
+            saved_review = config is not None
+            fingerprint = _h5_fingerprint(source_path)
+            self._file = h5py.File(path, "r")
+            self._say(P_META)
+
+            # A current config may reuse the complete, validated anchor evidence only
+            # while it remains tied to the same unchanged H5. Legacy configs still
+            # require fresh calibration before any stored masses can be migrated.
+            config_needs_write = False
             if config is not None:
-                config, migrated = ptrms.migrate_config_mass_axis(config, mass_axis)
-                config, retired_fields_removed = _scrub_retired_review_fields(config)
-                if migrated or retired_fields_removed:
-                    _write_json(config_path, config)
+                config, config_needs_write = _scrub_retired_review_fields(config)
+            mass_axis = _cached_mass_axis(config, fingerprint)
+            if mass_axis is None:
+                self.stage = "Calibrating the mass axis"
+                mass_axis = ptrms.load_mass_axis(
+                    self._file,
+                    progress=self._band(P_META, P_CAL),
+                    should_stop=self._cancel.is_set,
+                )
+                if not _h5_still_matches(source_path, fingerprint):
+                    raise RuntimeError("the H5 file changed while it was being opened")
+                if config is not None:
+                    config, _ = ptrms.migrate_config_mass_axis(config, mass_axis)
+                    config = _with_mass_axis_cache(config, mass_axis, fingerprint)
+                    config_needs_write = True
+            self._say(P_CAL)
+
             prep_start = P_CAL
             if config is None:
                 self.stage = "Detecting peaks and intervals"
@@ -526,14 +659,17 @@ class Session:
                     should_stop=self._cancel.is_set,
                 )
                 self._halt()  # a cancel must not leave a half-made config on disk
-                _write_json(config_path, config)
+                config = _with_mass_axis_cache(config, mass_axis, fingerprint)
+                config_needs_write = True
                 if agent_url:
-                    config = self._ask_agent(
-                        config, path, config_path, agent_url, agent_timeout
-                    )
+                    config = self._ask_agent(config, path, agent_url, agent_timeout)
                     self._halt()
                 prep_start = P_DETECT
-            self.stage = "Computing the review data"
+            self.stage = (
+                "Loading H5 data for the saved review"
+                if saved_review
+                else "Computing data for a new review"
+            )
             payload = self._payload(
                 path,
                 config,
@@ -541,6 +677,12 @@ class Session:
                 progress=self._build_sink(prep_start),
                 should_stop=self._cancel.is_set,
             )
+            if not _h5_still_matches(source_path, fingerprint):
+                raise RuntimeError("the H5 file changed while it was being opened")
+            if config_needs_write and not _write_json_for_source(
+                config_path, config, source_path, fingerprint
+            ):
+                raise RuntimeError("the H5 file changed while it was being opened")
             with self._save_lock:
                 self.path, self.config_path, self.config = path, config_path, config
                 self.payload = payload
@@ -583,7 +725,7 @@ class Session:
                 self._opening = False
             self.progress = None
 
-    def _ask_agent(self, config, path, config_path, agent_url, agent_timeout):
+    def _ask_agent(self, config, path, agent_url, agent_timeout):
         """Let an attached agent post-process the automatic config. Its answer is a
         convenience: any failure at all leaves the deterministic config in place,
         because the alternative is losing the pipeline's work over one bad request."""
@@ -630,8 +772,10 @@ class Session:
         ):
             self.agent_status = "Agent review failed — unsupported mass axis marker."
             return config
+        for key in _MASS_AXIS_CACHE_FIELDS:
+            if key in config:
+                answer[key] = config[key]
         self.agent_status = "Agent review applied."
-        _write_json(config_path, answer)
         return answer
 
     def _payload(
@@ -704,6 +848,9 @@ class Session:
         ):
             return False
         config, _ = _scrub_retired_review_fields(config)
+        for key in _MASS_AXIS_CACHE_FIELDS:
+            if key in self.config:
+                config[key] = self.config[key]
         _write_json(self.config_path, config)
         self.config = config
         if version is not None:

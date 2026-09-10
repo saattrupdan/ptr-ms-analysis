@@ -165,7 +165,41 @@ def test_legacy_product_config_is_recognised_without_clobbering_neighbours(tmp_p
     }
 
 
-def test_open_calibrates_once_for_new_and_existing_configs(tmp_path):
+def test_open_reuses_calibration_for_the_same_unchanged_h5(tmp_path):
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    session = app.Session()
+    stages = []
+
+    def observed_payload(f, peaks, ranges, **kwargs):
+        stages.append(session.stage)
+        return payload_stub(f, peaks, ranges, **kwargs)
+
+    with (
+        mock.patch.object(
+            app.ptrms, "load_mass_axis", return_value=identity_mass_axis()
+        ) as load_axis,
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", observed_payload),
+    ):
+        session.open(str(h5))
+        assert load_axis.call_count == 1
+        saved = json.loads((tmp_path / "run.json").read_text(encoding="utf-8"))
+        assert saved["mass_axis_calibration"]["applied"] is True
+        assert saved["mass_axis_h5_fingerprint"] == app._h5_fingerprint(h5)
+
+        load_axis.reset_mock()
+        session.open(str(h5))
+        load_axis.assert_not_called()
+
+    assert stages == [
+        "Computing data for a new review",
+        "Loading H5 data for the saved review",
+    ]
+
+
+def test_changed_h5_invalidates_saved_calibration(tmp_path):
     h5 = tmp_path / "run.h5"
     make_h5(h5)
     session = app.Session()
@@ -178,10 +212,111 @@ def test_open_calibrates_once_for_new_and_existing_configs(tmp_path):
         mock.patch.object(app.viz, "build_viz_data", payload_stub),
     ):
         session.open(str(h5))
-        assert load_axis.call_count == 1
+        old_fingerprint = app._h5_fingerprint(h5)
+        session.close()
+        with h5py.File(h5, "r+") as source:
+            source.attrs["changed"] = True
+        assert app._h5_fingerprint(h5) != old_fingerprint
+
         load_axis.reset_mock()
         session.open(str(h5))
         assert load_axis.call_count == 1
+
+
+def test_replaced_h5_during_open_does_not_keep_generated_config(tmp_path):
+    h5 = tmp_path / "run.h5"
+    replacement = tmp_path / "replacement.h5"
+    make_h5(h5, signal=True)
+    make_h5(replacement, cycles=5, signal=False)
+    config_path = tmp_path / "run.json"
+
+    def replace_during_payload(f, peaks, ranges, **kwargs):
+        os.replace(replacement, h5)
+        return payload_stub(f, peaks, ranges, **kwargs)
+
+    session = app.Session()
+    with (
+        mock.patch.object(
+            app.ptrms, "load_mass_axis", return_value=identity_mass_axis()
+        ),
+        mock.patch.object(app, "auto_peaks", return_value=[{"mz": 42.0}]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", replace_during_payload),
+        pytest.raises(RuntimeError, match="H5 file changed"),
+    ):
+        session.open(str(h5))
+
+    assert not config_path.exists()
+
+
+def test_replaced_h5_during_config_publication_removes_generated_config(tmp_path):
+    h5 = tmp_path / "run.h5"
+    replacement = tmp_path / "replacement.h5"
+    make_h5(h5, signal=True)
+    make_h5(replacement, cycles=5, signal=False)
+    config_path = tmp_path / "run.json"
+    real_replace = os.replace
+    source_replaced = False
+
+    def replace_during_publish(source, destination):
+        nonlocal source_replaced
+        if Path(destination) == config_path and not source_replaced:
+            real_replace(replacement, h5)
+            source_replaced = True
+        return real_replace(source, destination)
+
+    session = app.Session()
+    with (
+        mock.patch.object(
+            app.ptrms, "load_mass_axis", return_value=identity_mass_axis()
+        ),
+        mock.patch.object(app, "auto_peaks", return_value=[{"mz": 42.0}]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", payload_stub),
+        mock.patch.object(app.os, "replace", side_effect=replace_during_publish),
+        pytest.raises(RuntimeError, match="H5 file changed"),
+    ):
+        session.open(str(h5))
+
+    assert source_replaced
+    assert not config_path.exists()
+
+
+def test_invalid_saved_calibration_is_recomputed(tmp_path):
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    session = app.Session()
+    with (
+        mock.patch.object(
+            app.ptrms, "load_mass_axis", return_value=identity_mass_axis()
+        ) as load_axis,
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", payload_stub),
+    ):
+        session.open(str(h5))
+        session.close()
+        config_path = tmp_path / "run.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["mass_axis_calibration"]["scale"] = 1.01
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+
+        load_axis.reset_mock()
+        session.open(str(h5))
+        assert load_axis.call_count == 1
+
+        session.close()
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["mass_axis_calibration"]["anchors"][0]["persistence"]["fraction"] = (
+            10**1000
+        )
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+        load_axis.reset_mock()
+        session.open(str(h5))
+        assert load_axis.call_count == 1
+
+    refreshed = json.loads(config_path.read_text(encoding="utf-8"))
+    assert refreshed["mass_axis_calibration"]["scale"] == 1.0
 
 
 def test_config_written_on_open_is_reread_on_the_next_open(tmp_path):
@@ -294,6 +429,21 @@ def test_existing_config_scrubs_retired_review_fields_and_keeps_unknowns(tmp_pat
     assert "checklist" not in saved
     assert saved["review"] == {"future": {"keep": True}}
     assert saved["future_field"] == {"keep": True}
+
+    saved["checklist"] = ["retired field added to cached config"]
+    saved["review"]["checklist"] = ["retired nested field"]
+    config_path.write_text(json.dumps(saved), encoding="utf-8")
+    with (
+        mock.patch.object(app.ptrms, "load_mass_axis") as load_axis,
+        mock.patch.object(app.viz, "build_viz_data", payload_stub),
+    ):
+        session.open(str(h5))
+    load_axis.assert_not_called()
+    cached = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "checklist" not in cached
+    assert cached["review"] == {"future": {"keep": True}}
+    assert cached["future_field"] == {"keep": True}
+
     cleaned, changed = app._scrub_retired_review_fields(
         {"peaks": [], "review": {"checklist": ["only retired field"]}}
     )
@@ -316,6 +466,8 @@ def test_agent_answer_replaces_the_deterministic_config(tmp_path):
     assert session.agent_status == "Agent review applied."
     on_disk = json.loads((tmp_path / "run.json").read_text(encoding="utf-8"))
     assert on_disk["peaks"] == curated["peaks"]
+    assert on_disk["mass_axis_calibration"]["applied"] is True
+    assert on_disk["mass_axis_h5_fingerprint"] == app._h5_fingerprint(h5)
 
 
 def test_unreachable_agent_keeps_the_deterministic_config(tmp_path):
@@ -719,7 +871,10 @@ def test_save_reload_and_close_preserve_the_latest_config(server, tmp_path):
     stale = {**edited, "peaks": [{"mz": 1.0, "label": "stale"}]}
     assert api.post("/save?version=99&page=1&closing=1", stale)[0] == 409
     assert api.post("/save?version=11&page=2&closing=1", edited)[0] == 200
-    assert json.loads((tmp_path / "run.json").read_text(encoding="utf-8")) == edited
+    saved = json.loads((tmp_path / "run.json").read_text(encoding="utf-8"))
+    assert {key: saved[key] for key in edited} == edited
+    assert saved["mass_axis_calibration"]["applied"] is True
+    assert saved["mass_axis_h5_fingerprint"] == app._h5_fingerprint(h5)
 
 
 def test_stale_page_cannot_write_or_export_a_newly_opened_file(

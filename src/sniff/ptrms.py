@@ -133,7 +133,7 @@ def validate_mass_axis(mass_axis):
             [mass_axis.a, mass_axis.b, mass_axis.scale, mass_axis.offset],
             dtype=np.float64,
         )
-    except (TypeError, ValueError):
+    except (OverflowError, TypeError, ValueError):
         fail("caller-supplied mass axis has non-numeric coefficients")
     if not np.isfinite(values).all() or mass_axis.a <= 0 or mass_axis.scale <= 0:
         fail("caller-supplied mass axis has non-finite or non-physical coefficients")
@@ -169,7 +169,7 @@ def validate_mass_axis(mass_axis):
         diag_offset = float(diag_offset_value)
         file_a = float(file_a_value)
         file_b = float(file_b_value)
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, OverflowError, TypeError, ValueError):
         fail("caller-supplied mass axis has incomplete calibration diagnostics")
     if not np.isfinite([diag_scale, diag_offset, file_a, file_b]).all():
         fail("caller-supplied mass axis has non-finite calibration diagnostics")
@@ -232,7 +232,7 @@ def validate_mass_axis(mass_axis):
             timebin = float(timebin_raw)
             prominence = float(prominence_raw)
             snr = float(snr_raw)
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, OverflowError, TypeError, ValueError):
             fail(f"{name} anchor evidence is incomplete")
         if (
             anchor.get("status") != "accepted"
@@ -287,7 +287,7 @@ def validate_mass_axis(mass_axis):
             blocks = int(blocks_value)
             accepted_blocks = int(accepted_value)
             fraction = float(fraction_value)
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, OverflowError, TypeError, ValueError):
             fail(f"{name} anchor persistence evidence is incomplete")
         if (
             blocks < min_blocks
@@ -309,6 +309,30 @@ def validate_mass_axis(mass_axis):
         ):
             fail(f"{name} anchor persistence evidence is contradictory")
     return mass_axis
+
+
+def mass_axis_from_dict(diagnostics):
+    """Rebuild and validate an internal calibration from saved diagnostics."""
+    if not isinstance(diagnostics, dict):
+        raise MassCalibrationError(
+            "saved mass-axis calibration is not a mapping",
+            {"applied": False, "fallback_reason": "invalid saved calibration"},
+        )
+    try:
+        file_calibration = diagnostics["file_calibration"]
+        calibration = MassAxisCalibration(
+            file_calibration["a"],
+            file_calibration["b"],
+            scale=diagnostics["scale"],
+            offset=diagnostics["offset_da"],
+            diagnostics=copy.deepcopy(diagnostics),
+        )
+    except (KeyError, OverflowError, TypeError, ValueError) as exc:
+        raise MassCalibrationError(
+            "saved mass-axis calibration has incomplete coefficients",
+            dict(diagnostics),
+        ) from exc
+    return validate_mass_axis(calibration)
 
 
 def migrate_config_mass_axis(config, mass_axis):

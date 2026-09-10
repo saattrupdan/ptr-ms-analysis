@@ -83,12 +83,14 @@ Each file's config sits beside it under the same name: `sniff.h5` → `sniff.jso
 Every review edit is saved there on the fly, and closing the page or desktop window
 flushes the latest edit before it goes away. A `sniff-analysis-config.json` left by the
 CLI flow is found automatically, so selecting a file that has been reviewed before
-reuses its saved
-peaks, intervals and settings instead of detecting them again. Starting Sniff always
-shows the opening screen; it does not reopen the previous run automatically. The H5 is
-still read to reconstruct spectra and traces, which are deliberately not duplicated in
-the JSON. A file that has never been reviewed gets the deterministic pipeline — detected
-peaks and detected intervals — written to that path and then loaded, so
+reuses its saved peaks, intervals and settings instead of detecting them again. The
+config also retains the validated mass-axis calibration and a fingerprint of its source
+H5; an unchanged file reuses that evidence, while a changed, replaced or legacy file is
+calibrated again. Starting Sniff always shows the opening screen; it does not reopen the
+previous run automatically. The H5 is still read to reconstruct spectra and traces,
+which are deliberately not duplicated in the JSON. A file that has never been reviewed
+gets the deterministic pipeline — detected peaks and detected intervals — written to
+that path and then loaded, so
 the panel starts as a starting point rather than an empty table. **Export** runs the
 full-precision analysis to `<name>.csv` beside the file and leaves everything open; if a
 table that is not a sniff summary already sits at that name — a Viewer export, say — it
@@ -328,10 +330,12 @@ curated values: precedence is **CLI override > `analyze` config > legacy default
 The same resolver is used by `analyze`, browser initial state, live-save, and Done.
 Unknown top-level and nested config fields survive browser round trips. New detected and
 saved configs carry `mass_axis_domain: "corrected"` and
-`mass_axis_version: 1`. When an older unmarked config is opened, Sniff first proves
-both internal anchors, then migrates every saved absolute mass and mass width from the
-file axis exactly once and persists the marker; cycle ranges and unknown fields are
-unchanged.
+`mass_axis_version: 1`. App-created configs also retain the complete validated
+`mass_axis_calibration` evidence and an H5 fingerprint. The app reuses that calibration
+only while the source file's stable identity, size and nanosecond timestamps still
+match. When an older unmarked config is opened, Sniff first proves both internal
+anchors, then migrates every saved absolute mass and mass width from the file axis
+exactly once and persists the marker; cycle ranges and unknown fields are unchanged.
 
 Before peak detection or extraction, Sniff requires an internal two-point mass-axis
 check. It detects the operational water calibrant at 37.033 and protonated
