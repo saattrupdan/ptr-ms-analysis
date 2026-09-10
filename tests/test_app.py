@@ -59,6 +59,7 @@ def test_default_recent_path_uses_sniff_state_directory(tmp_path):
     ):
         assert app._recent_path() == tmp_path / ".sniff" / "recent.json"
         assert app._active_path() == tmp_path / ".sniff" / "active.json"
+        assert app._onboarding_path() == tmp_path / ".sniff" / "onboarding.json"
 
 
 def test_active_file_survives_shutdown_until_the_reviewer_leaves(tmp_path):
@@ -70,6 +71,24 @@ def test_active_file_survives_shutdown_until_the_reviewer_leaves(tmp_path):
         assert app.load_active() == str(h5.resolve())
         app.forget_active()
         assert app.load_active() is None
+
+
+def test_automatic_tour_state_survives_app_launches(tmp_path):
+    onboarding = tmp_path / "state" / "onboarding.json"
+    with mock.patch.object(app, "ONBOARDING_PATH", onboarding):
+        assert app.auto_tour_pending() is True
+        app.remember_tour_seen()
+        assert app.auto_tour_pending() is False
+    assert onboarding.is_file()
+
+
+def test_failed_onboarding_directory_does_not_look_completed(tmp_path):
+    blocked = tmp_path / "blocked"
+    blocked.write_text("not a directory", encoding="utf-8")
+    with mock.patch.object(app, "ONBOARDING_PATH", blocked / "onboarding.json"):
+        assert app.auto_tour_pending() is True
+        with pytest.raises(OSError):
+            app.remember_tour_seen()
 
 
 def test_valid_config_beside_the_file_is_used(tmp_path):
@@ -497,8 +516,23 @@ def test_review_page_404s_until_a_file_is_open(server):
     assert exc.value.code == 404
 
 
-def test_review_page_is_rendered_in_app_mode(server, tmp_path):
+def test_onboarding_write_failure_is_reported_without_consuming_state(
+    server, tmp_path, monkeypatch
+):
     api, _ = server
+    blocked = tmp_path / "blocked"
+    blocked.write_text("not a directory", encoding="utf-8")
+    monkeypatch.setattr(app, "ONBOARDING_PATH", blocked / "onboarding.json")
+
+    code, body = api.post("/onboarding", {})
+    assert code == 500
+    assert "could not save onboarding state" in body["error"]
+    assert app.auto_tour_pending() is True
+
+
+def test_review_page_is_rendered_in_app_mode(server, tmp_path, monkeypatch):
+    api, _ = server
+    monkeypatch.setattr(app, "ONBOARDING_PATH", tmp_path / "onboarding.json")
     h5 = tmp_path / "run.h5"
     make_h5(h5)
     with (
@@ -511,10 +545,19 @@ def test_review_page_is_rendered_in_app_mode(server, tmp_path):
     status, html = api.get("/review")
     assert status == 200
     assert b"const APPMODE = true" in html  # Export, not Done
+    assert b"const AUTO_TOUR = true" in html
     assert b'const PAGE_TOKEN = "1"' in html
     assert b"Open another file" in html
+    # Merely rendering the page does not consume a tour that has not appeared yet.
     _, refreshed = api.get("/review")
+    assert b"const AUTO_TOUR = true" in refreshed
     assert b'const PAGE_TOKEN = "2"' in refreshed
+
+    code, _ = api.post("/onboarding", {})
+    assert code == 200
+    _, acknowledged = api.get("/review")
+    assert b"const AUTO_TOUR = false" in acknowledged
+    assert b'const PAGE_TOKEN = "3"' in acknowledged
 
 
 def test_review_render_cannot_mix_payload_and_target_across_an_open(
@@ -1237,8 +1280,18 @@ def test_the_embedded_scripts_are_valid_javascript():
 
 def test_render_html_mode_flag_is_not_confused_with_the_review_page():
     data = {"file": "x.h5", "peaks": [], "ranges": [], "meta": {}}
-    assert "const APPMODE = true" in viz.render_html(data, mode="app")
+    app_page = viz.render_html(data, mode="app", auto_tour=False)
+    assert "const APPMODE = true" in app_page
+    assert "const AUTO_TOUR = false" in app_page
     assert "const APPMODE = false" in viz.render_html(data)
+
+
+def test_tour_migrates_browser_state_and_tolerates_storage_errors():
+    js = _review_js()
+    assert "let _onboarded=false" in js
+    assert "if(_onboarded){ rememberTour();" in js
+    assert 'fetch("/onboarding",{method:"POST"})' in js
+    assert "setTimeout(startAutoTour,650)" in js
 
 
 def test_review_flushes_the_latest_edit_when_the_page_closes():
@@ -1561,6 +1614,7 @@ def test_the_start_screen_holds_an_open_behind_a_modal_sheet():
     assert 'role="progressbar"' in html, "the bar is not announced as a bar"
     assert 'id="cancel"' in html and "fetch('/cancel'" in html
     assert "s.progress" in html and "s.cancellable" in html
+    assert ".ovstage{margin:10px 0 12px" in html
     assert 'points="8,105 74,105 99,105 108,34 117,105 251,105"' in html
     for retired in ("nose", "mascot", "lab-coat", "magnifier"):
         assert retired not in html.lower()

@@ -479,11 +479,12 @@ def build_viz_data(
     }
 
 
-def render_html(data, config_path=None, mode="review", page_token=None):
+def render_html(data, config_path=None, mode="review", page_token=None, auto_tour=True):
     """Render the review page.
 
     ``mode="app"`` is the persistent app's page: the primary button exports and the
-    server stays up, instead of Done shutting the one-shot review down.
+    server stays up, instead of Done shutting the one-shot review down. ``auto_tour``
+    lets that app apply its durable, user-wide onboarding state.
     """
     payload = json.dumps(data, separators=(",", ":"))
     _validate_embedded_absolute_axis(payload)
@@ -492,6 +493,7 @@ def render_html(data, config_path=None, mode="review", page_token=None):
         .replace("/*__CFGPATH__*/", json.dumps(config_path or ""))
         .replace("/*__APPMODE__*/", json.dumps(bool(mode == "app")))
         .replace("/*__PAGE_TOKEN__*/", json.dumps(page_token or ""))
+        .replace("/*__AUTO_TOUR__*/", json.dumps(bool(auto_tour)))
         .replace("/*__MARK__*/", brand.MARK_SVG.replace('aria-label="Sniff"',
                                                         'aria-label="' + brand.APP_NAME + '"'))
         .replace("/*__APP_NAME__*/", brand.APP_NAME)
@@ -2787,8 +2789,9 @@ function maybeAutoChecklist(){ if(!CHECK.length) return; let seen=false;
   if(seen) return; try{ sessionStorage.setItem("ptrms-cl:"+M.file,"1"); }catch(e){}
   openPanel(checkPanel); }
 
-// ---- onboarding tour (coach-marks; skip/finish persisted in localStorage) ----
+// ---- onboarding tour (app-wide auto-start; localStorage migration/fallback) ----
 const TOURKEY="ptrms-onboarded";
+const AUTO_TOUR = /*__AUTO_TOUR__*/;
 let tourArr=null, tourIx=0;
 function tourSteps(){ const s=[];
   if(CHECK.length) s.push({sel:"#checkBtn",place:"bottom",title:"Your review checklist",
@@ -2853,9 +2856,11 @@ function positionTour(){ const step=tourArr[tourIx];
   pop.style.left=clampL(left)+"px"; pop.style.top=clampT(top)+"px"; }
 function nextTour(){ if(!tourArr) return;
   if(tourIx>=tourArr.length-1){ endTour(); return; } tourIx++; positionTour(); }
+function rememberTour(){ if(APPMODE) fetch("/onboarding",{method:"POST"}).catch(()=>{}); }
 function startTour(){ closePanels(); buildTourDom(); tourArr=tourSteps(); tourIx=0;
   document.getElementById("tourblock").hidden=false; positionTour(); }
-function endTour(){ try{ localStorage.setItem(TOURKEY,"1"); }catch(e){}
+function startAutoTour(){ rememberTour(); startTour(); }
+function endTour(){ try{ localStorage.setItem(TOURKEY,"1"); }catch(e){} rememberTour();
   tourArr=null; const b=document.getElementById("tourblock"), sp=document.getElementById("tourspot"),
     po=document.getElementById("tourpop");
   if(b) b.hidden=true; if(sp) sp.hidden=true; if(po) po.hidden=true; }
@@ -2917,9 +2922,10 @@ setTab("trace");  // start on the intervals view — confirm segments first, the
 // review checklist: reveal the header button + render, then decide first-run behaviour
 if(CHECK.length){ const cb=document.getElementById("checkBtn"); if(cb) cb.hidden=false; }
 renderChecklist();
-let _onboarded=true; try{ _onboarded=!!localStorage.getItem(TOURKEY); }catch(e){}
-if(!_onboarded) setTimeout(startTour,650);          // first visit: guided tour
-else maybeAutoChecklist();                          // returning user: surface the checklist once
+let _onboarded=false; try{ _onboarded=!!localStorage.getItem(TOURKEY); }catch(e){}
+if(_onboarded){ rememberTour(); maybeAutoChecklist(); } // migrate browser-only state
+else if(AUTO_TOUR) setTimeout(startAutoTour,650);       // first analysis: guided tour
+else maybeAutoChecklist();                              // returning user: surface checklist once
 </script>
 </body>
 </html>

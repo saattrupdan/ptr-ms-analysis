@@ -65,8 +65,19 @@ def _active_path() -> Path:
     )
 
 
+def _onboarding_path() -> Path:
+    """Where app-wide onboarding completion is remembered."""
+    override = os.environ.get("SNIFF_ONBOARDING_PATH")
+    return (
+        Path(override).expanduser()
+        if override
+        else _recent_path().with_name("onboarding.json")
+    )
+
+
 RECENT_PATH = _recent_path()
 ACTIVE_PATH = _active_path()
+ONBOARDING_PATH = _onboarding_path()
 LEGACY_RECENT_PATH = Path.home() / ".ptr-ms" / "recent.json"
 RECENT_LIMIT = 20
 
@@ -352,6 +363,20 @@ def forget_active() -> None:
         ACTIVE_PATH.unlink()
     except FileNotFoundError:
         pass
+
+
+def auto_tour_pending() -> bool:
+    """Whether the app has yet to show its one automatic guided tour."""
+    try:
+        return not ONBOARDING_PATH.is_file()
+    except OSError:
+        return True
+
+
+def remember_tour_seen() -> None:
+    """Persist that the automatic guided tour has been shown."""
+    ONBOARDING_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ONBOARDING_PATH.touch(exist_ok=True)
 
 
 class Session:
@@ -1048,7 +1073,7 @@ html.lock,html.lock body{overflow:hidden}
 @keyframes drawpeak{0%,100%{stroke-dashoffset:90;opacity:.5}45%,70%{stroke-dashoffset:0;opacity:1}}
 @keyframes iondrift{0%,100%{transform:translate(0,3px);opacity:.25}50%{transform:translate(9px,-3px);opacity:.85}}
 @keyframes breathe{0%,100%{transform:translateX(-3px);opacity:.2}50%{transform:translateX(4px);opacity:.8}}
-.ovstage{margin:10px 0 6px;color:var(--mut);font-size:13px;min-height:20px}
+.ovstage{margin:10px 0 12px;color:var(--mut);font-size:13px;min-height:20px}
 .pbar{height:6px;border-radius:4px;background:var(--line);overflow:hidden}
 .pbar i{display:block;height:100%;width:0;background:var(--acc);border-radius:4px;
   transition:width .35s ease}
@@ -1524,6 +1549,7 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                     config_path=config_path,
                     mode="app",
                     page_token=page_token,
+                    auto_tour=auto_tour_pending(),
                 )
                 self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
             elif route.path == "/api/state":
@@ -1680,6 +1706,15 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                     return
                 self._send(200, {"ok": _reveal(last), "path": last})
             elif route.path == "/ack":
+                self._send(200, {"ok": True})
+            elif route.path == "/onboarding":
+                try:
+                    remember_tour_seen()
+                except OSError as exc:
+                    self._send(
+                        500, {"error": f"could not save onboarding state: {exc}"}
+                    )
+                    return
                 self._send(200, {"ok": True})
             elif route.path == "/browse":
                 try:

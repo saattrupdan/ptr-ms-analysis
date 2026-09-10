@@ -15,11 +15,14 @@ def _app_recents_never_touch_the_home_folder(tmp_path_factory):
     state = tmp_path_factory.mktemp("sniff-ms")
     original_recent = app.RECENT_PATH
     original_active = app.ACTIVE_PATH
+    original_onboarding = app.ONBOARDING_PATH
     app.RECENT_PATH = state / "recent.json"
     app.ACTIVE_PATH = state / "active.json"
+    app.ONBOARDING_PATH = state / "onboarding.json"
     yield
     app.RECENT_PATH = original_recent
     app.ACTIVE_PATH = original_active
+    app.ONBOARDING_PATH = original_onboarding
 
 
 @pytest.fixture(autouse=True)

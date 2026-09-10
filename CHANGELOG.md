@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **The guided tour now opens automatically only for the first analysis.** Sniff stores
+  that app-wide onboarding state under `~/.sniff`, so later analyses and app restarts do
+  not repeat it; the help button can still replay it manually.
+- **The analysis loading sheet gives its stage text more room.** Extra space before the
+  progress bar keeps the status from feeling cramped.
 - **The Sniff mark is now a focused mass-spectrum peak.** The web mark,
   start-screen artwork, Dock icon and Windows icon share the same clean peak without
   a nose or mascot. The macOS app also applies its bundled icon directly at launch so

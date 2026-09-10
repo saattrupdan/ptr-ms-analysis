@@ -467,10 +467,36 @@ def _standalone_browser_pass(data: dict[str, Any]) -> None:
         try:
             _open(session, html_path.as_uri())
             _browser(session, "wait", "--load", "networkidle")
-            _browser(session, "eval", "localStorage.setItem('ptrms-onboarded', '1')")
+            _browser(session, "eval", "localStorage.removeItem('ptrms-onboarded')")
+            _browser(session, "reload")
+            _browser(session, "wait", "--load", "networkidle")
+            _browser(session, "wait", "800")
+            _assert(
+                _eval_json(
+                    session,
+                    "document.querySelector('#tourblock')?.hidden===false",
+                ),
+                "first analysis did not open the guided tour",
+            )
+            _browser(session, "eval", "document.querySelector('#tskip').click()")
+            _assert(
+                _eval_json(
+                    session, "localStorage.getItem('ptrms-onboarded')==='1'"
+                ),
+                "skipping the guided tour was not remembered",
+            )
             _browser(session, "reload")
             _freeze_animations(session)  # the reload dropped the injected override
             _browser(session, "wait", "--load", "networkidle")
+            _browser(session, "wait", "800")
+            _assert(
+                _eval_json(
+                    session,
+                    "!document.querySelector('#tourblock') || "
+                    "document.querySelector('#tourblock').hidden",
+                ),
+                "the guided tour reopened after it was skipped",
+            )
             _assert(
                 _eval(
                     session,
@@ -1488,6 +1514,94 @@ def _provenance_browser_pass() -> None:
             _browser(session, "close")
 
 
+def _app_onboarding_browser_pass(data: dict[str, Any]) -> None:
+    """Exercise durable app onboarding branches in a real browser."""
+    onboarding = copy.deepcopy(data)
+    onboarding["checklist"] = [
+        {"text": "Confirm the sample interval", "detail": "Browser regression"}
+    ]
+    session = f"{SESSION}-onboarding-{threading.get_ident()}"
+    _ReviewHandler.posts = []
+    _ReviewHandler.html = viz.render_html(
+        onboarding, mode="app", auto_tour=False
+    )
+    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _ReviewHandler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        port = server.server_address[1]
+        _open(session, f"http://127.0.0.1:{port}/")
+        _browser(session, "wait", "--load", "networkidle")
+        _browser(
+            session,
+            "eval",
+            "localStorage.setItem('ptrms-onboarded','1');sessionStorage.clear()",
+        )
+
+        _ReviewHandler.posts = []
+        _ReviewHandler.html = viz.render_html(
+            onboarding, mode="app", auto_tour=True
+        )
+        _browser(session, "reload")
+        _browser(session, "wait", "--load", "networkidle")
+        _browser(session, "wait", "800")
+        migrated = _eval(
+            session,
+            "({tour:document.querySelector('#tourblock')?.hidden!==false,"
+            "checklist:document.querySelector('#checkpanel').hidden===false})",
+        )
+        _assert(migrated["tour"], "legacy browser state reopened the guided tour")
+        _assert(
+            migrated["checklist"],
+            "returning-user onboarding did not surface the review checklist",
+        )
+        _assert(
+            any(path == "/onboarding" for path, _body in _ReviewHandler.posts),
+            "legacy browser onboarding state was not migrated to the app",
+        )
+
+        _browser(session, "eval", "document.querySelector('#tourBtn').click()")
+        replayed = _eval(
+            session,
+            "({visible:document.querySelector('#tourblock').hidden===false})",
+        )
+        _assert(replayed["visible"], "the guided tour could not be replayed manually")
+        _browser(session, "eval", "document.querySelector('#tskip').click()")
+
+        _browser(session, "eval", "localStorage.removeItem('ptrms-onboarded')")
+        _ReviewHandler.posts = []
+        storage_failure = viz.render_html(onboarding, mode="app", auto_tour=True)
+        storage_failure = storage_failure.replace(
+            "<script>",
+            "<script>Storage.prototype.getItem=()=>{throw new Error('blocked')};"
+            "Storage.prototype.setItem=()=>{throw new Error('blocked')};</script><script>",
+            1,
+        )
+        _ReviewHandler.html = storage_failure
+        _browser(session, "reload")
+        _browser(session, "wait", "--load", "networkidle")
+        _browser(session, "wait", "800")
+        fallback = _eval(
+            session,
+            "({visible:document.querySelector('#tourblock')?.hidden===false})",
+        )
+        _assert(
+            fallback["visible"],
+            "unavailable browser storage suppressed the first guided tour",
+        )
+        _assert(
+            any(path == "/onboarding" for path, _body in _ReviewHandler.posts),
+            "starting the automatic tour did not acknowledge app onboarding",
+        )
+    finally:
+        _browser(session, "close")
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
 def _interval_spectrum() -> list[int]:
     """Return an interval spectrum whose shared maximum exposes re-centring bugs."""
     spectrum = [1] * 13000
@@ -1505,6 +1619,7 @@ def main() -> int:
         )
 
     data = _synthetic_data()
+    _app_onboarding_browser_pass(data)
     _ReviewHandler.html = viz.render_html(data)
     _ReviewHandler.spectrum = json.dumps(data["spectrum"]).encode("ascii")
     _ReviewHandler.interval_spectrum = json.dumps(_interval_spectrum()).encode("ascii")
