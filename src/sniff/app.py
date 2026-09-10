@@ -374,7 +374,10 @@ class Session:
         self._lock = threading.Lock()
         self._save_lock = threading.Lock()
         self._save_version = None
-        self._close_save = threading.Event()
+        self._page_condition = threading.Condition()
+        self._page_counter = 0
+        self._current_page = None
+        self._closed_pages = set()
         self._opening = False
         self._cancel = threading.Event()
         # A double-clicked bundle has no terminal to press Ctrl-C in, so stopping the
@@ -624,7 +627,9 @@ class Session:
             self.payload = None
             self.progress = None
             self._save_version = None
-            self._close_save.clear()
+            with self._page_condition:
+                self._current_page = None
+                self._closed_pages.clear()
             # A closed file has no last export: a tab left open must not be told a run
             # finished when it belongs to a file that is no longer loaded.
             self.export_result = None
@@ -654,19 +659,34 @@ class Session:
                 self._save_version = version
             return True
 
-    def finish_close_save(self) -> None:
-        """Report that the page-teardown snapshot has finished its save attempt."""
-        self._close_save.set()
+    def begin_review_page(self) -> str:
+        """Issue a generation token for the review page being rendered now."""
+        with self._page_condition:
+            self._page_counter += 1
+            token = str(self._page_counter)
+            self._current_page = token
+            self._closed_pages.clear()
+            return token
+
+    def finish_close_save(self, page) -> None:
+        """Report that one page generation finished its teardown save attempt."""
+        if page is None:
+            return
+        with self._page_condition:
+            self._closed_pages.add(page)
+            self._page_condition.notify_all()
 
     def wait_for_close_save(self, timeout=1.0) -> bool:
-        """Give this closing page a bounded opportunity to publish its last edit."""
+        """Wait briefly for the currently rendered page's teardown snapshot."""
         if not self.config_path:
             return True
-        # A pagehide from an earlier refresh may have completed a different close-save.
-        # Clear that sticky signal at shutdown initiation; if the current beacon already
-        # finished, the data is safe and this only costs the bounded wait.
-        self._close_save.clear()
-        return self._close_save.wait(timeout)
+        with self._page_condition:
+            page = self._current_page
+            if page is None:
+                return True
+            return self._page_condition.wait_for(
+                lambda: page in self._closed_pages, timeout=timeout
+            )
 
     @property
     def busy(self) -> bool:
@@ -1336,10 +1356,12 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 if not session.payload:
                     self._send(404, {"error": "no file is open"})
                     return
+                page_token = session.begin_review_page()
                 html = viz.render_html(
                     session.payload,
                     config_path=str(session.config_path or ""),
                     mode="app",
+                    page_token=page_token,
                 )
                 self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
             elif route.path == "/api/state":
@@ -1386,7 +1408,9 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 )
                 self._send(202, {"ok": True})
             elif route.path == "/save":
-                closing = parse_qs(route.query).get("closing", ["0"])[0] == "1"
+                query = parse_qs(route.query)
+                closing = query.get("closing", ["0"])[0] == "1"
+                page = query.get("page", [None])[0]
                 try:
                     if not _valid_config(body, require_mass_axis=True):
                         self._send(
@@ -1397,7 +1421,7 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                             },
                         )
                         return
-                    raw_version = parse_qs(route.query).get("version", [None])[0]
+                    raw_version = query.get("version", [None])[0]
                     try:
                         version = int(raw_version) if raw_version is not None else None
                     except ValueError:
@@ -1416,7 +1440,7 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                     self._send(200, {"ok": True, "saved": saved})
                 finally:
                     if closing:
-                        session.finish_close_save()
+                        session.finish_close_save(page)
             elif route.path == "/export":
                 if not session.path:
                     self._send(409, {"error": "no file is open"})

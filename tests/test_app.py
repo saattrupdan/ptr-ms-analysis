@@ -5,7 +5,6 @@ import json
 import os
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import tempfile
@@ -460,7 +459,10 @@ def test_review_page_is_rendered_in_app_mode(server, tmp_path):
     status, html = api.get("/review")
     assert status == 200
     assert b"const APPMODE = true" in html  # Export, not Done
+    assert b'const PAGE_TOKEN = "1"' in html
     assert b"Open another file" in html
+    _, refreshed = api.get("/review")
+    assert b'const PAGE_TOKEN = "2"' in refreshed
 
 
 def test_save_rejects_a_body_that_is_not_a_config(server, tmp_path):
@@ -827,31 +829,28 @@ def test_one_shot_done_rejects_a_snapshot_older_than_autosave(tmp_path):
     config_path = tmp_path / "run.json"
     analysed = []
     result = {}
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
+    ready = threading.Event()
+    urls = []
+
+    def publish_url(url):
+        urls.append(url)
+        ready.set()
 
     def run_server():
         result["value"] = viz.serve(
             "<html></html>",
             str(config_path),
-            port=port,
+            port=0,
             timeout=5,
             open_browser=False,
             run_analysis=lambda config: analysed.append(config) or {},
+            ready_callback=publish_url,
         )
 
     thread = threading.Thread(target=run_server, daemon=True)
     thread.start()
-    api = _Server(f"http://127.0.0.1:{port}")
-    for _ in range(100):
-        try:
-            api.get("/")
-            break
-        except (OSError, urllib.error.URLError):
-            threading.Event().wait(0.02)
-    else:
-        raise AssertionError("the one-shot review server did not start")
+    assert ready.wait(5)
+    api = _Server(urls[0].rstrip("/"))
 
     newer = {"peaks": [{"mz": 2.0}], "ranges": []}
     older = {"peaks": [{"mz": 1.0}], "ranges": []}

@@ -479,7 +479,7 @@ def build_viz_data(
     }
 
 
-def render_html(data, config_path=None, mode="review"):
+def render_html(data, config_path=None, mode="review", page_token=None):
     """Render the review page.
 
     ``mode="app"`` is the persistent app's page: the primary button exports and the
@@ -491,6 +491,7 @@ def render_html(data, config_path=None, mode="review"):
         _TEMPLATE.replace("/*__DATA__*/", payload)
         .replace("/*__CFGPATH__*/", json.dumps(config_path or ""))
         .replace("/*__APPMODE__*/", json.dumps(bool(mode == "app")))
+        .replace("/*__PAGE_TOKEN__*/", json.dumps(page_token or ""))
         .replace("/*__MARK__*/", brand.MARK_SVG.replace('aria-label="Sniff"',
                                                         'aria-label="' + brand.APP_NAME + '"'))
         .replace("/*__APP_NAME__*/", brand.APP_NAME)
@@ -506,6 +507,7 @@ def serve(
     open_browser=True,
     run_analysis=None,
     spectrum_fn=None,
+    ready_callback=None,
 ):
     """Serve the review app on localhost so the page can live-save the config.
 
@@ -669,7 +671,10 @@ def serve(
         raise OSError("no free port found for the review server")
     httpd.daemon_threads = True
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    port = httpd.server_address[1]
     url = f"http://127.0.0.1:{port}/"
+    if ready_callback is not None:
+        ready_callback(url)
     print(f"sniff: review app running at {url}", file=sys.stderr)
     print(
         "sniff: open it, adjust the analysis, then click 'Done' (changes auto-save "
@@ -1243,6 +1248,7 @@ const CFGPATH = /*__CFGPATH__*/;
 const SERVED = location.protocol.indexOf("http") === 0;
 // App mode: one long-lived server, so the primary action exports and keeps going.
 const APPMODE = /*__APPMODE__*/;
+const PAGE_TOKEN = /*__PAGE_TOKEN__*/;
 const M = DATA.meta, PC = DATA.per_cycle, SPEC = DATA.spectrum;
 const A = M.a, B = M.b, MS = M.mass_scale||1, MO = M.mass_offset||0, NCYC = M.ncyc, NBIN = SPEC.length;
 const m2tb = m => A*Math.sqrt((m-MO)/MS)+B;
@@ -2336,7 +2342,7 @@ function buildConfig(){ return {
 let saveTimer=null, saveVersion=Date.now(), pendingSaveVersion=saveVersion;
 function nextSaveVersion(){ saveVersion=Math.max(saveVersion+1,Date.now()); return saveVersion; }
 function saveUrl(path,version,closing=false){ return path+"?version="+encodeURIComponent(version)+
-  (closing?"&closing=1":""); }
+  (PAGE_TOKEN?"&page="+encodeURIComponent(PAGE_TOKEN):"")+(closing?"&closing=1":""); }
 function postSave(version,body,keepalive=false){ return fetch(saveUrl("/save",version),{method:"POST",
   headers:{"Content-Type":"application/json"},body,keepalive}).then(r=>{
     if(!r.ok) throw new Error("save rejected"); return r.json(); }); }

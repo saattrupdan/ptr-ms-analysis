@@ -422,6 +422,8 @@ def test_window_shutdown_waits_for_a_delayed_close_time_save(tmp_path, monkeypat
         "mass_axis_version": 1,
     }
 
+    old_page = session.begin_review_page()
+    current_page = session.begin_review_page()
     save_entered = threading.Event()
     release_save = threading.Event()
     real_save = session.save_config
@@ -432,19 +434,22 @@ def test_window_shutdown_waits_for_a_delayed_close_time_save(tmp_path, monkeypat
         return real_save(body, version=version)
 
     session.save_config = blocked_save
-    session.finish_close_save()  # stale signal from an earlier page refresh
     assert desktop.close_window() is True
-    assert _wait_for(lambda: not session._close_save.is_set())
+    session.finish_close_save(old_page)  # an earlier refresh finishes during shutdown
+    assert thread.is_alive()  # the old page generation must not release the wait
     api = _Server(captured["url"])
     response = {}
     request = threading.Thread(
         target=lambda: response.setdefault(
-            "value", api.post("/save?version=1&closing=1", config)
+            "value",
+            api.post(
+                f"/save?version=1&page={current_page}&closing=1", config
+            ),
         )
     )
     request.start()
     assert save_entered.wait(TIMEOUT)
-    assert thread.is_alive()  # shutdown is draining this close's save
+    assert thread.is_alive()  # shutdown is draining the current page's save
     release_save.set()
     request.join(TIMEOUT)
     thread.join(TIMEOUT)
