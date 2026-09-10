@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Review edits now survive immediate closes and app restarts.** Autosave flushes the
+  latest config as a review page or desktop window closes, rejects delayed older writes,
+  reports failed saves honestly, and the next app launch resumes the active run.
 - **The packaged app icon now fits the macOS Cmd+Tab switcher.** Its coloured tile is
   drawn inside the platform safe area instead of filling the entire icon canvas and
   appearing oversized beside other apps.

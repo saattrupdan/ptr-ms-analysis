@@ -386,6 +386,23 @@ def _serve_in_thread(monkeypatch, captured, **kwargs):
     return thread
 
 
+def test_the_app_resumes_the_active_review_after_a_restart(tmp_path, monkeypatch):
+    h5 = tmp_path / "run.h5"
+    h5.touch()
+    app.remember_active(str(h5))
+    opened = []
+
+    def open_active(session, path, **_kwargs):
+        opened.append(path)
+        session.stop.set()
+
+    monkeypatch.setattr(app.Session, "open", open_active)
+    monkeypatch.setattr(app, "_install_quit_handlers", lambda _stop: None)
+    app.serve_app(port=0, open_browser=False)
+
+    assert opened == [str(h5.resolve())]
+
+
 def test_a_closed_window_ends_the_app_without_opening_a_browser(monkeypatch):
     fake = _fake_gui(monkeypatch)
     opened = []

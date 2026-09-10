@@ -21,6 +21,7 @@ import tempfile
 import threading
 from pathlib import Path
 from typing import Any, ClassVar
+from urllib.parse import urlparse
 
 from sniff import app, viz
 
@@ -316,7 +317,7 @@ class _ReviewHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
         body = json.loads(self.rfile.read(length) or b"{}")
-        self.posts.append((self.path, body))
+        self.posts.append((urlparse(self.path).path, body))
         payload = b'{"ok":true}'
         self.send_response(200)
         self.send_header("Content-Type", "application/json")

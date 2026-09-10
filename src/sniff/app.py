@@ -55,7 +55,18 @@ def _recent_path() -> Path:
     )
 
 
+def _active_path() -> Path:
+    """Where the file to resume on the next launch is remembered."""
+    override = os.environ.get("SNIFF_ACTIVE_PATH")
+    return (
+        Path(override).expanduser()
+        if override
+        else _recent_path().with_name("active.json")
+    )
+
+
 RECENT_PATH = _recent_path()
+ACTIVE_PATH = _active_path()
 LEGACY_RECENT_PATH = Path.home() / ".ptr-ms" / "recent.json"
 RECENT_LIMIT = 20
 
@@ -100,13 +111,20 @@ def _read_json(path: Path):
 
 
 def _write_json(path: Path, value) -> None:
-    """Write through a private temporary name in the same folder, then move it into
-    place. Two review tabs autosave to the same config, so the temp name must be
-    unique per write: a shared one lets one tab publish another tab's bytes."""
+    """Durably replace a JSON file without exposing a partial write.
+
+    A private temporary name prevents concurrent review tabs from publishing one
+    another's bytes. Flushing it before the atomic replace means a successful save has
+    reached the filesystem before the app reports it, including across a laptop
+    shutdown immediately afterwards.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(value, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(tmp, path)
     finally:
         try:
@@ -305,9 +323,30 @@ def remember_recent(path) -> list:
     values = [p for p in load_recent() if p != path]
     values.insert(0, path)
     values = values[:RECENT_LIMIT]
-    RECENT_PATH.parent.mkdir(parents=True, exist_ok=True)
     _write_json(RECENT_PATH, values)
     return values
+
+
+def load_active():
+    """Return the file whose review was active when Sniff last stopped."""
+    value = _read_json(ACTIVE_PATH)
+    if not isinstance(value, dict):
+        return None
+    path = value.get("file")
+    return path if isinstance(path, str) and path else None
+
+
+def remember_active(path: str) -> None:
+    """Remember a successfully opened file for the next app launch."""
+    _write_json(ACTIVE_PATH, {"file": str(Path(path).expanduser().resolve())})
+
+
+def forget_active() -> None:
+    """Forget the resume target after the reviewer explicitly leaves the file."""
+    try:
+        ACTIVE_PATH.unlink()
+    except FileNotFoundError:
+        pass
 
 
 class Session:
@@ -333,6 +372,8 @@ class Session:
         self.agent_status = None
         self._file = None
         self._lock = threading.Lock()
+        self._save_lock = threading.Lock()
+        self._save_version = None
         self._opening = False
         self._cancel = threading.Event()
         # A double-clicked bundle has no terminal to press Ctrl-C in, so stopping the
@@ -469,6 +510,7 @@ class Session:
             self.status, self.stage = "ready", "Ready"
             try:
                 remember_recent(path)
+                remember_active(path)
             except OSError:
                 # Bookkeeping. It must never cost the user a file that opened fine.
                 pass
@@ -559,23 +601,49 @@ class Session:
         )
 
     def close(self):
-        if self._file is not None:
-            try:
-                self._file.close()
-            except OSError:
-                pass
-        self._file = None
-        self.path = None
-        self.config_path = None
-        self.config = None
-        self.payload = None
-        self.progress = None
-        # A closed file has no last export: a tab left open must not be told a run
-        # finished when it belongs to a file that is no longer loaded.
-        self.export_result = None
-        self.export_error = None
-        self.agent_status = None
-        self.status, self.stage = "empty", ""
+        # Waiting for a save already accepted by the server keeps shutdown from clearing
+        # the target out from underneath its request thread.
+        with self._save_lock:
+            if self._file is not None:
+                try:
+                    self._file.close()
+                except OSError:
+                    pass
+            self._file = None
+            self.path = None
+            self.config_path = None
+            self.config = None
+            self.payload = None
+            self.progress = None
+            self._save_version = None
+            # A closed file has no last export: a tab left open must not be told a run
+            # finished when it belongs to a file that is no longer loaded.
+            self.export_result = None
+            self.export_error = None
+            self.agent_status = None
+            self.status, self.stage = "empty", ""
+
+    def save_config(self, config, version=None):
+        """Persist an edit unless a newer edit from this app arrived first.
+
+        Returns ``False`` for an obsolete request. Browser teardown can race a pending
+        debounced request, so the edit-time version rather than thread completion order
+        decides which snapshot remains on disk.
+        """
+        with self._save_lock:
+            if not self.config_path:
+                raise RuntimeError("no file is open")
+            if (
+                version is not None
+                and self._save_version is not None
+                and version < self._save_version
+            ):
+                return False
+            _write_json(self.config_path, config)
+            self.config = config
+            if version is not None:
+                self._save_version = version
+            return True
 
     @property
     def busy(self) -> bool:
@@ -1269,13 +1337,14 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 self._send(404, {"error": "not found"})
 
         def do_POST(self):
+            route = urlparse(self.path)
             n = int(self.headers.get("Content-Length", 0) or 0)
             try:
                 body = json.loads(self.rfile.read(n) if n else b"{}")
             except (UnicodeError, json.JSONDecodeError, ValueError):
                 self._send(400, {"error": "invalid JSON"})
                 return
-            if self.path == "/open":
+            if route.path == "/open":
                 target = str(body.get("path") or "").strip()
                 if not target:
                     self._send(400, {"error": "no path given"})
@@ -1290,10 +1359,7 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                     session.open, target, agent_url=agent_url, agent_timeout=agent_timeout
                 )
                 self._send(202, {"ok": True})
-            elif self.path == "/save":
-                if not session.config_path:
-                    self._send(409, {"error": "no file is open"})
-                    return
+            elif route.path == "/save":
                 if not _valid_config(body, require_mass_axis=True):
                     self._send(
                         400,
@@ -1303,16 +1369,24 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                         },
                     )
                     return
+                raw_version = parse_qs(route.query).get("version", [None])[0]
                 try:
-                    _write_json(session.config_path, body)
+                    version = int(raw_version) if raw_version is not None else None
+                except ValueError:
+                    self._send(400, {"error": "save version must be an integer"})
+                    return
+                try:
+                    saved = session.save_config(body, version=version)
+                except RuntimeError as exc:
+                    self._send(409, {"error": str(exc)})
+                    return
                 except OSError as exc:
                     # Say so rather than let the request thread die: the page needs a
                     # reason, and the config on disk is still the last good one.
                     self._send(500, {"error": f"could not write the config: {exc}"})
                     return
-                session.config = body
-                self._send(200, {"ok": True})
-            elif self.path == "/export":
+                self._send(200, {"ok": True, "saved": saved})
+            elif route.path == "/export":
                 if not session.path:
                     self._send(409, {"error": "no file is open"})
                     return
@@ -1327,35 +1401,44 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                     self._send(400, {"error": "export config has an invalid mass-axis marker"})
                     return
                 if body:
+                    raw_version = parse_qs(route.query).get("version", [None])[0]
                     try:
-                        _write_json(session.config_path, body)
-                    except OSError as exc:
+                        version = int(raw_version) if raw_version is not None else None
+                        session.save_config(body, version=version)
+                    except ValueError:
+                        self._send(400, {"error": "save version must be an integer"})
+                        return
+                    except (OSError, RuntimeError) as exc:
                         self._send(500, {"error": f"could not write the config: {exc}"})
                         return
-                    session.config = body
                 _background(session.export)
                 self._send(202, {"ok": True})
-            elif self.path == "/cancel":
+            elif route.path == "/cancel":
                 # Cancelling an open that is not running is not an event: the page's
                 # Cancel button and a poll can cross, and the answer must not depend
                 # on which one arrived first.
                 session.cancel()
                 self._send(200, {"ok": True})
-            elif self.path == "/close":
+            elif route.path == "/close":
                 if session.busy:
                     self._send(409, {"error": "wait for the current work to finish"})
                     return
+                try:
+                    forget_active()
+                except OSError as exc:
+                    self._send(500, {"error": f"could not clear the saved session: {exc}"})
+                    return
                 session.close()
                 self._send(200, {"ok": True})
-            elif self.path == "/reveal":
+            elif route.path == "/reveal":
                 last = (session.export_result or {}).get("out")
                 if not last:
                     self._send(409, {"error": "nothing has been exported yet"})
                     return
                 self._send(200, {"ok": _reveal(last), "path": last})
-            elif self.path == "/ack":
+            elif route.path == "/ack":
                 self._send(200, {"ok": True})
-            elif self.path == "/browse":
+            elif route.path == "/browse":
                 try:
                     picked = _browse()
                 except (
@@ -1367,7 +1450,7 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                     self._send(501, {"error": str(exc) or "no file dialog here"})
                     return
                 self._send(200, {"path": picked} if picked else {"cancelled": True})
-            elif self.path == "/shutdown":
+            elif route.path == "/shutdown":
                 # One direction each, so the two can never chase one another: the page
                 # stops the session and closes the window, while closing the window
                 # only ever stops the session. Nothing here waits for the other.
@@ -1477,10 +1560,13 @@ def serve_app(
 
     _log(f"sniff: app running at {url}")
     _log("sniff: a large run takes 30-90 s to open; the app stays up between files.")
-    if initial:
+    resume = initial or load_active()
+    if resume and Path(resume).expanduser().is_file():
         _background(
-            session.open, initial, agent_url=agent_url, agent_timeout=agent_timeout
+            session.open, resume, agent_url=agent_url, agent_timeout=agent_timeout
         )
+    elif resume:
+        _log(f"sniff: cannot resume missing file: {resume}")
     global _surface
     # Decided fresh on every serve: a second call in the same process — a test, or a
     # script that restarts the app — must not inherit the previous run's surface.

@@ -12,7 +12,26 @@ import pytest
 def _app_recents_never_touch_the_home_folder(tmp_path_factory):
     from sniff import app
 
-    original = app.RECENT_PATH
-    app.RECENT_PATH = tmp_path_factory.mktemp("sniff-ms") / "recent.json"
+    state = tmp_path_factory.mktemp("sniff-ms")
+    original_recent = app.RECENT_PATH
+    original_active = app.ACTIVE_PATH
+    app.RECENT_PATH = state / "recent.json"
+    app.ACTIVE_PATH = state / "active.json"
     yield
-    app.RECENT_PATH = original
+    app.RECENT_PATH = original_recent
+    app.ACTIVE_PATH = original_active
+
+
+@pytest.fixture(autouse=True)
+def _active_review_never_leaks_between_tests():
+    from sniff import app
+
+    try:
+        app.ACTIVE_PATH.unlink()
+    except FileNotFoundError:
+        pass
+    yield
+    try:
+        app.ACTIVE_PATH.unlink()
+    except FileNotFoundError:
+        pass

@@ -58,6 +58,18 @@ def test_default_recent_path_uses_sniff_state_directory(tmp_path):
         mock.patch.object(Path, "home", return_value=tmp_path),
     ):
         assert app._recent_path() == tmp_path / ".sniff" / "recent.json"
+        assert app._active_path() == tmp_path / ".sniff" / "active.json"
+
+
+def test_active_file_survives_shutdown_until_the_reviewer_leaves(tmp_path):
+    h5 = tmp_path / "run.h5"
+    h5.touch()
+    active = tmp_path / "state" / "active.json"
+    with mock.patch.object(app, "ACTIVE_PATH", active):
+        app.remember_active(str(h5))
+        assert app.load_active() == str(h5.resolve())
+        app.forget_active()
+        assert app.load_active() is None
 
 
 def test_valid_config_beside_the_file_is_used(tmp_path):
@@ -138,6 +150,7 @@ def test_config_written_on_open_is_reread_on_the_next_open(tmp_path):
     written = json.loads((tmp_path / "run.json").read_text(encoding="utf-8"))
     assert written["peaks"] and written["ranges"]
     assert written["checklist"]
+    assert app.load_active() == str(h5.resolve())
     with mock.patch.object(app, "auto_peaks") as detect_peaks:
         with mock.patch.object(app.viz, "build_viz_data", payload_stub):
             session.open(str(h5))
@@ -541,8 +554,10 @@ def test_closing_a_file_leaves_the_server_up(server, tmp_path):
     ):
         api.post("/open", {"path": str(h5)})
         _wait_ready(api)
+    assert app.load_active() == str(h5.resolve())
     code, _ = api.post("/close")
     assert code == 200 and session.status == "empty"
+    assert app.load_active() is None
     with pytest.raises(urllib.error.HTTPError) as exc:
         api.get("/review")
     assert exc.value.code == 404
@@ -702,6 +717,26 @@ def test_export_is_refused_while_one_is_running(server, tmp_path):
 # --------------------------------------------------------------------------
 # durability of the saved config
 # --------------------------------------------------------------------------
+def test_older_delayed_save_cannot_replace_the_close_time_snapshot(server, tmp_path):
+    api, session = server
+    session.path = str(tmp_path / "run.h5")
+    session.config_path = tmp_path / "run.json"
+    session.config = {}
+    session.status = "ready"
+    base = {
+        "ranges": [],
+        "mass_axis_domain": "corrected",
+        "mass_axis_version": 1,
+    }
+
+    code, answer = api.post("/save?version=200", {**base, "peaks": [{"mz": 2.0}]})
+    assert code == 200 and answer["saved"] is True
+    code, answer = api.post("/save?version=100", {**base, "peaks": [{"mz": 1.0}]})
+    assert code == 200 and answer["saved"] is False
+    saved = json.loads(session.config_path.read_text(encoding="utf-8"))
+    assert saved["peaks"] == [{"mz": 2.0}]
+
+
 def test_two_tabs_saving_at_once_do_not_publish_each_other(tmp_path):
     target = tmp_path / "cfg.json"
     errors = []
@@ -837,6 +872,15 @@ def test_render_html_mode_flag_is_not_confused_with_the_review_page():
     data = {"file": "x.h5", "peaks": [], "ranges": [], "meta": {}}
     assert "const APPMODE = true" in viz.render_html(data, mode="app")
     assert "const APPMODE = false" in viz.render_html(data)
+
+
+def test_review_flushes_the_latest_edit_when_the_page_closes():
+    data = {"file": "x.h5", "peaks": [], "ranges": [], "meta": {}}
+    html = viz.render_html(data, config_path="/tmp/x.json", mode="app")
+    assert 'window.addEventListener("pagehide",flushSave)' in html
+    assert 'window.addEventListener("beforeunload",flushSave)' in html
+    assert "navigator.sendBeacon(saveUrl(\"/save\",version),blob)" in html
+    assert "if(!r.ok) throw new Error(\"save rejected\")" in html
 
 
 def test_no_template_marker_survives_rendering():

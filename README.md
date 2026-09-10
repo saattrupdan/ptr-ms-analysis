@@ -79,16 +79,20 @@ terminal is right beside you. The packaged installer includes the desktop window
 and opens a browser tab, so nothing is ever lost — the same page, the same localhost
 server, the same Export.
 
-Each file's config sits beside it under the same name: `sniff.h5` → `sniff.json`. A
-`sniff-analysis-config.json` left by the CLI flow is found automatically, so a file that
-has been reviewed before reopens exactly as it was saved. A file that has never been
-reviewed gets the deterministic pipeline — detected peaks, detected intervals, honest
-checklist — written to that path and then loaded, so the panel starts as a starting
-point rather than an empty table. **Export** runs the full-precision analysis to
-`<name>.csv` beside the file and leaves everything open; if a table that is not a sniff
-summary already sits at that name — a Viewer export, say — it writes `<name>-sniff.csv`
-instead of overwriting it. Opening another file closes the current one, since a large
-run holds its data in memory.
+Each file's config sits beside it under the same name: `sniff.h5` → `sniff.json`. Every
+review edit is saved there on the fly, and closing the page or desktop window flushes the
+latest edit before it goes away. A `sniff-analysis-config.json` left by the CLI flow is
+found automatically, so a file that has been reviewed before reopens exactly as it was
+saved. Sniff also remembers which review was active: closing and reopening the app
+resumes that run automatically, while deliberately leaving the review returns the next
+launch to the opening screen. Sleeping or shutting down the laptop does not discard the
+review. A file that has never been reviewed gets the deterministic pipeline — detected
+peaks, detected intervals, honest checklist — written to that path and then loaded, so
+the panel starts as a starting point rather than an empty table. **Export** runs the
+full-precision analysis to `<name>.csv` beside the file and leaves everything open; if a
+table that is not a sniff summary already sits at that name — a Viewer export, say — it
+writes `<name>-sniff.csv` instead of overwriting it. Opening another file closes the
+current one, since a large run holds its data in memory.
 
 The opening screen is deliberately uncluttered: use **Browse this computer…** to
 choose a run in the native file dialog. Paths cannot be typed or pasted into the start

@@ -33,6 +33,7 @@ import subprocess
 import sys
 import threading
 import webbrowser
+from urllib.parse import parse_qs, urlparse
 
 import numpy as np
 
@@ -520,12 +521,28 @@ def serve(
     done = threading.Event()  # expert clicked Done
     analysis_done = threading.Event()  # background analysis finished
     closed = threading.Event()  # page acked the result (can shut down)
-    state = {"config": None, "status": "editing", "summary": None, "error": None}
+    state = {
+        "config": None,
+        "status": "editing",
+        "summary": None,
+        "error": None,
+        "save_version": None,
+    }
+    save_lock = threading.Lock()
 
-    def write_config(cfg):
-        if cfg is not None and config_path:
-            with open(config_path, "w", encoding="utf-8") as fh:
-                json.dump(cfg, fh, indent=2)
+    def write_config(cfg, version=None):
+        with save_lock:
+            previous = state["save_version"]
+            if version is not None and previous is not None and version < previous:
+                return False
+            if cfg is not None and config_path:
+                with open(config_path, "w", encoding="utf-8") as fh:
+                    json.dump(cfg, fh, indent=2)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+            if version is not None:
+                state["save_version"] = version
+            return True
 
     def _run(cfg):
         try:
@@ -581,19 +598,26 @@ def serve(
                 self._send(404)
 
         def do_POST(self):
+            route = urlparse(self.path)
             n = int(self.headers.get("Content-Length", 0) or 0)
             raw = self.rfile.read(n) if n else b"{}"
             try:
                 cfg = json.loads(raw.decode("utf-8"))
             except (UnicodeError, json.JSONDecodeError):
                 cfg = None
-            if self.path == "/save":
-                write_config(cfg)
-                self._json({"ok": True})
-            elif self.path == "/done":
+            raw_version = parse_qs(route.query).get("version", [None])[0]
+            try:
+                version = int(raw_version) if raw_version is not None else None
+            except ValueError:
+                self._send(400, b"save version must be an integer")
+                return
+            if route.path == "/save":
+                saved = write_config(cfg, version=version)
+                self._json({"ok": True, "saved": saved})
+            elif route.path == "/done":
                 if cfg is not None:
                     state["config"] = cfg
-                    write_config(cfg)
+                    write_config(cfg, version=version)
                 if run_analysis is not None:
                     state["status"] = "running"
                     threading.Thread(target=_run, args=(cfg,), daemon=True).start()
@@ -602,7 +626,7 @@ def serve(
                     analysis_done.set()
                 self._json({"ok": True})
                 done.set()
-            elif self.path == "/open":  # open the results file in the OS default app
+            elif route.path == "/open":  # open the results file in the OS default app
                 out = (state["summary"] or {}).get("out") if state["summary"] else None
                 ok = False
                 if out and os.path.exists(out):
@@ -618,7 +642,7 @@ def serve(
                         ok = False
                 self._json({"ok": ok})
                 closed.set()  # user is done — let the server shut down
-            elif self.path == "/ack":  # page displayed the result
+            elif route.path == "/ack":  # page displayed the result
                 self._json({"ok": True})
                 closed.set()
             else:
@@ -2300,11 +2324,23 @@ function buildConfig(){ return {
   // preserve the agent-authored review checklist so live-save doesn't strip it
   checklist:(DATA.checklist||[]).map(it=>it.detail?{text:it.text,detail:it.detail}:it.text)
 }; }
-let saveTimer=null;
+let saveTimer=null, saveVersion=Date.now(), pendingSaveVersion=saveVersion;
+function nextSaveVersion(){ saveVersion=Math.max(saveVersion+1,Date.now()); return saveVersion; }
+function saveUrl(path,version){ return path+"?version="+encodeURIComponent(version); }
+function postSave(version,body,keepalive=false){ return fetch(saveUrl("/save",version),{method:"POST",
+  headers:{"Content-Type":"application/json"},body,keepalive}).then(r=>{
+    if(!r.ok) throw new Error("save rejected"); return r.json(); }); }
 function scheduleSave(){ if(!SERVED) return; setStat("saving…");
-  clearTimeout(saveTimer); saveTimer=setTimeout(()=>{ fetch("/save",{method:"POST",
-    headers:{"Content-Type":"application/json"},body:JSON.stringify(buildConfig())})
-    .then(()=>setStat("saved ✓")).catch(()=>setStat("save failed")); },500); }
+  clearTimeout(saveTimer); pendingSaveVersion=nextSaveVersion(); const version=pendingSaveVersion;
+  saveTimer=setTimeout(()=>{ saveTimer=null; postSave(version,JSON.stringify(buildConfig()))
+    .then(res=>{ if(res.saved!==false && version===pendingSaveVersion) setStat("saved ✓"); })
+    .catch(()=>setStat("save failed")); },500); }
+function flushSave(){ if(!SERVED) return; clearTimeout(saveTimer); saveTimer=null;
+  const version=nextSaveVersion(), body=JSON.stringify(buildConfig()); pendingSaveVersion=version;
+  try{ if(navigator.sendBeacon){ const blob=new Blob([body],{type:"application/json"});
+    if(navigator.sendBeacon(saveUrl("/save",version),blob)) return; } }catch(e){}
+  postSave(version,body,true).catch(()=>{}); }
+window.addEventListener("pagehide",flushSave); window.addEventListener("beforeunload",flushSave);
 function setStat(s){ const el=document.getElementById("savestat"); if(el) el.textContent=s; }
 function submitRun(isExport){
   const ov=document.createElement("div"); ov.id="doneov";
@@ -2374,8 +2410,11 @@ function submitRun(isExport){
       wireDismiss();
       ackNow(); }
   }).catch(()=>{}); },600);
-  fetch(isExport?"/export":"/done",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify(buildConfig())})
+  clearTimeout(saveTimer); saveTimer=null; const body=JSON.stringify(buildConfig());
+  const autosaveVersion=nextSaveVersion(); postSave(autosaveVersion,body).catch(()=>{});
+  const runVersion=nextSaveVersion();
+  fetch(saveUrl(isExport?"/export":"/done",runVersion),{method:"POST",
+    headers:{"Content-Type":"application/json"},body})
     .then(r=>{ if(!r.ok) throw new Error("rejected"); })
     .catch(()=>{
       // A refused request must not leave the overlay spinning with nothing to wait for.
