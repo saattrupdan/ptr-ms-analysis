@@ -88,7 +88,7 @@ peaks, intervals and settings instead of detecting them again. Starting Sniff al
 shows the opening screen; it does not reopen the previous run automatically. The H5 is
 still read to reconstruct spectra and traces, which are deliberately not duplicated in
 the JSON. A file that has never been reviewed gets the deterministic pipeline — detected
-peaks, detected intervals, honest checklist — written to that path and then loaded, so
+peaks and detected intervals — written to that path and then loaded, so
 the panel starts as a starting point rather than an empty table. **Export** runs the
 full-precision analysis to `<name>.csv` beside the file and leaves everything open; if a
 table that is not a sniff summary already sits at that name — a Viewer export, say — it
@@ -216,11 +216,7 @@ and, when the expert clicks *Done*, runs the full-precision analysis and writes 
 via a Download button).
 A first-time user gets an automatic guided tour of the interface. It is skippable and
 remembered once for the whole app under `~/.sniff`, so it does not appear again after an
-app restart; the **?** button can replay it at any time. The agent can also add a
-`"checklist"` array to the config — short points for the reviewer to confirm (an
-ambiguous segment, a relabelled background
-channel, a calibration caveat) — which the app shows as a tickable list, so review
-notes live in the app instead of a wall of chat text. `viz` does not detect
+app restart; the **?** button can replay it at any time. `viz` does not detect
 peaks/segments. Skip it and run `analyze` directly only for a headless/no-browser run or
 a hand-off file. There is no one-shot command; the delivered CSV always comes from
 `analyze`, never the browser.

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Removed the browser review checklist. New configs no longer generate checklist data,
+  and older top-level or nested checklist fields are discarded while unrelated config
+  fields are preserved.
+
 ## [0.6.1] - 2026-09-10
 
 ### Fixed

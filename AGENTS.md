@@ -31,7 +31,7 @@ agent-facing contracts; `README.md` and the CLI remain the user documentation.
   keep scientific decisions in the package's CLI and library.
 - **Review ownership:** the browser review belongs to the human reviewer. Prepare the
   config before opening it, then hand over the URL or app. Do not use browser
-  automation to inspect or edit the review, tick its checklist, or click Done.
+  automation to inspect or edit the review or click Done.
 - **Peak scope:** decide comprehensive versus targeted output before selecting peaks.
   Comprehensive output retains every credible real channel, including fragments,
   isotopes, reagent ions and water clusters; targeted output is only for an explicit

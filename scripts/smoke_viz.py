@@ -279,8 +279,9 @@ def _synthetic_data() -> dict[str, Any]:
             "unknown_top_level": {"keep": True},
             "viz": {"unknown_setting": "keep"},
             "analyze": {"unknown_setting": "keep"},
+            "checklist": ["retired top-level note"],
+            "review": {"checklist": ["retired nested note"]},
         },
-        "checklist": [],
         # two library entries far from the fixture peaks: enough for name/formula
         # consistency and hand-drawn naming, without moving any existing mDa column
         "rate_constants": [
@@ -455,7 +456,8 @@ def _assert_config_round_trip(config: dict[str, Any]) -> None:
         == [("sample_01", 1, 2), ("sample_02", 3, 4)],
         "ranges did not round-trip",
     )
-    _assert(config["checklist"] == [], "checklist did not round-trip")
+    _assert("checklist" not in config, "retired checklist field was saved")
+    _assert("review" not in config, "empty retired review object was saved")
 
 
 def _standalone_browser_pass(data: dict[str, Any]) -> None:
@@ -1518,9 +1520,6 @@ def _provenance_browser_pass() -> None:
 def _app_onboarding_browser_pass(data: dict[str, Any]) -> None:
     """Exercise durable app onboarding branches in a real browser."""
     onboarding = copy.deepcopy(data)
-    onboarding["checklist"] = [
-        {"text": "Confirm the sample interval", "detail": "Browser regression"}
-    ]
     session = f"{SESSION}-onboarding-{threading.get_ident()}"
     _ReviewHandler.posts = []
     _ReviewHandler.html = viz.render_html(
@@ -1550,14 +1549,9 @@ def _app_onboarding_browser_pass(data: dict[str, Any]) -> None:
         _browser(session, "wait", "800")
         migrated = _eval(
             session,
-            "({tour:document.querySelector('#tourblock')?.hidden!==false,"
-            "checklist:document.querySelector('#checkpanel').hidden===false})",
+            "({tour:document.querySelector('#tourblock')?.hidden!==false})",
         )
         _assert(migrated["tour"], "legacy browser state reopened the guided tour")
-        _assert(
-            migrated["checklist"],
-            "returning-user onboarding did not surface the review checklist",
-        )
         _assert(
             any(path == "/onboarding" for path, _body in _ReviewHandler.posts),
             "legacy browser onboarding state was not migrated to the app",

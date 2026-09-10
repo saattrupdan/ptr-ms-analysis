@@ -51,21 +51,19 @@ PREP_FRACTION = 0.11
 _PREP_CUM_S = (0.6, 1.7, 2.4, 3.5)  # cumulative, in the order the phases run
 
 
-def _normalise_checklist(items):
-    """Coerce the config's checklist into [{text, detail?}] for the UI.
-
-    Accepts plain strings or {text, detail} objects; drops anything empty."""
-    out = []
-    for it in items or []:
-        if isinstance(it, str):
-            if it.strip():
-                out.append({"text": it.strip()})
-        elif isinstance(it, dict) and (it.get("text") or "").strip():
-            o = {"text": it["text"].strip()}
-            if (it.get("detail") or "").strip():
-                o["detail"] = it["detail"].strip()
-            out.append(o)
-    return out
+def _scrub_retired_review_fields(config):
+    """Remove retired checklist fields while retaining unknown config data."""
+    cleaned = dict(config or {})
+    cleaned.pop("checklist", None)
+    review = cleaned.get("review")
+    if isinstance(review, dict):
+        review = dict(review)
+        review.pop("checklist", None)
+        if review:
+            cleaned["review"] = review
+        else:
+            cleaned.pop("review", None)
+    return cleaned
 
 
 def _validate_embedded_absolute_axis(payload):
@@ -98,7 +96,6 @@ def build_viz_data(
     primary_mz=21.022,
     K=None,
     molar_volume=None,
-    checklist=None,
     analysis_settings=None,
     config_base=None,
     x_axis_unit="cycle",
@@ -112,7 +109,6 @@ def build_viz_data(
 
     peaks_cfg  : [{mz, label?, formula?, k?}]  (assigned peaks to quantify/tweak)
     ranges_cfg : [{label, start, end, unit, class?}]  (time segments)
-    checklist  : [str | {text, detail?}]  (agent-authored review points to confirm)
     merge_note : legacy provenance describing automatic interval joins. It remains in
                  the payload for config compatibility but is not shown in the review.
     progress   : optional callback with a 0..1 fraction. This call's own phases take
@@ -397,7 +393,7 @@ def build_viz_data(
         if good.any():
             href_default = round(float(np.median(humidity[good])), 5)
 
-    config_payload = dict(config_base or {})
+    config_payload = _scrub_retired_review_fields(config_base)
     config_payload.setdefault("mass_axis_domain", ptrms.MASS_AXIS_CONFIG_DOMAIN)
     config_payload.setdefault("mass_axis_version", ptrms.MASS_AXIS_CONFIG_VERSION)
     return {
@@ -463,7 +459,6 @@ def build_viz_data(
         "spectrum": [round(x) for x in avg],
         "peaks": peaks,
         "ranges": ranges,
-        "checklist": _normalise_checklist(checklist),
         "rate_constants": [
             {
                 "name": c["name"],
@@ -762,9 +757,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
            display:flex;align-items:center;gap:10px;font-weight:700}
   .card h2 .sub{text-transform:none;letter-spacing:0;font-weight:400;color:var(--mut);font-size:11.5px}
   .card h2 .grow{flex:1}
-  /* the slide-out panels (Configuration, Method, Checklist) are not inside a
-     .card, so the spacer that pushes their close button to the right edge needs
-     the rule of their own rather than a margin a sibling can absorb */
+  /* the slide-out panels are not inside a .card, so the spacer that pushes their
+     close button to the right edge needs the rule of their own rather than a margin
+     a sibling can absorb */
   .grow{flex:1 1 auto}
   .card h2.pkhead{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
   .pkhead .pktitle{align-self:flex-start;line-height:1.1}
@@ -968,26 +963,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
   #rngtbl th:first-child,#rngtbl td:first-child{width:56%}
   #rngtbl th:nth-child(2),#rngtbl td:nth-child(2){width:28%}
   #rngtbl input.lbl,#rngtbl select{width:100%}
-  /* header count badge (checklist) */
-  .badge{display:inline-block;min-width:16px;padding:0 5px;margin-left:2px;border-radius:999px;
-         background:var(--acc);color:var(--onacc);font-size:10.5px;font-weight:700;
-         text-align:center;line-height:16px;vertical-align:1px}
-  .badge.done{background:var(--ok)}
-  /* review checklist slide-over (shares the cfg/method scrim) */
-  #checkpanel{position:fixed;top:0;right:0;height:100%;width:400px;max-width:92vw;background:var(--panel);
-        border-left:1px solid var(--line);box-shadow:-14px 0 44px rgba(0,0,0,.45);z-index:41;
-        padding:18px 22px;overflow:auto}
-  #checkpanel h2{font-size:14px;margin:0 0 4px;display:flex;align-items:center;gap:8px;font-weight:650}
-  .clprog{font-size:11.5px;color:var(--mut);margin:14px 0 6px}
-  .cl{list-style:none;margin:0;padding:0}
-  .cl li{display:flex;gap:11px;align-items:flex-start;padding:11px 12px;border:1px solid var(--line2);
-         border-radius:10px;margin-bottom:8px;background:var(--panel2);cursor:pointer;transition:border-color .12s}
-  .cl li:hover{border-color:var(--acc)}
-  .cl li.done{opacity:.55}
-  .cl li.done .cltext{text-decoration:line-through}
-  .cl input[type=checkbox]{margin:2px 0 0;width:16px;height:16px;accent-color:var(--acc);cursor:pointer;flex:0 0 auto}
-  .cl .cltext{font-size:12.5px;line-height:1.5;color:var(--fg)}
-  .cl .cldetail{display:block;color:var(--mut);font-size:11.5px;margin-top:3px;line-height:1.5}
   /* onboarding tour: full-screen click-catcher + spotlight ring + popover */
   #tourblock{position:fixed;inset:0;z-index:60}
   #tourspot{position:fixed;z-index:61;border-radius:12px;pointer-events:none;
@@ -1034,7 +1009,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <button data-theme="system">🖥&nbsp; System</button>
     </div>
   </span>
-  <button class="hbtn" id="checkBtn" title="Review checklist" hidden>📋 Checklist <span class="badge" id="checkbadge"></span></button>
   <button class="hbtn" id="methodBtn" title="How the analysis works">📖 Method</button>
   <button class="hbtn" id="cfgBtn" title="Configuration">⚙ Configuration</button>
   <button class="hbtn ic" id="tourBtn" title="Show the guided tour">?</button>
@@ -1138,13 +1112,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
   </main>
-</div>
-
-<!-- Review checklist slide-over (hidden by default): agent-authored points to confirm -->
-<div id="checkpanel" hidden>
-  <h2>📋 Review checklist <span class="grow"></span><button class="hbtn" id="checkClose">✕</button></h2>
-  <p class="mut" style="font-size:11.5px;margin:2px 0 0">Things the analysis flagged for you to confirm — beyond eyeballing the peaks and intervals. Tick them off as you go (saved in this browser).</p>
-  <div id="checkbody"></div>
 </div>
 
 <!-- Configuration slide-over (hidden by default): settings not set via the plot -->
@@ -2313,8 +2280,15 @@ function jumpToInterval(r){ const pad=Math.max(8,(r.end-r.start)*0.6);
   if(tab!=="trace") setTab("trace"); animateTo(axisAtCycle(Math.max(1,r.start-pad)), axisAtCycle(Math.min(NCYC,r.end+pad)), 300); }
 
 // ---- config / save ----
-function buildConfig(){ return {
-  ...DATA.config_base,
+function buildConfig(){
+  const base={...(DATA.config_base||{})};
+  delete base.checklist;
+  if(base.review && typeof base.review==='object' && !Array.isArray(base.review)){
+    base.review={...base.review}; delete base.review.checklist;
+    if(!Object.keys(base.review).length) delete base.review;
+  }
+  return {
+  ...base,
   peaks: peaks.filter(p=>p.use).map(p=>{ const o={...(p._config_original||{}), mz:p.mz,
       label:(p.labelAuto!==undefined && p.label===p.labelAuto) ? "" : p.label};
     delete o._config_original; delete o.id; delete o.use;
@@ -2336,8 +2310,6 @@ function buildConfig(){ return {
     kinetic:cfg.kinetic, k_anchor:cfg.kanchor, humidity_correct:cfg.humid,
     humidity_p:cfg.hump, humidity_ref:cfg.href,
     whole_run_windows:cfg.wholewindows },
-  // preserve the agent-authored review checklist so live-save doesn't strip it
-  checklist:(DATA.checklist||[]).map(it=>it.detail?{text:it.text,detail:it.detail}:it.text)
 }; }
 let saveTimer=null, saveVersion=Date.now(), pendingSaveVersion=saveVersion;
 function nextSaveVersion(){ saveVersion=Math.max(saveVersion+1,Date.now()); return saveVersion; }
@@ -2714,15 +2686,13 @@ document.getElementById("pkdetails").onclick=()=>{ showDetails=!showDetails;
   const t0=Date.now(); (function follow(){ drawMain(); if(Date.now()-t0<340) requestAnimationFrame(follow); })(); };
 // configuration / method slide-overs (shared scrim)
 const cfgPanel=document.getElementById("cfgpanel"), methodPanel=document.getElementById("methodpanel"),
-      checkPanel=document.getElementById("checkpanel"), scrim=document.getElementById("cfgscrim");
-function closePanels(){ cfgPanel.hidden=true; methodPanel.hidden=true; checkPanel.hidden=true; scrim.hidden=true; }
+      scrim=document.getElementById("cfgscrim");
+function closePanels(){ cfgPanel.hidden=true; methodPanel.hidden=true; scrim.hidden=true; }
 function openPanel(p){ closePanels(); p.hidden=false; scrim.hidden=false; }
 document.getElementById("cfgBtn").onclick=()=>openPanel(cfgPanel);
 document.getElementById("cfgClose").onclick=closePanels;
 document.getElementById("methodBtn").onclick=()=>openPanel(methodPanel);
 document.getElementById("methodClose").onclick=closePanels;
-document.getElementById("checkBtn").onclick=()=>openPanel(checkPanel);
-document.getElementById("checkClose").onclick=closePanels;
 // theme dropdown: click the icon to open, pick a mode, click-away/Esc to close
 const themeMenu=document.getElementById("thememenu");
 document.getElementById("themeBtn").onclick=e=>{ e.stopPropagation(); themeMenu.hidden=!themeMenu.hidden; };
@@ -2756,44 +2726,11 @@ document.addEventListener("keydown",e=>{
     e.preventDefault(); deleteRange(selRange); }
 });
 
-// ---- review checklist (agent-authored, carried in the config) ----
-const CHECK=(DATA.checklist||[]).map((it,i)=>({text:it.text,detail:it.detail||"",i}));
-function clKey(i){ return "ptrms-clk:"+M.file+":"+i; }
-function clDone(i){ try{ return localStorage.getItem(clKey(i))==="1"; }catch(e){ return false; } }
-function setClDone(i,v){ try{ v?localStorage.setItem(clKey(i),"1"):localStorage.removeItem(clKey(i)); }catch(e){} }
-function updateCheckBadge(){ let d=0; CHECK.forEach(it=>{ if(clDone(it.i)) d++; });
-  const n=CHECK.length, badge=document.getElementById("checkbadge");
-  if(badge){ const rem=n-d; badge.textContent=rem>0?String(rem):"✓"; badge.classList.toggle("done",rem===0); }
-  const prog=document.getElementById("clprog"); if(prog) prog.textContent=d+" of "+n+" checked"; }
-function renderChecklist(){ const body=document.getElementById("checkbody"); if(!body) return;
-  body.innerHTML="";
-  if(!CHECK.length){ body.innerHTML="<p class='mut' style='margin-top:14px'>No specific review notes for this run — check the peaks and intervals and you're good.</p>"; return; }
-  const prog=document.createElement("p"); prog.className="clprog"; prog.id="clprog"; body.appendChild(prog);
-  const ul=document.createElement("ul"); ul.className="cl";
-  CHECK.forEach(it=>{ const li=document.createElement("li"); const done=clDone(it.i);
-    if(done) li.classList.add("done");
-    li.innerHTML="<input type=checkbox"+(done?" checked":"")+"><span><span class='cltext'></span>"+
-      (it.detail?"<span class='cldetail'></span>":"")+"</span>";
-    li.querySelector(".cltext").textContent=it.text;
-    if(it.detail) li.querySelector(".cldetail").textContent=it.detail;
-    const cb=li.querySelector("input");
-    const toggle=v=>{ cb.checked=v; setClDone(it.i,v); li.classList.toggle("done",v); updateCheckBadge(); };
-    cb.onclick=e=>{ e.stopPropagation(); toggle(cb.checked); };
-    li.onclick=e=>{ if(e.target!==cb) toggle(!cb.checked); };
-    ul.appendChild(li); });
-  body.appendChild(ul); updateCheckBadge(); }
-function maybeAutoChecklist(){ if(!CHECK.length) return; let seen=false;
-  try{ seen=sessionStorage.getItem("ptrms-cl:"+M.file)==="1"; }catch(e){}
-  if(seen) return; try{ sessionStorage.setItem("ptrms-cl:"+M.file,"1"); }catch(e){}
-  openPanel(checkPanel); }
-
 // ---- onboarding tour (app-wide auto-start; localStorage migration/fallback) ----
 const TOURKEY="ptrms-onboarded";
 const AUTO_TOUR = /*__AUTO_TOUR__*/;
 let tourArr=null, tourIx=0;
 function tourSteps(){ const s=[];
-  if(CHECK.length) s.push({sel:"#checkBtn",place:"bottom",title:"Your review checklist",
-    body:"Specific points I need you to confirm for this run live here — start with these; they’re what most needs a human eye."});
   // the workflow runs left-to-right: first get the intervals right, then the peaks
   s.push({sel:"#maintabs",place:"bottom",tab:"trace",title:"Step 1 — the intervals",
     body:"Start here, on Signal over time. Each shaded band is a sample or background interval. Getting these right comes first, because every compound is quantified per interval."});
@@ -2913,13 +2850,9 @@ initSpecView(); clampView(); renderPeaks(); renderRanges();
 if(peaks.length){ const p0=peaks[0], wmax=Math.max(p0.winL||0,p0.winR||0)||p0.apex/(2*cfg.R);
   const hw=Math.min(1.2,Math.max(0.18,wmax*10)); vSpec.lo=p0.apex-hw; vSpec.hi=p0.apex+hw; clampView(); }
 setTab("trace");  // start on the intervals view — confirm segments first, then review peaks per interval
-// review checklist: reveal the header button + render, then decide first-run behaviour
-if(CHECK.length){ const cb=document.getElementById("checkBtn"); if(cb) cb.hidden=false; }
-renderChecklist();
 let _onboarded=false; try{ _onboarded=!!localStorage.getItem(TOURKEY); }catch(e){}
-if(_onboarded){ rememberTour(); maybeAutoChecklist(); } // migrate browser-only state
-else if(AUTO_TOUR) setTimeout(startAutoTour,650);       // first analysis: guided tour
-else maybeAutoChecklist();                              // returning user: surface checklist once
+if(_onboarded){ rememberTour(); } // migrate browser-only tour state
+else if(AUTO_TOUR) setTimeout(startAutoTour,650); // first analysis: guided tour
 </script>
 </body>
 </html>

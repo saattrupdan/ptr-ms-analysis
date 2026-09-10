@@ -196,7 +196,7 @@ def test_config_written_on_open_is_reread_on_the_next_open(tmp_path):
         session.open(str(h5))
     written = json.loads((tmp_path / "run.json").read_text(encoding="utf-8"))
     assert written["peaks"] and written["ranges"]
-    assert written["checklist"]
+    assert "checklist" not in written
     assert app.load_active() == str(h5.resolve())
     with mock.patch.object(app, "auto_peaks") as detect_peaks:
         with mock.patch.object(app.viz, "build_viz_data", payload_stub):
@@ -235,7 +235,7 @@ def test_bootstrap_reports_what_it_decided(tmp_path):
     ):
         config = app.bootstrap_config(str(h5))
     assert config["peaks"] and config["ranges"]
-    assert any("generated automatically" in str(item) for item in config["checklist"])
+    assert "checklist" not in config
     assert config["diagnostics"]["n_peaks"] == 1
     assert config["diagnostics"]["n_ranges"] == 1
 
@@ -248,7 +248,7 @@ def test_a_blank_file_says_so(tmp_path):
         mock.patch.object(app, "auto_ranges", return_value=[]),
     ):
         config = app.bootstrap_config(str(h5))
-    assert any("No significant signal" in str(item) for item in config["checklist"])
+    assert "checklist" not in config
 
 
 # --------------------------------------------------------------------------
@@ -266,6 +266,38 @@ def _agent_answer(config):
             return False
 
     return Response()
+
+
+def test_existing_config_scrubs_retired_review_fields_and_keeps_unknowns(tmp_path):
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    config_path = tmp_path / "run.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "peaks": [{"mz": 42.0}],
+                "ranges": [],
+                "checklist": ["old top-level note"],
+                "review": {
+                    "checklist": ["old nested note"],
+                    "future": {"keep": True},
+                },
+                "future_field": {"keep": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    session = app.Session()
+    with mock.patch.object(app.viz, "build_viz_data", payload_stub):
+        session.open(str(h5))
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "checklist" not in saved
+    assert saved["review"] == {"future": {"keep": True}}
+    assert saved["future_field"] == {"keep": True}
+    cleaned, changed = app._scrub_retired_review_fields(
+        {"peaks": [], "review": {"checklist": ["only retired field"]}}
+    )
+    assert changed and "review" not in cleaned
 
 
 def test_agent_answer_replaces_the_deterministic_config(tmp_path):
@@ -1333,6 +1365,8 @@ def test_tour_migrates_browser_state_and_tolerates_storage_errors():
     assert "if(_onboarded){ rememberTour();" in js
     assert 'fetch("/onboarding",{method:"POST"})' in js
     assert "setTimeout(startAutoTour,650)" in js
+    assert "checkpanel" not in js
+    assert "ptrms-cl" not in js
 
 
 def test_review_flushes_the_latest_edit_when_the_page_closes():
