@@ -428,10 +428,10 @@ def test_window_shutdown_waits_for_a_delayed_close_time_save(tmp_path, monkeypat
     release_save = threading.Event()
     real_save = session.save_config
 
-    def blocked_save(body, version=None):
+    def blocked_save(body, version=None, page=None):
         save_entered.set()
         assert release_save.wait(TIMEOUT)
-        return real_save(body, version=version)
+        return real_save(body, version=version, page=page)
 
     session.save_config = blocked_save
     assert desktop.close_window() is True

@@ -465,6 +465,84 @@ def test_review_page_is_rendered_in_app_mode(server, tmp_path):
     assert b'const PAGE_TOKEN = "2"' in refreshed
 
 
+def test_save_reload_and_close_preserve_the_latest_config(server, tmp_path):
+    api, _ = server
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+
+    def config_payload(_file, peaks, ranges, **kwargs):
+        return {
+            "file": "stub.h5",
+            "peaks": peaks,
+            "ranges": ranges,
+            "meta": {"ncyc": 4},
+            "config_base": kwargs["config_base"],
+        }
+
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", side_effect=config_payload),
+    ):
+        api.post("/open", {"path": str(h5)})
+        _wait_ready(api)
+        _, first = api.get("/review")
+        assert b'const PAGE_TOKEN = "1"' in first
+        edited = {
+            "peaks": [{"mz": 42.0, "label": "reloaded edit"}],
+            "ranges": [],
+            "mass_axis_domain": "corrected",
+            "mass_axis_version": 1,
+        }
+        assert api.post("/save?version=10&page=1&closing=1", edited)[0] == 200
+        _, refreshed = api.get("/review")
+
+    assert b'const PAGE_TOKEN = "2"' in refreshed
+    assert b"reloaded edit" in refreshed
+    stale = {**edited, "peaks": [{"mz": 1.0, "label": "stale"}]}
+    assert api.post("/save?version=99&page=1&closing=1", stale)[0] == 409
+    assert api.post("/save?version=11&page=2&closing=1", edited)[0] == 200
+    assert json.loads((tmp_path / "run.json").read_text(encoding="utf-8")) == edited
+
+
+def test_stale_page_cannot_write_or_export_a_newly_opened_file(
+    server, tmp_path, monkeypatch
+):
+    api, _ = server
+    first = tmp_path / "first.h5"
+    second = tmp_path / "second.h5"
+    make_h5(first)
+    make_h5(second)
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", payload_stub),
+    ):
+        api.post("/open", {"path": str(first)})
+        _wait_ready(api)
+        _, first_page = api.get("/review")
+        assert b'const PAGE_TOKEN = "1"' in first_page
+        api.post("/open", {"path": str(second)})
+        _wait_ready(api)
+        _, second_page = api.get("/review")
+        assert b'const PAGE_TOKEN = "2"' in second_page
+
+    second_config = tmp_path / "second.json"
+    before = json.loads(second_config.read_text(encoding="utf-8"))
+    stale = {
+        "peaks": [{"mz": 99.0}],
+        "ranges": [],
+        "mass_axis_domain": "corrected",
+        "mass_axis_version": 1,
+    }
+    analysed = mock.Mock()
+    monkeypatch.setattr(app, "analyze_config_to_csv", analysed)
+    assert api.post("/save?version=999&page=1&closing=1", stale)[0] == 409
+    assert api.post("/export?version=1000&page=1", stale)[0] == 409
+    assert json.loads(second_config.read_text(encoding="utf-8")) == before
+    analysed.assert_not_called()
+
+
 def test_save_rejects_a_body_that_is_not_a_config(server, tmp_path):
     api, _ = server
     h5 = tmp_path / "run.h5"
@@ -577,6 +655,41 @@ def test_close_waits_for_ready_to_be_published_atomically(server, tmp_path):
     assert session.status == "empty"
     assert session.path is None
     assert app.load_active() is None
+
+
+def test_routes_reserve_background_work_before_returning_accepted(
+    server, tmp_path, monkeypatch
+):
+    api, session = server
+    first = tmp_path / "first.h5"
+    second = tmp_path / "second.h5"
+    first.touch()
+    second.touch()
+    jobs = []
+    monkeypatch.setattr(app, "_background", lambda *args, **kwargs: jobs.append((args, kwargs)))
+
+    assert api.post("/open", {"path": str(first)})[0] == 202
+    assert api.post("/open", {"path": str(second)})[0] == 409
+    assert api.post("/close")[0] == 409
+    assert len(jobs) == 1
+    session._opening = False
+
+    session.path = str(first)
+    session.config_path = tmp_path / "first.json"
+    session.config = {
+        "peaks": [{"mz": 42.0}],
+        "ranges": [],
+        "mass_axis_domain": "corrected",
+        "mass_axis_version": 1,
+    }
+    session.status = "ready"
+    assert api.post("/export", session.config)[0] == 202
+    assert api.post("/export", session.config)[0] == 409
+    assert api.post("/open", {"path": str(second)})[0] == 409
+    assert api.post("/close")[0] == 409
+    assert len(jobs) == 2
+    session._exporting = False
+    session.status = "ready"
 
 
 def test_a_client_that_acts_on_ready_is_never_told_busy(server, tmp_path):
@@ -762,8 +875,18 @@ def test_export_is_refused_while_one_is_running(server, tmp_path):
         api.post("/open", {"path": str(h5)})
         _wait_ready(api)
     session.status = "exporting"
-    code, _ = api.post("/export", {"peaks": [{"mz": 1.0}]})
+    session._exporting = True
+    code, _ = api.post(
+        "/export",
+        {
+            "peaks": [{"mz": 1.0}],
+            "ranges": [],
+            "mass_axis_domain": "corrected",
+            "mass_axis_version": 1,
+        },
+    )
     assert code == 409
+    session._exporting = False
     session.status = "ready"
 
 
@@ -797,10 +920,10 @@ def test_older_delayed_save_cannot_replace_the_close_time_snapshot(
             assert release_newer.wait(5)
         real_write(path, value)
 
-    def observed_save(config, version=None):
+    def observed_save(config, version=None, page=None):
         if version == 100:
             older_arrived.set()
-        return real_save(config, version=version)
+        return real_save(config, version=version, page=page)
 
     monkeypatch.setattr(app, "_write_json", blocked_write)
     session.save_config = observed_save

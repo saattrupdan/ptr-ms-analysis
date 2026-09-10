@@ -2435,10 +2435,14 @@ function submitRun(isExport){
     headers:{"Content-Type":"application/json"},body})
     .then(r=>{ if(!r.ok) throw new Error("rejected"); })
     .catch(()=>{
-      // A refused request must not leave the overlay spinning with nothing to wait for.
-      if(isExport) finish('<div class="xmark">!</div><h2>Export did not start</h2>'+
-        '<p class="mut">The app is busy with the current file. Wait for that to finish, '+
-        'then export again.</p>');
+      // A refused request must not leave either workflow spinning with nothing to poll.
+      finish('<div class="xmark">!</div><h2>'+
+        (isExport?'Export did not start':'Review was not finished')+'</h2>'+
+        '<p class="mut">'+(isExport
+          ?'The app is busy with the current file. Wait for that to finish, then export again.'
+          :'A newer edit was saved first. Your work is safe; keep reviewing and try Done again.')+
+        '</p><button class="ghost" id="keepreviewing" style="margin:16px 0 6px">Keep reviewing</button>');
+      wireDismiss();
     });
 }
 function download(name,text){ const bl=new Blob([text],{type:"application/json"});

@@ -310,6 +310,7 @@ class _ReviewHandler(http.server.BaseHTTPRequestHandler):
     spectrum = b"[]"
     interval_spectrum = b"[]"
     posts: ClassVar[list[tuple[str, dict[str, Any]]]] = []
+    reject_next_done = False
 
     def log_message(self, *_args: Any) -> None:
         pass
@@ -317,9 +318,13 @@ class _ReviewHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
         body = json.loads(self.rfile.read(length) or b"{}")
-        self.posts.append((urlparse(self.path).path, body))
-        payload = b'{"ok":true}'
-        self.send_response(200)
+        path = urlparse(self.path).path
+        self.posts.append((path, body))
+        rejected = path == "/done" and self.reject_next_done
+        if rejected:
+            type(self).reject_next_done = False
+        payload = b'{"error":"stale"}' if rejected else b'{"ok":true}'
+        self.send_response(409 if rejected else 200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
@@ -2285,6 +2290,19 @@ def main() -> int:
         # Interval edits, unit-aware values, sample-specific ticks and compound
         # naming are exercised against the same served page.
         _review_round_browser_pass(session)
+        _ReviewHandler.reject_next_done = True
+        _browser(session, "find", "role", "button", "click", "--name", "Done")
+        _browser(session, "wait", "500")
+        refused = _eval(
+            session,
+            "({text:document.querySelector('#doneov').innerText, "
+            "retry:!!document.querySelector('#keepreviewing')})",
+        )
+        _assert(
+            "Review was not finished" in refused["text"] and refused["retry"],
+            "a rejected one-shot Done left the review spinning or without recovery",
+        )
+        _browser(session, "find", "role", "button", "click", "--name", "Keep reviewing")
         post_cursor = len(_ReviewHandler.posts)
         _browser(session, "find", "role", "button", "click", "--name", "Done")
         _browser(session, "wait", "800")
