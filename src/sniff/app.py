@@ -368,6 +368,7 @@ class Session:
         self.payload = None
         self.mass_axis = None
         self._payload_config = None
+        self._session_generation = 0
         self.status = "empty"  # empty | loading | ready | error
         self.stage = ""
         self.error = None
@@ -515,16 +516,18 @@ class Session:
                     self._halt()
                 prep_start = P_DETECT
             self.stage = "Computing the review data"
-            self.payload = self._payload(
+            payload = self._payload(
                 path,
                 config,
                 mass_axis=mass_axis,
                 progress=self._build_sink(prep_start),
                 should_stop=self._cancel.is_set,
             )
-            self.path, self.config_path, self.config = path, config_path, config
-            self.mass_axis = mass_axis
-            self._payload_config = _config_key(config)
+            with self._save_lock:
+                self.path, self.config_path, self.config = path, config_path, config
+                self.payload = payload
+                self.mass_axis = mass_axis
+                self._payload_config = _config_key(config)
             # The resume pointer belongs to the successful open. Publish it before
             # "ready" lets /close proceed, otherwise an explicit close can delete the
             # pointer just before this thread recreates it.
@@ -648,6 +651,7 @@ class Session:
             self._payload_config = None
             self.progress = None
             self._save_version = None
+            self._session_generation += 1
             with self._page_condition:
                 self._current_page = None
                 self._closed_pages.clear()
@@ -667,53 +671,81 @@ class Session:
         decides which snapshot remains on disk.
         """
         with self._save_lock:
-            if not self.accepts_review_page(page):
-                raise RuntimeError("this review page is no longer current")
-            if not self.config_path:
-                raise RuntimeError("no file is open")
-            if (
-                version is not None
-                and self._save_version is not None
-                and version < self._save_version
-            ):
-                return False
-            _write_json(self.config_path, config)
-            self.config = config
-            if version is not None:
-                self._save_version = version
-            return True
+            return self._save_config_locked(config, version=version, page=page)
+
+    def _save_config_locked(self, config, version=None, page=None):
+        """Save while the caller holds ``_save_lock``."""
+        if not self.accepts_review_page(page):
+            raise RuntimeError("this review page is no longer current")
+        if not self.config_path:
+            raise RuntimeError("no file is open")
+        if (
+            version is not None
+            and self._save_version is not None
+            and version < self._save_version
+        ):
+            return False
+        _write_json(self.config_path, config)
+        self.config = config
+        if version is not None:
+            self._save_version = version
+        return True
 
     def review_payload(self):
         """Rebuild review data when the saved config changed since the last render."""
-        while True:
-            with self._save_lock:
-                if not self.path or self.config is None or self.payload is None:
-                    raise RuntimeError("no file is open")
-                config = self.config
-                config_key = _config_key(config)
-                if config_key == self._payload_config:
-                    return self.payload
-                path = self.path
-                mass_axis = self.mass_axis
-            payload = self._payload(path, config, mass_axis=mass_axis)
-            with self._save_lock:
-                if config_key == _config_key(self.config):
-                    self.payload = payload
-                    self._payload_config = config_key
-                    return payload
+        with self._save_lock:
+            if not self.path or self.config is None or self.payload is None:
+                raise RuntimeError("no file is open")
+            config = self.config
+            config_key = _config_key(config)
+            if config_key == self._payload_config:
+                return self.payload
+            path = self.path
+            mass_axis = self.mass_axis
+            generation = self._session_generation
+        payload = self._payload(path, config, mass_axis=mass_axis)
+        with self._save_lock:
+            if (
+                generation != self._session_generation
+                or path != self.path
+                or config_key != _config_key(self.config)
+            ):
+                raise RuntimeError("the open file changed while refreshing the review")
+            self.payload = payload
+            self._payload_config = config_key
+            return payload
+
+    def prepare_review_page(self):
+        """Return one generation-consistent payload, target path and page token."""
+        with self._save_lock:
+            generation = self._session_generation
+        payload = self.review_payload()
+        with self._save_lock:
+            if (
+                generation != self._session_generation
+                or payload is not self.payload
+                or self._payload_config != _config_key(self.config)
+            ):
+                raise RuntimeError("the open file changed while rendering the review")
+            token = self._begin_review_page_locked()
+            return payload, str(self.config_path or ""), token
 
     def begin_review_page(self) -> str:
         """Issue a generation token for the review page being rendered now."""
         with self._save_lock:
-            # Versions order requests within one page. A refreshed page starts a new
-            # clock, while its token keeps every request from the prior page out.
-            self._save_version = None
-            with self._page_condition:
-                self._page_counter += 1
-                token = str(self._page_counter)
-                self._current_page = token
-                self._closed_pages.clear()
-                return token
+            return self._begin_review_page_locked()
+
+    def _begin_review_page_locked(self) -> str:
+        """Issue a page token while the caller holds ``_save_lock``."""
+        # Versions order requests within one page. A refreshed page starts a new
+        # clock, while its token keeps every request from the prior page out.
+        self._save_version = None
+        with self._page_condition:
+            self._page_counter += 1
+            token = str(self._page_counter)
+            self._current_page = token
+            self._closed_pages.clear()
+            return token
 
     def current_review_page(self):
         """Return the generation token for the most recently rendered review page."""
@@ -773,6 +805,19 @@ class Session:
             self.export_error = None
             return True
 
+    def prepare_export(self, config=None, version=None, page=None):
+        """Save and capture one immutable export request under the config lock."""
+        with self._save_lock:
+            if config is not None:
+                saved = self._save_config_locked(config, version=version, page=page)
+                if not saved:
+                    raise RuntimeError("a newer review edit is already saved")
+            elif not self.accepts_review_page(page):
+                raise RuntimeError("this review page is no longer current")
+            if not self.path or self.config is None:
+                raise RuntimeError("no file is open")
+            return self.path, self.config
+
     def cancel_export_reservation(self) -> None:
         """Return to a ready review when an admitted export cannot be started."""
         with self._lock:
@@ -799,32 +844,32 @@ class Session:
             return self._opening or self._exporting or self._closing
 
     # ---- exporting -----------------------------------------------------------
-    def export(self, reserved=False):
+    def export(self, path=None, config=None, reserved=False):
         """Run the full-precision analysis to ``<stem>.csv`` beside the file.
 
         Unlike the CLI's Done, nothing shuts down afterwards: the reviewer keeps
-        working and exports again.
+        working and exports again. Route callers pass the request snapshot captured
+        during admission; direct callers capture it here after reserving the session.
         """
         if not reserved and not self.reserve_export():
             raise RuntimeError("the app is busy or no file is open")
-        with self._save_lock:
-            path = self.path
-            config = self.config
-        if not path or config is None:
-            self.cancel_export_reservation()
-            raise RuntimeError("no file is open")
-        target = _csv_target(path)
-        fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=target.name + ".",
-                                   suffix=".tmp")
-        os.close(fd)
+        tmp = None
         try:
+            if path is None or config is None:
+                path, config = self.prepare_export()
+            target = _csv_target(path)
+            fd, tmp = tempfile.mkstemp(
+                dir=str(target.parent), prefix=target.name + ".", suffix=".tmp"
+            )
+            os.close(fd)
             result = analyze_config_to_csv(path, config, tmp)
             _replace_from(tmp, target)
         except Exception as exc:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
+            if tmp is not None:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
             # The file is still open and still worth reviewing, so a failed export
             # reports the error without dropping the session into an error state.
             with self._lock:
@@ -1470,14 +1515,13 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 previous_page = session.current_review_page()
                 session.wait_for_page_close_save(previous_page)
                 try:
-                    payload = session.review_payload()
+                    payload, config_path, page_token = session.prepare_review_page()
                 except (OSError, RuntimeError, TypeError, ValueError) as exc:
-                    self._send(500, {"error": f"could not refresh the review: {exc}"})
+                    self._send(409, {"error": f"could not refresh the review: {exc}"})
                     return
-                page_token = session.begin_review_page()
                 html = viz.render_html(
                     payload,
-                    config_path=str(session.config_path or ""),
+                    config_path=config_path,
                     mode="app",
                     page_token=page_token,
                 )
@@ -1582,23 +1626,33 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 if body and not _valid_config(body, require_mass_axis=True):
                     self._send(400, {"error": "export config has an invalid mass-axis marker"})
                     return
+                raw_version = query.get("version", [None])[0]
+                try:
+                    version = int(raw_version) if raw_version is not None else None
+                except ValueError:
+                    self._send(400, {"error": "save version must be an integer"})
+                    return
                 if not session.reserve_export():
                     self._send(409, {"error": "an export is already running"})
                     return
-                if body:
-                    raw_version = query.get("version", [None])[0]
-                    try:
-                        version = int(raw_version) if raw_version is not None else None
-                        session.save_config(body, version=version, page=page)
-                    except ValueError:
-                        session.cancel_export_reservation()
-                        self._send(400, {"error": "save version must be an integer"})
-                        return
-                    except (OSError, RuntimeError) as exc:
-                        session.cancel_export_reservation()
-                        self._send(500, {"error": f"could not write the config: {exc}"})
-                        return
-                _background(session.export, reserved=True)
+                try:
+                    path, config = session.prepare_export(
+                        body or None, version=version, page=page
+                    )
+                except RuntimeError as exc:
+                    session.cancel_export_reservation()
+                    self._send(409, {"error": str(exc)})
+                    return
+                except OSError as exc:
+                    session.cancel_export_reservation()
+                    self._send(500, {"error": f"could not write the config: {exc}"})
+                    return
+                _background(
+                    session.export,
+                    path=path,
+                    config=config,
+                    reserved=True,
+                )
                 self._send(202, {"ok": True})
             elif route.path == "/cancel":
                 # Cancelling an open that is not running is not an event: the page's

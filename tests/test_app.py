@@ -322,6 +322,58 @@ def test_export_writes_beside_the_file_and_stays_ready(tmp_path):
     assert session.status_payload() == {"status": "done", "out": str(tmp_path / "run.csv")}
 
 
+def test_export_setup_failure_releases_the_busy_reservation(tmp_path, monkeypatch):
+    h5 = tmp_path / "run.h5"
+    session = app.Session()
+    session.path = str(h5)
+    session.config = {"peaks": [{"mz": 42.0}], "ranges": []}
+    session.status = "ready"
+    monkeypatch.setattr(app.tempfile, "mkstemp", mock.Mock(side_effect=OSError("disk full")))
+
+    with pytest.raises(OSError, match="disk full"):
+        session.export()
+
+    assert session.busy is False
+    assert session.status == "ready"
+    assert session.export_error == "disk full"
+
+
+def test_export_uses_the_admitted_request_snapshot(server, tmp_path, monkeypatch):
+    api, session = server
+    h5 = tmp_path / "run.h5"
+    h5.touch()
+    session.path = str(h5)
+    session.config_path = tmp_path / "run.json"
+    session.config = {}
+    session.status = "ready"
+    clicked = {
+        "peaks": [{"mz": 42.0}],
+        "ranges": [],
+        "mass_axis_domain": "corrected",
+        "mass_axis_version": 1,
+    }
+    later = {**clicked, "peaks": [{"mz": 99.0}]}
+    jobs = []
+    monkeypatch.setattr(app, "_background", lambda *args, **kwargs: jobs.append((args, kwargs)))
+
+    assert api.post("/export?version=10", clicked)[0] == 202
+    assert api.post("/save?version=11", later)[0] == 200
+    assert session.config == later
+    assert jobs[0][1]["config"] == clicked
+    analysed = []
+    monkeypatch.setattr(
+        app,
+        "analyze_config_to_csv",
+        lambda path, config, out: analysed.append((path, config, out)) or {},
+    )
+    function = jobs[0][0][0]
+    function(**jobs[0][1])
+
+    assert analysed[0][0] == str(h5)
+    assert analysed[0][1] == clicked
+    assert session.busy is False
+
+
 def test_a_second_export_cannot_report_the_previous_one(tmp_path):
     h5 = tmp_path / "run.h5"
     make_h5(h5)
@@ -463,6 +515,68 @@ def test_review_page_is_rendered_in_app_mode(server, tmp_path):
     assert b"Open another file" in html
     _, refreshed = api.get("/review")
     assert b'const PAGE_TOKEN = "2"' in refreshed
+
+
+def test_review_render_cannot_mix_payload_and_target_across_an_open(
+    server, tmp_path, monkeypatch
+):
+    api, session = server
+    first = tmp_path / "first.h5"
+    second = tmp_path / "second.h5"
+    make_h5(first)
+    make_h5(second)
+
+    def named_payload(file, peaks, ranges, **kwargs):
+        return {
+            "file": Path(file.filename).name,
+            "peaks": peaks,
+            "ranges": ranges,
+            "meta": {"ncyc": 4},
+            "config_base": kwargs["config_base"],
+        }
+
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", side_effect=named_payload),
+    ):
+        api.post("/open", {"path": str(first)})
+        _wait_ready(api)
+        assert b'const PAGE_TOKEN = "1"' in api.get("/review")[1]
+        session.finish_close_save("1")
+        payload_captured = threading.Event()
+        release_render = threading.Event()
+        real_review_payload = session.review_payload
+
+        def blocked_review_payload():
+            payload = real_review_payload()
+            payload_captured.set()
+            assert release_render.wait(5)
+            return payload
+
+        monkeypatch.setattr(session, "review_payload", blocked_review_payload)
+        response = {}
+
+        def refresh_first():
+            try:
+                response["value"] = api.get("/review")
+            except urllib.error.HTTPError as exc:
+                response["error"] = exc.code
+
+        refresh = threading.Thread(target=refresh_first)
+        refresh.start()
+        assert payload_captured.wait(5)
+        api.post("/open", {"path": str(second)})
+        _wait_ready(api)
+        release_render.set()
+        refresh.join(5)
+        assert response == {"error": 409}
+        monkeypatch.setattr(session, "review_payload", real_review_payload)
+        _, current = api.get("/review")
+
+    assert b'second.h5' in current
+    assert str(tmp_path / "second.json").encode("utf-8") in current
+    assert b'const PAGE_TOKEN = "2"' in current
 
 
 def test_save_reload_and_close_preserve_the_latest_config(server, tmp_path):
