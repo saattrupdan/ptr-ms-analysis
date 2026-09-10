@@ -168,33 +168,41 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    [],
-    exclude_binaries=True,
-    name="sniff",
-    icon=ICON,           # the Explorer and taskbar icon on Windows
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=False,  # UPX-packed binaries are the single most common AV false positive
-    # A bundle started from Finder has no console, and it does not need one: it opens
-    # the page itself and logs to ~/.sniff/log.txt. From a terminal the same build
-    # prints, because `sniff app` is what a script calls.
-    console=not IS_MAC,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_name=None,
-    # Keep the visible executable at the bundle root while placing Python modules,
-    # data, and shared libraries in PyInstaller's private one-dir contents folder.
-    # Using "." makes the collected ``sniff`` package collide with the executable
-    # of the same name during COLLECT.
-    contents_directory="_internal",
-)
+def make_executable(name, console):
+    return EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name=name,
+        icon=ICON,  # the Explorer and taskbar icon on Windows
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,  # UPX-packed binaries are the most common AV false positive
+        console=console,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_name=None,
+        # Keep visible executables at the bundle root while placing Python modules,
+        # data, and shared libraries in PyInstaller's private one-dir contents folder.
+        # Using "." makes the collected ``sniff`` package collide with the executable
+        # of the same name during COLLECT.
+        contents_directory="_internal",
+    )
+
+
+# The desktop launcher opens its own UI and logs to ~/.sniff/log.txt. Keeping it
+# windowed on Windows prevents a command prompt from remaining beside the app.
+exe = make_executable(name="sniff", console=False)
+executables = [exe]
+if not IS_MAC:
+    # Windowed programs have no stdout/stderr on Windows. Preserve a separate terminal
+    # launcher for JSON-producing CLI commands rather than silently swallowing output.
+    executables.append(make_executable(name="sniff-cli", console=True))
 
 coll = COLLECT(
-    exe,
+    *executables,
     a.binaries,
     a.datas,
     strip=False,

@@ -84,21 +84,23 @@ Ask the running app rather than watching for a window:
 curl -s http://127.0.0.1:8765/api/state | uv run python -c "import json,sys; print(json.load(sys.stdin)['surface'])"
 ```
 
-`window` or `browser`. For a macOS bundle this is the only reliable signal: it is
-built `console=False`, so it writes to no terminal, and the line explaining a
-fallback never reaches anyone who is not already reading `~/.sniff/log.txt`.
-`scripts/smoke_frozen.py` reads this field for that reason. On a desktop machine
-`--window` must report `window`; a CI runner with no window server may report
+`window` or `browser`. For a desktop bundle this is the only reliable signal: both
+macOS and Windows are built `console=False`, so they write to no terminal, and the line
+explaining a fallback never reaches anyone who is not already reading
+`~/.sniff/log.txt`. This also prevents a command prompt from remaining open beside the
+Windows app. `scripts/smoke_frozen.py` reads this field for that reason. On a desktop
+machine `--window` must report `window`; a CI runner with no window server may report
 `browser`, and neither counts as a crash. To see the same fact from outside,
 `lsappinfo list | grep -i sniff` shows `type="Foreground"` only once something has
 registered with the window server — a bundle that only opened a tab never appears
 there at all.
 
-That leaves `dist/Sniff.app/Contents/MacOS/sniff` on macOS and
-`dist/sniff/sniff.exe` on Windows. The executable remains visible at the bundle root;
-PyInstaller keeps the package data, Python modules and shared libraries in the app's
-`Contents/Resources/` on macOS and its private `_internal/` directory on Windows.
-This avoids the executable colliding with the collected `sniff/` package. Check it
+That leaves `dist/Sniff.app/Contents/MacOS/sniff` on macOS. Windows gets the quiet
+desktop launcher `dist/sniff/sniff.exe` plus `dist/sniff/sniff-cli.exe` for terminal
+commands and JSON output. The executables remain visible at the bundle root; PyInstaller
+keeps the package data, Python modules and shared libraries in the app's
+`Contents/Resources/` on macOS and its private `_internal/` directory on Windows. This
+avoids the executable colliding with the collected `sniff/` package. Check it
 before wrapping it:
 
 ```bash
@@ -198,10 +200,11 @@ data alone. Nothing is downloaded or uploaded: the app serves its page on
 | --- | --- | --- |
 | payload | `dist/Sniff.app` | `dist/sniff/` |
 | installs to | `/Applications/Sniff.app` | `C:\Program Files\Sniff\` |
-| the executable | `Contents/MacOS/sniff` | `sniff.exe` |
+| desktop executable | `Contents/MacOS/sniff` | `sniff.exe` |
+| terminal executable | the installed `sniff` command | `sniff-cli.exe` |
 | private contents | `Contents/Resources/` | `_internal/` |
 | entry point | double-click, or `open -a "Sniff"` | Start Menu → Sniff |
-| console window | none (a windowed bundle logs to `~/.sniff/log.txt`) | yes, and it prints the URL there |
+| console window | none; logs to `~/.sniff/log.txt` | none for the app; CLI terminal only |
 | scope | the machine, needs administrator rights | the machine (`InstallScope: perMachine`), needs administrator rights |
 
 A double-clicked bundle arrives **with no arguments at all** — that is how
@@ -264,16 +267,17 @@ uv run python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/sniff"
 uv run python scripts/smoke_frozen.py "/Applications/Sniff.app/Contents/MacOS/sniff"
 ```
 
-It runs three phases: `app <file> --no-browser --port N` must serve the review
-page for a synthetic run; the same executable with no arguments must open the
-start screen; and `--window` must report which surface it got, never die on a
-machine with no window server.
+On Windows it checks the terminal launcher first. It then runs three app phases:
+`app <file> --no-browser --port N` must serve the review page for a synthetic run and
+write its startup log; the same executable with no arguments must open the start screen;
+and `--window` must report which surface it got, never die on a machine with no window
+server.
 
 The third phase asks `/api/state` for the surface. An earlier version decided by
 grepping the captured output for the word `window`, which was wrong twice over: a
-`console=False` macOS bundle writes nothing there, so an empty log read as
-success, and the one line that reported failure — `no desktop window (...)` —
-contained the word as well. That is how a browser-only artifact passed for green.
+`console=False` desktop bundle writes nothing there, so an empty log read as success,
+and the one line that reported failure — `no desktop window (...)` — contained the word
+as well. That is how a browser-only artifact passed for green.
 
 To look inside a package without installing it — what it will write, and where:
 

@@ -62,6 +62,34 @@ def test_default_recent_path_uses_sniff_state_directory(tmp_path):
         assert app._onboarding_path() == tmp_path / ".sniff" / "onboarding.json"
 
 
+def test_frozen_windowed_log_works_without_stderr(tmp_path, monkeypatch):
+    monkeypatch.setenv("SNIFF_RECENT_PATH", str(tmp_path / "recent.json"))
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "stderr", None)
+
+    app._log("sniff: windowed diagnostic")
+
+    assert (tmp_path / "log.txt").read_text() == "sniff: windowed diagnostic\n"
+
+
+def test_frozen_background_failure_uses_windowed_log(tmp_path, monkeypatch):
+    class ImmediateThread:
+        def __init__(self, target, daemon):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setenv("SNIFF_RECENT_PATH", str(tmp_path / "recent.json"))
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "stderr", None)
+    monkeypatch.setattr(app.threading, "Thread", ImmediateThread)
+
+    app._background(mock.Mock(side_effect=RuntimeError("open failed")))
+
+    assert (tmp_path / "log.txt").read_text() == "sniff: RuntimeError: open failed\n"
+
+
 def test_active_file_survives_shutdown_until_the_reviewer_leaves(tmp_path):
     h5 = tmp_path / "run.h5"
     h5.touch()
@@ -1228,6 +1256,19 @@ def _review_js(mode="app"):
     return "\n".join(re.findall(r"<script>(.*?)</script>", page, re.S))
 
 
+def test_review_header_handles_windows_paths_and_omits_interval_note():
+    data = {
+        "peaks": [],
+        "ranges": [],
+        "merge_note": "joined 2 gaps, 1 fell to baseline",
+        "meta": {"file": r"C:\runs\sample.h5"},
+    }
+    page = viz.render_html(data, mode="app")
+
+    assert 'id="intnote"' not in page
+    assert r'String(M.file||"").split(/[\\/]/).pop()' in page
+
+
 def test_the_export_dialog_hands_the_review_back():
     """Export used to end on a disabled button reading "Opened - you can close this
     tab", which did nothing and left the modal as the only screen. The dialog has to
@@ -1346,6 +1387,14 @@ def test_the_spec_still_installs_the_hook():
     """A spec that stopped listing the hook would break double-click silently."""
     spec = HOOK.with_name("sniff-app.spec").read_text()
     assert "runtime_hook.py" in spec
+
+
+def test_the_windows_bundle_separates_desktop_and_cli_launchers():
+    """The desktop stays quiet without swallowing terminal command output."""
+    spec = HOOK.with_name("sniff-app.spec").read_text()
+    assert 'make_executable(name="sniff", console=False)' in spec
+    assert 'make_executable(name="sniff-cli", console=True)' in spec
+    assert "console=not IS_MAC" not in spec
 
 
 def test_the_recent_api_flags_the_open_file(server, tmp_path, monkeypatch):

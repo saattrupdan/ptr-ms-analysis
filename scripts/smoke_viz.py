@@ -50,7 +50,7 @@ def _synthetic_data() -> dict[str, Any]:
     """Build a stable, standalone review payload without an HDF5 fixture."""
     return {
         "meta": {
-            "file": "synthetic-review.h5",
+            "file": r"C:\measurements\synthetic-review.h5",
             "ncyc": 4,
             "dur": 1.0,
             "x_axis_unit": "cycle",
@@ -274,6 +274,7 @@ def _synthetic_data() -> dict[str, Any]:
             },
             {"label": "sample_02", "start": 3, "end": 4, "class": "sample"},
         ],
+        "merge_note": "joined 2 gaps, 1 fell to baseline",
         "config_base": {
             "unknown_top_level": {"keep": True},
             "viz": {"unknown_setting": "keep"},
@@ -1643,6 +1644,16 @@ def main() -> int:
         # first controlled edit; every request below has a matching snapshot.
         _ReviewHandler.posts = []
         post_cursor = 0
+
+        header = _eval(
+            session,
+            "({file:document.querySelector('#file').textContent, "
+            "intervalNote:!!document.querySelector('#intnote')})",
+        )
+        _assert(
+            header == {"file": "synthetic-review.h5", "intervalNote": False},
+            "review header exposed a path or the removed interval merge note",
+        )
 
         # The sidebar keeps the current m/z order by default, then supports a
         # descending mean integrated-signal order without changing config peak order.

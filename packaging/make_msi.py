@@ -174,7 +174,7 @@ def build_wxs(source: str, product_version: str) -> ET.ElementTree:
                                                  "Title": APP_NAME, "Level": "1"})
     _tree(app_dir, os.path.abspath(source), "", feature)
 
-    # The Start Menu entry, because the console window it opens is where the URL appears.
+    # The Start Menu entry launches the windowed executable, not sniff-cli.exe.
     menu = ET.SubElement(targetdir, "Directory", {"Id": "ProgramMenuFolder"})
     menu_dir = ET.SubElement(menu, "Directory", {"Id": _id("dir", "__menu__"), "Name": APP_NAME})
     shortcut = ET.SubElement(menu_dir, "Component", {"Id": _id("component", "__shortcut__"),

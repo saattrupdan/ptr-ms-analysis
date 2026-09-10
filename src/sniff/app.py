@@ -313,9 +313,8 @@ def bootstrap_config(
             "instrument": instrument,
         },
     }
-    # Said on the Intervals card: whoever opens the file here never sees a command
-    # line, so a gap the pipeline joined has to explain itself or it is an unannounced
-    # edit to the reviewer's intervals. Nothing merged, nothing to say.
+    # Preserve automatic join provenance for CLI/config compatibility without showing
+    # it in the review interface. Nothing merged, nothing to record.
     note = auto_ranges_note(ranges)
     if note:
         config["merge_note"] = note
@@ -1496,13 +1495,13 @@ def _browse():
 
 def _background(fn, *args, **kwargs):
     """Run a long job off the request thread. The session is where the page reads the
-    result or the failure, so the thread itself only echoes to stderr."""
+    result or failure, so the thread only echoes it to the available diagnostic log."""
 
     def run():
         try:
             fn(*args, **kwargs)
         except Exception as exc:
-            print(f"sniff: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            _log(f"sniff: {type(exc).__name__}: {exc}")
 
     threading.Thread(target=run, daemon=True).start()
 
@@ -1768,10 +1767,11 @@ def surface() -> str:
 def _log(text):
     """Report progress on stderr, and to a log file too when there is no console.
 
-    A double-clicked ``.app`` bundle is started by LaunchServices and has nowhere to
-    print, so its URL and its tracebacks would otherwise be lost.
+    A windowed frozen bundle has nowhere to print, so its URL and its tracebacks would
+    otherwise be lost. PyInstaller sets stderr to ``None`` in Windows windowed mode.
     """
-    print(text, file=sys.stderr, flush=True)
+    if sys.stderr is not None:
+        print(text, file=sys.stderr, flush=True)
     if not getattr(sys, "frozen", False):
         return
     try:
@@ -1838,7 +1838,15 @@ def serve_app(
 
     _log(f"sniff: app running at {url}")
     _log("sniff: a large run takes 30-90 s to open; the app stays up between files.")
-    resume = initial or load_active()
+    # A fresh app launch always starts at the opening screen. Selecting a file still
+    # discovers and reuses its same-basename config, but closing the app is not a request
+    # to reopen the last run automatically.
+    if initial is None:
+        try:
+            forget_active()
+        except OSError:
+            pass
+    resume = initial
     if resume:
         if Path(resume).expanduser().is_file():
             if session.reserve_open():

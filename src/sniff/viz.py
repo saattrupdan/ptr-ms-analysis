@@ -113,9 +113,8 @@ def build_viz_data(
     peaks_cfg  : [{mz, label?, formula?, k?}]  (assigned peaks to quantify/tweak)
     ranges_cfg : [{label, start, end, unit, class?}]  (time segments)
     checklist  : [str | {text, detail?}]  (agent-authored review points to confirm)
-    merge_note : one line on what the automatic interval detection joined up, said
-                 on the Intervals card because a merge the reviewer cannot see is a
-                 merge they cannot check. Empty for a curated config.
+    merge_note : legacy provenance describing automatic interval joins. It remains in
+                 the payload for config compatibility but is not shown in the review.
     progress   : optional callback with a 0..1 fraction. This call's own phases take
                  the first PREP_FRACTION of it and the streaming pass the rest, so
                  the axis is the whole build's, not this function's share of a
@@ -1133,7 +1132,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <!-- context card: intervals (signal-over-time tab); positions set by dragging in the plot -->
   <div class="card" id="intcard">
     <h2>Intervals <span class="sub">— name / classify; drag edges in the plot to set the range</span></h2>
-    <p id="intnote" class="mut" style="font-size:11.5px;margin:2px 0 0" hidden></p>
     <div class="scroll">
       <table id="rngtbl"><thead><tr><th class="l">label</th><th class="l">class</th><th id="rngunit">cycles</th></tr></thead><tbody></tbody></table>
       <p id="rngwarn" class="warn" style="font-size:11.5px;margin:6px 0 0" hidden></p>
@@ -2877,13 +2875,9 @@ try{
     setTimeout(clearEntrance,720);
   }
 }catch(e){}
-document.getElementById("file").textContent=M.file.split("/").pop();
+document.getElementById("file").textContent=String(M.file||"").split(/[\\/]/).pop();
 document.getElementById("meta").textContent=
   `${NCYC.toLocaleString()} cycles · ${(NCYC*M.dur/60).toFixed(1)} min · ${peaks.length} peaks · ${ranges.length} intervals`;
-// plain text in the Intervals card's existing header area: a merge the reviewer never
-// hears about is a merge they cannot check, and the app mode has no command line to ask
-const intnote=document.getElementById("intnote");
-if(intnote && DATA.merge_note){ intnote.textContent=DATA.merge_note; intnote.hidden=false; }
 // reflect the default quant in the trace sub-tabs + legend
 document.querySelectorAll("#qtabs button").forEach(b=>b.classList.toggle("on",b.dataset.q===quant));
 document.getElementById("tracelbl").textContent=QSHORT[quant];

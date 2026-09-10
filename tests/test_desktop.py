@@ -386,21 +386,20 @@ def _serve_in_thread(monkeypatch, captured, **kwargs):
     return thread
 
 
-def test_the_app_resumes_the_active_review_after_a_restart(tmp_path, monkeypatch):
+def test_the_app_starts_at_opening_screen_after_a_restart(tmp_path, monkeypatch):
     h5 = tmp_path / "run.h5"
     h5.touch()
     app.remember_active(str(h5))
     opened = []
 
-    def open_active(session, path, **_kwargs):
-        opened.append(path)
-        session.stop.set()
-
-    monkeypatch.setattr(app.Session, "open", open_active)
-    monkeypatch.setattr(app, "_install_quit_handlers", lambda _stop: None)
+    monkeypatch.setattr(
+        app.Session, "open", lambda _session, path, **_kwargs: opened.append(path)
+    )
+    monkeypatch.setattr(app, "_install_quit_handlers", lambda stop: stop())
     app.serve_app(port=0, open_browser=False)
 
-    assert opened == [str(h5.resolve())]
+    assert opened == []
+    assert app.load_active() is None
 
 
 def test_window_shutdown_waits_for_a_delayed_close_time_save(tmp_path, monkeypatch):

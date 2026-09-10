@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import socket
 import subprocess
 import sys
@@ -27,7 +26,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-LAUNCH_TIMEOUT = 30  # seconds for the process to print its URL
+LAUNCH_TIMEOUT = 30  # seconds for the process to start serving
 OPEN_TIMEOUT = 120  # seconds for the app to build the review payload
 
 
@@ -121,23 +120,50 @@ def contents_directory(exe: Path) -> t.Optional[Path]:
     return next((path for path in candidates if path.is_dir()), None)
 
 
-def await_url(proc, timeout):
-    """Block until the app reports its address on stderr. Returns (url, lines)."""
+def await_url(proc, port, timeout):
+    """Block until the app serves its state endpoint. Returns (url, diagnostics)."""
+    url = f"http://127.0.0.1:{port}/"
     deadline = time.monotonic() + timeout
-    lines = []
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             out, err = proc.communicate(timeout=5)
-            return None, lines + [out, err]
-        line = proc.stderr.readline()
-        if not line:
+            return None, [text for text in (out, err) if text]
+        try:
+            status, _ = get(url + "api/state", timeout=0.5)
+        except (OSError, urllib.error.URLError):
             time.sleep(0.05)
             continue
-        lines.append(line.rstrip())
-        match = re.search(r"http://127\.0\.0\.1:(\d+)/", line)
-        if match:
-            return f"http://127.0.0.1:{match.group(1)}/", lines
-    return None, lines
+        if status == 200:
+            return url, []
+    return None, []
+
+
+def await_logged_url(proc, log_path, offset, timeout):
+    """Discover a console-free launch from its appended log, then poll its URL."""
+    deadline = time.monotonic() + timeout
+    prefix = "sniff: app running at "
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            out, err = proc.communicate(timeout=5)
+            return None, [text for text in (out, err) if text]
+        if log_path.is_file():
+            with log_path.open(encoding="utf-8") as handle:
+                handle.seek(offset)
+                lines = handle.read().splitlines()
+            urls = [
+                line.removeprefix(prefix) for line in lines if line.startswith(prefix)
+            ]
+            if urls:
+                url = urls[-1]
+                try:
+                    status, _ = get(url + "api/state", timeout=0.5)
+                except (OSError, urllib.error.URLError):
+                    pass
+                else:
+                    if status == 200:
+                        return url, []
+        time.sleep(0.05)
+    return None, []
 
 
 def main(argv) -> int:
@@ -158,6 +184,24 @@ def main(argv) -> int:
             file=sys.stderr,
         )
         return 1
+    if exe.suffix.lower() == ".exe":
+        cli = exe.with_name("sniff-cli.exe")
+        if not cli.is_file():
+            print(
+                f"frozen app smoke: FAIL — no terminal launcher beside {exe}",
+                file=sys.stderr,
+            )
+            return 1
+        result = subprocess.run(
+            [str(cli), "--help"], capture_output=True, text=True, timeout=LAUNCH_TIMEOUT
+        )
+        if result.returncode != 0 or "usage: sniff" not in result.stdout:
+            print(
+                "frozen app smoke: FAIL — sniff-cli.exe did not return CLI help",
+                file=sys.stderr,
+            )
+            print(result.stdout, result.stderr, file=sys.stderr)
+            return 1
 
     work = Path(tempfile.mkdtemp(prefix="sniff-frozen-smoke-"))
     h5 = make_h5(work / "run.h5")
@@ -176,20 +220,24 @@ def main(argv) -> int:
         env=env,
     )
     try:
-        url, lines = await_url(proc, LAUNCH_TIMEOUT)
+        url, lines = await_url(proc, port, LAUNCH_TIMEOUT)
         if url is None:
             print(
-                "frozen app smoke: FAIL — no URL on stderr within the timeout",
+                "frozen app smoke: FAIL — the app did not serve within the timeout",
                 file=sys.stderr,
             )
             print("\n".join(lines), file=sys.stderr)
             return 1
-        base = url.rstrip("/")
-        if int(url.rsplit(":", 1)[1].rstrip("/")) != port:
+        log_path = work / "log.txt"
+        if (
+            not log_path.is_file()
+            or f"sniff: app running at {url}" not in log_path.read_text()
+        ):
             print(
-                f"frozen app smoke: note — the app moved to port {url}", file=sys.stderr
+                "frozen app smoke: FAIL — the frozen app did not write its startup log",
+                file=sys.stderr,
             )
-
+            return 1
         base = url.rstrip("/")
         deadline = time.monotonic() + OPEN_TIMEOUT
         state = {}
@@ -230,6 +278,7 @@ def main(argv) -> int:
         # Finder and the Start Menu shortcut launch it. The command line would answer
         # that with usage text and exit 2, and a windowed bundle does it invisibly.
         # `BROWSER` keeps the page from popping open on whoever is running this.
+        log_offset = log_path.stat().st_size
         bare = subprocess.Popen(
             [str(exe)],
             stdout=subprocess.PIPE,
@@ -240,7 +289,9 @@ def main(argv) -> int:
             env=dict(env, BROWSER=f"{sys.executable} -c pass"),
         )
         try:
-            bare_url, bare_lines = await_url(bare, LAUNCH_TIMEOUT)
+            bare_url, bare_lines = await_logged_url(
+                bare, log_path, log_offset, LAUNCH_TIMEOUT
+            )
             if bare_url is None:
                 print(
                     "frozen app smoke: FAIL — launched with no arguments, the bundle "
@@ -267,8 +318,9 @@ def main(argv) -> int:
         # Third phase: --window. A runner has no window server, which is exactly the
         # case that must degrade rather than die: the app logs why and serves anyway.
         # On a desktop machine the same command opens a real window and serves too.
+        win_port = free_port()
         win = subprocess.Popen(
-            [str(exe), "app", str(h5), "--window", "--port", str(free_port())],
+            [str(exe), "app", str(h5), "--window", "--port", str(win_port)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -278,7 +330,7 @@ def main(argv) -> int:
         )
         windowed = "fell back to a browser tab"
         try:
-            win_url, win_lines = await_url(win, LAUNCH_TIMEOUT)
+            win_url, win_lines = await_url(win, win_port, LAUNCH_TIMEOUT)
             if win_url is None:
                 print(
                     "frozen app smoke: FAIL — --window neither opened a window nor "
@@ -310,10 +362,10 @@ def main(argv) -> int:
                     file=sys.stderr,
                 )
                 return 1
-            # Ask the app, not the log. A windowed macOS bundle writes to no
-            # console at all, so grepping the captured output for the word "window"
-            # used to report success precisely when nothing had been written — and
-            # the failure it was meant to catch contained that word too.
+            # Ask the app, not the log. A windowed desktop bundle can have no console,
+            # so grepping captured output for the word "window" used to report success
+            # precisely when nothing had been written — and the failure it was meant to
+            # catch contained that word too.
             surface = json.loads(get(win_base + "/api/state")[1]).get("surface")
             if surface not in ("window", "browser"):
                 print(

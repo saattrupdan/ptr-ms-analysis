@@ -79,14 +79,15 @@ terminal is right beside you. The packaged installer includes the desktop window
 and opens a browser tab, so nothing is ever lost — the same page, the same localhost
 server, the same Export.
 
-Each file's config sits beside it under the same name: `sniff.h5` → `sniff.json`. Every
-review edit is saved there on the fly, and closing the page or desktop window flushes the
-latest edit before it goes away. A `sniff-analysis-config.json` left by the CLI flow is
-found automatically, so a file that has been reviewed before reopens exactly as it was
-saved. Sniff also remembers which review was active: closing and reopening the app
-resumes that run automatically, while deliberately leaving the review returns the next
-launch to the opening screen. Sleeping or shutting down the laptop does not discard the
-review. A file that has never been reviewed gets the deterministic pipeline — detected
+Each file's config sits beside it under the same name: `sniff.h5` → `sniff.json`.
+Every review edit is saved there on the fly, and closing the page or desktop window
+flushes the latest edit before it goes away. A `sniff-analysis-config.json` left by the
+CLI flow is found automatically, so selecting a file that has been reviewed before
+reuses its saved
+peaks, intervals and settings instead of detecting them again. Starting Sniff always
+shows the opening screen; it does not reopen the previous run automatically. The H5 is
+still read to reconstruct spectra and traces, which are deliberately not duplicated in
+the JSON. A file that has never been reviewed gets the deterministic pipeline — detected
 peaks, detected intervals, honest checklist — written to that path and then loaded, so
 the panel starts as a starting point rather than an empty table. **Export** runs the
 full-precision analysis to `<name>.csv` beside the file and leaves everything open; if a
@@ -127,9 +128,10 @@ uv run python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/sniff"  # m
 uv run python scripts/smoke_frozen.py dist/sniff/sniff.exe                    # Windows
 ```
 
-On Windows that leaves `dist/sniff/sniff.exe`; on macOS it leaves `dist/Sniff.app`.
-The visible executable stays at that path while PyInstaller keeps package data,
-Python modules and shared libraries separate from it: under `_internal/` on Windows,
+On Windows that leaves the quiet desktop launcher at `dist/sniff/sniff.exe` and a
+terminal launcher at `dist/sniff/sniff-cli.exe`; on macOS it leaves `dist/Sniff.app`.
+The visible executables stay at those paths while PyInstaller keeps package data,
+Python modules and shared libraries separate from them: under `_internal/` on Windows,
 and under the app bundle's `Contents/Resources/` on macOS. Either way the bundle is
 the same ~40 MB of interpreter, NumPy, HDF5 and bundled reference data.
 `scripts/smoke_frozen.py` starts it against a tiny synthetic file and
@@ -195,10 +197,11 @@ Windows SmartScreen says "More info" → "Run anyway". Both warnings go away onc
 bundle is signed and notarised with a Developer ID or code-signing certificate, which the
 spec and both installer sources are ready for without other changes.
 
-A double-clicked app opens its review page in the browser and prints nothing, since
-there is no terminal; its URL and any errors go to `~/.sniff/log.txt`. A window stops
-the server when you close it; in a browser tab, where there is no window to close, the
-*Stop the app* link in the footer does it — from a terminal, Ctrl-C does the same.
+A double-clicked app opens its review page without a console; its URL and any errors go
+to `~/.sniff/log.txt`. On Windows, use the bundled `sniff-cli.exe` for terminal commands
+and JSON output. A window stops the server when you close it; in a browser tab, where
+there is no window to close, the *Stop the app* link in the footer does it — from a
+terminal, Ctrl-C does the same.
 
 `viz` opens a browser review app for an existing peak list + ranges so an expert can
 visually check and tweak peaks / segments / calibration. K, molar volume, kinetic and
@@ -318,9 +321,9 @@ Those levels are read against the run's own background, so the same physical wob
 merges at 1 s/cycle and at 5 s/cycle alike, and each gap is judged against the plateau
 it abuts, so nothing depends on which plateau came first. An opposite-class plateau in
 between is always a boundary. `--merge-high-gap N` overrides
-the ~60 s cap with a fixed cycle count (`0` never joins high plateaus), and every join
-says what it did: per gap in `sniff segments` JSON, and as one line on the Intervals card
-of the review app.
+the ~60 s cap with a fixed cycle count (`0` never joins high plateaus). Every join keeps
+its reason per gap in `sniff segments` JSON and the saved config, but the review app does
+not add a separate merge summary to the Intervals card.
 
 An analysis config may include an `analyze` object with `R`, `R_phys`, `K`,
 `molar_volume`, `primary_mz`, `kinetic`, `k_anchor`, `humidity_correct`, `humidity_p`,

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-10
+
+### Fixed
+
+- **The Windows desktop app no longer leaves a command prompt open.** The Start Menu
+  launches a windowed executable, while a separate `sniff-cli.exe` preserves terminal
+  commands and JSON output; console-free diagnostics continue in Sniff's log file.
+- **Restarting Sniff now returns to the opening screen.** Selecting a previously
+  reviewed H5 file still reuses its same-basename JSON config instead of detecting peaks
+  and intervals again.
+- **Windows paths no longer fill the review header.** The top bar shows only the H5
+  filename for both Windows and POSIX paths.
+- **The Intervals card no longer shows automatic gap-joining diagnostics.** The
+  underlying interval provenance remains in the config and CLI diagnostics without
+  occupying the review interface.
+
 ## [0.6.0] - 2026-09-10
 
 ### Fixed

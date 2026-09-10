@@ -917,7 +917,8 @@ def auto_ranges(
     `high_gap=None` (the default) lets the merge judge each gap from the signal
     itself across ~60 s of acquisition; a number forces that cycle cap instead and 0
     never merges high plateaus. Merged gaps carry their provenance on the range as
-    `merged_gaps`, which is what the review UI quotes back to the reviewer."""
+    `merged_gaps` for JSON and config consumers; the review UI does not show a separate
+    merge summary."""
     D = ptrms.build_discriminator(f, mass_axis=mass_axis)
     segs = ptrms.detect_segments(
         f, discriminator=D, min_duration=min_duration, grad_thr=grad_thr
