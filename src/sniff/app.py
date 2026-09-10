@@ -804,7 +804,6 @@ html.lock,html.lock body{overflow:hidden}
 
   <div class="hero">
     <div>
-      <p class="eyebrow"><i aria-hidden="true"></i>Local signal desk</p>
       <h2>Find the story in your spectrum.</h2>
       <p class="lede">Open an IONICON run to review its peaks and intervals. Saved configs
         return exactly as you left them; new runs get a clear starting point.</p>
@@ -821,17 +820,16 @@ html.lock,html.lock body{overflow:hidden}
 
   <div class="card pick">
     <h2>Open an IONICON run</h2>
-    <p>Choose an HDF5 run with the native file dialog on this computer.</p>
     <button class="btn" id="browse" type="button">Browse this computer&hellip;</button>
     <div class="quick" id="quick-help"><span><i aria-hidden="true"></i>Runs locally</span>
-      <span><i aria-hidden="true"></i>No uploads</span><span><i aria-hidden="true"></i>HDF5 input</span>
+      <span><i aria-hidden="true"></i>No uploads</span>
+      <span><i aria-hidden="true"></i>Nothing leaves this computer</span>
     </div>
   </div>
 
   <div class="note" id="state" role="status" aria-live="polite" hidden></div>
 
   <footer>
-    <span>Served from 127.0.0.1 &mdash; nothing leaves this computer.</span>
     <a class="link" id="quit" href="#" hidden>Stop the app</a>
   </footer>
 </main>
