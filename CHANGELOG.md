@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The app landing page now shows the installed Sniff version discreetly in its footer.
 - Reopening an unchanged H5 in the app now reuses the fully validated mass-axis
   calibration stored in its config. A versioned file-identity fingerprint prevents a
   changed, replaced or copied H5 from inheriting stale calibration evidence; uncertain

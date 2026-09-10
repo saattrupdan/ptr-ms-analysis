@@ -32,7 +32,7 @@ from urllib.parse import parse_qs, urlparse
 
 import h5py
 
-from . import brand, desktop, ptrms, viz
+from . import __version__, brand, desktop, ptrms, viz
 from .analyze import (
     analyze_config_to_csv,
     auto_peaks,
@@ -1175,6 +1175,7 @@ h1{margin:0;font-size:20px;font-weight:650;letter-spacing:-.015em}
   .spectrum .trace{animation:none;stroke-dashoffset:0}}
 footer{display:flex;gap:12px;align-items:center;justify-content:space-between;
   margin-top:32px;color:var(--mut);font-size:12px}
+.version{margin-left:auto;opacity:.55}
 .link{background:none;border:0;padding:0;color:var(--mut);font:inherit;
   text-decoration:underline;cursor:pointer}
 .link:hover{color:var(--fg)}
@@ -1267,6 +1268,7 @@ html.lock,html.lock body{overflow:hidden}
 
   <footer>
     <a class="link" id="quit" href="#" hidden>Stop the app</a>
+    <span class="version">v__VERSION__</span>
   </footer>
 </main>
 
@@ -1525,6 +1527,7 @@ _START_HTML = (
     .replace('__APP_NAME__', brand.APP_NAME)
     .replace('__TAGLINE__', brand.TAGLINE)
     .replace('__PAGE_TITLE__', brand.PAGE_TITLE)
+    .replace('__VERSION__', __version__)
 )
 
 

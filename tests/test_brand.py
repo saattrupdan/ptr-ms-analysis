@@ -119,6 +119,8 @@ def test_the_version_is_stated_once():
     import sniff
 
     assert sniff.__version__ == version("sniff")
+    assert f'<span class="version">v{sniff.__version__}</span>' in app._START_HTML
+    assert "__VERSION__" not in app._START_HTML
     spec = (REPO / "pyproject.toml").read_text(encoding="utf-8")
     declared = re.search(r'^version = "([\d.]+[^"\n]*)"$', spec, re.M).group(1)
     assert version("sniff").split("+")[0] == declared
