@@ -616,8 +616,17 @@ def serve(
                 self._json({"ok": True, "saved": saved})
             elif route.path == "/done":
                 if cfg is not None:
+                    saved = write_config(cfg, version=version)
+                    if not saved:
+                        self._send(
+                            409,
+                            json.dumps(
+                                {"error": "a newer review edit is already saved"}
+                            ).encode("utf-8"),
+                            "application/json",
+                        )
+                        return
                     state["config"] = cfg
-                    write_config(cfg, version=version)
                 if run_analysis is not None:
                     state["status"] = "running"
                     threading.Thread(target=_run, args=(cfg,), daemon=True).start()
@@ -2326,20 +2335,23 @@ function buildConfig(){ return {
 }; }
 let saveTimer=null, saveVersion=Date.now(), pendingSaveVersion=saveVersion;
 function nextSaveVersion(){ saveVersion=Math.max(saveVersion+1,Date.now()); return saveVersion; }
-function saveUrl(path,version){ return path+"?version="+encodeURIComponent(version); }
+function saveUrl(path,version,closing=false){ return path+"?version="+encodeURIComponent(version)+
+  (closing?"&closing=1":""); }
 function postSave(version,body,keepalive=false){ return fetch(saveUrl("/save",version),{method:"POST",
   headers:{"Content-Type":"application/json"},body,keepalive}).then(r=>{
     if(!r.ok) throw new Error("save rejected"); return r.json(); }); }
 function scheduleSave(){ if(!SERVED) return; setStat("saving…");
   clearTimeout(saveTimer); pendingSaveVersion=nextSaveVersion(); const version=pendingSaveVersion;
   saveTimer=setTimeout(()=>{ saveTimer=null; postSave(version,JSON.stringify(buildConfig()))
-    .then(res=>{ if(res.saved!==false && version===pendingSaveVersion) setStat("saved ✓"); })
-    .catch(()=>setStat("save failed")); },500); }
+    .then(res=>{ if(version!==pendingSaveVersion) return;
+      setStat(res.saved===false?"newer edit already saved":"saved ✓"); })
+    .catch(()=>{ if(version===pendingSaveVersion) setStat("save failed"); }); },500); }
 function flushSave(){ if(!SERVED) return; clearTimeout(saveTimer); saveTimer=null;
   const version=nextSaveVersion(), body=JSON.stringify(buildConfig()); pendingSaveVersion=version;
   try{ if(navigator.sendBeacon){ const blob=new Blob([body],{type:"application/json"});
-    if(navigator.sendBeacon(saveUrl("/save",version),blob)) return; } }catch(e){}
-  postSave(version,body,true).catch(()=>{}); }
+    if(navigator.sendBeacon(saveUrl("/save",version,true),blob)) return; } }catch(e){}
+  fetch(saveUrl("/save",version,true),{method:"POST",headers:{"Content-Type":"application/json"},
+    body,keepalive:true}).catch(()=>{}); }
 window.addEventListener("pagehide",flushSave); window.addEventListener("beforeunload",flushSave);
 function setStat(s){ const el=document.getElementById("savestat"); if(el) el.textContent=s; }
 function submitRun(isExport){

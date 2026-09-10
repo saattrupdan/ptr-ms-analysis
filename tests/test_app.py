@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -526,6 +527,37 @@ def test_export_keeps_the_server_and_the_file_open(server, tmp_path):
     assert b"Sniff" in page and b"PTR-MS review" in page  # and the app is still serving
 
 
+def test_close_cannot_race_the_resume_pointer_back_into_existence(
+    server, tmp_path, monkeypatch
+):
+    api, session = server
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    entered = threading.Event()
+    release = threading.Event()
+    real_remember_active = app.remember_active
+
+    def blocked_remember_active(path):
+        entered.set()
+        assert release.wait(5)
+        real_remember_active(path)
+
+    monkeypatch.setattr(app, "remember_active", blocked_remember_active)
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", payload_stub),
+    ):
+        assert api.post("/open", {"path": str(h5)})[0] == 202
+        assert entered.wait(5)
+        assert session.busy is True
+        assert api.post("/close")[0] == 409
+        release.set()
+        _wait_ready(api)
+    assert api.post("/close")[0] == 200
+    assert app.load_active() is None
+
+
 def test_a_client_that_acts_on_ready_is_never_told_busy(server, tmp_path):
     """The page offers its buttons as soon as the state says ready, so ready has to
     mean the work is really finished — not finished except for the busy flag."""
@@ -737,6 +769,50 @@ def test_older_delayed_save_cannot_replace_the_close_time_snapshot(server, tmp_p
     assert saved["peaks"] == [{"mz": 2.0}]
 
 
+def test_one_shot_done_rejects_a_snapshot_older_than_autosave(tmp_path):
+    config_path = tmp_path / "run.json"
+    analysed = []
+    result = {}
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    def run_server():
+        result["value"] = viz.serve(
+            "<html></html>",
+            str(config_path),
+            port=port,
+            timeout=5,
+            open_browser=False,
+            run_analysis=lambda config: analysed.append(config) or {},
+        )
+
+    thread = threading.Thread(target=run_server, daemon=True)
+    thread.start()
+    api = _Server(f"http://127.0.0.1:{port}")
+    for _ in range(100):
+        try:
+            api.get("/")
+            break
+        except (OSError, urllib.error.URLError):
+            threading.Event().wait(0.02)
+    else:
+        raise AssertionError("the one-shot review server did not start")
+
+    newer = {"peaks": [{"mz": 2.0}], "ranges": []}
+    older = {"peaks": [{"mz": 1.0}], "ranges": []}
+    assert api.post("/save?version=200", newer)[0] == 200
+    assert api.post("/done?version=100", older)[0] == 409
+    assert analysed == []
+    assert json.loads(config_path.read_text(encoding="utf-8")) == newer
+    assert api.post("/done?version=300", newer)[0] == 200
+    assert api.post("/ack")[0] == 200
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert analysed == [newer]
+    assert result["value"][0] == newer
+
+
 def test_two_tabs_saving_at_once_do_not_publish_each_other(tmp_path):
     target = tmp_path / "cfg.json"
     errors = []
@@ -775,6 +851,7 @@ def test_a_broken_recents_file_cannot_lose_an_opened_file(tmp_path, monkeypatch)
         session.open(str(h5))
     assert session.status == "ready"
     assert session.path == str(h5)
+    assert app.load_active() == str(h5.resolve())
 
 
 def test_close_forgets_the_last_export(tmp_path):
@@ -879,8 +956,9 @@ def test_review_flushes_the_latest_edit_when_the_page_closes():
     html = viz.render_html(data, config_path="/tmp/x.json", mode="app")
     assert 'window.addEventListener("pagehide",flushSave)' in html
     assert 'window.addEventListener("beforeunload",flushSave)' in html
-    assert "navigator.sendBeacon(saveUrl(\"/save\",version),blob)" in html
+    assert "navigator.sendBeacon(saveUrl(\"/save\",version,true),blob)" in html
     assert "if(!r.ok) throw new Error(\"save rejected\")" in html
+    assert 'if(version===pendingSaveVersion) setStat("save failed")' in html
 
 
 def test_no_template_marker_survives_rendering():

@@ -403,6 +403,35 @@ def test_the_app_resumes_the_active_review_after_a_restart(tmp_path, monkeypatch
     assert opened == [str(h5.resolve())]
 
 
+def test_window_shutdown_waits_for_a_delayed_close_time_save(tmp_path, monkeypatch):
+    fake = _fake_gui(monkeypatch)
+    captured = {}
+    thread = _serve_in_thread(
+        monkeypatch, captured, port=0, window=True, open_browser=False
+    )
+    assert _wait_for(lambda: len(fake.windows) == 1 and "session" in captured)
+    session = captured["session"]
+    session.path = str(tmp_path / "run.h5")
+    session.config_path = tmp_path / "run.json"
+    session.config = {}
+    session.status = "ready"
+    config = {
+        "peaks": [{"mz": 42.0}],
+        "ranges": [],
+        "mass_axis_domain": "corrected",
+        "mass_axis_version": 1,
+    }
+
+    assert desktop.close_window() is True
+    threading.Event().wait(0.1)
+    api = _Server(captured["url"])
+    assert api.post("/save?version=1&closing=1", config)[0] == 200
+    thread.join(TIMEOUT)
+
+    assert not thread.is_alive()
+    assert json.loads((tmp_path / "run.json").read_text(encoding="utf-8")) == config
+
+
 def test_a_closed_window_ends_the_app_without_opening_a_browser(monkeypatch):
     fake = _fake_gui(monkeypatch)
     opened = []

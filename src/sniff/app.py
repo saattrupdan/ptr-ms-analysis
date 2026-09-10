@@ -374,6 +374,7 @@ class Session:
         self._lock = threading.Lock()
         self._save_lock = threading.Lock()
         self._save_version = None
+        self._close_save = threading.Event()
         self._opening = False
         self._cancel = threading.Event()
         # A double-clicked bundle has no terminal to press Ctrl-C in, so stopping the
@@ -502,18 +503,25 @@ class Session:
                 should_stop=self._cancel.is_set,
             )
             self.path, self.config_path, self.config = path, config_path, config
+            # The resume pointer belongs to the successful open. Publish it before
+            # "ready" lets /close proceed, otherwise an explicit close can delete the
+            # pointer just before this thread recreates it.
+            try:
+                remember_active(path)
+            except OSError:
+                pass
+            try:
+                remember_recent(path)
+            except OSError:
+                # Either piece of bookkeeping may fail independently. In particular, a
+                # broken recents store must not leave the previous file as the resume.
+                pass
             # Clear the flag before announcing readiness: the page polls the state and
             # offers its buttons the moment it sees "ready", so "ready" has to mean it
             # will accept a close or an export rather than answering "busy".
             with self._lock:
                 self._opening = False
             self.status, self.stage = "ready", "Ready"
-            try:
-                remember_recent(path)
-                remember_active(path)
-            except OSError:
-                # Bookkeeping. It must never cost the user a file that opened fine.
-                pass
             return self.payload
         except ptrms.AnalysisCancelled:
             # Nothing was decided and nothing was half-written: the file closes and
@@ -616,6 +624,7 @@ class Session:
             self.payload = None
             self.progress = None
             self._save_version = None
+            self._close_save.clear()
             # A closed file has no last export: a tab left open must not be told a run
             # finished when it belongs to a file that is no longer loaded.
             self.export_result = None
@@ -644,6 +653,16 @@ class Session:
             if version is not None:
                 self._save_version = version
             return True
+
+    def finish_close_save(self) -> None:
+        """Report that the page-teardown snapshot has finished its save attempt."""
+        self._close_save.set()
+
+    def wait_for_close_save(self, timeout=1.0) -> bool:
+        """Give a closing page a bounded opportunity to publish its last edit."""
+        if not self.config_path:
+            return True
+        return self._close_save.wait(timeout)
 
     @property
     def busy(self) -> bool:
@@ -1360,32 +1379,37 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 )
                 self._send(202, {"ok": True})
             elif route.path == "/save":
-                if not _valid_config(body, require_mass_axis=True):
-                    self._send(
-                        400,
-                        {
-                            "error": "config must contain peaks or ranges and the "
-                            "current mass-axis marker"
-                        },
-                    )
-                    return
-                raw_version = parse_qs(route.query).get("version", [None])[0]
+                closing = parse_qs(route.query).get("closing", ["0"])[0] == "1"
                 try:
-                    version = int(raw_version) if raw_version is not None else None
-                except ValueError:
-                    self._send(400, {"error": "save version must be an integer"})
-                    return
-                try:
-                    saved = session.save_config(body, version=version)
-                except RuntimeError as exc:
-                    self._send(409, {"error": str(exc)})
-                    return
-                except OSError as exc:
-                    # Say so rather than let the request thread die: the page needs a
-                    # reason, and the config on disk is still the last good one.
-                    self._send(500, {"error": f"could not write the config: {exc}"})
-                    return
-                self._send(200, {"ok": True, "saved": saved})
+                    if not _valid_config(body, require_mass_axis=True):
+                        self._send(
+                            400,
+                            {
+                                "error": "config must contain peaks or ranges and the "
+                                "current mass-axis marker"
+                            },
+                        )
+                        return
+                    raw_version = parse_qs(route.query).get("version", [None])[0]
+                    try:
+                        version = int(raw_version) if raw_version is not None else None
+                    except ValueError:
+                        self._send(400, {"error": "save version must be an integer"})
+                        return
+                    try:
+                        saved = session.save_config(body, version=version)
+                    except RuntimeError as exc:
+                        self._send(409, {"error": str(exc)})
+                        return
+                    except OSError as exc:
+                        # Say so rather than let the request thread die: the page needs a
+                        # reason, and the config on disk is still the last good one.
+                        self._send(500, {"error": f"could not write the config: {exc}"})
+                        return
+                    self._send(200, {"ok": True, "saved": saved})
+                finally:
+                    if closing:
+                        session.finish_close_save()
             elif route.path == "/export":
                 if not session.path:
                     self._send(409, {"error": "no file is open"})
@@ -1595,6 +1619,11 @@ def serve_app(
             # server is up, so it has to carry the address.
             _log(f"sniff: could not open a browser ({exc}); open {url} in one yourself")
     session.stop.wait()
+    # A native window's close event can beat the browser engine's sendBeacon onto the
+    # request thread. Keep the localhost endpoint alive briefly for that final snapshot;
+    # an ordinary browser tab leaves the server running and never pays this wait.
+    if in_window:
+        session.wait_for_close_save()
     session.close()
     httpd.shutdown()
     httpd.server_close()
