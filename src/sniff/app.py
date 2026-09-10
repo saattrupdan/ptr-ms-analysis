@@ -516,12 +516,12 @@ class Session:
                 # Either piece of bookkeeping may fail independently. In particular, a
                 # broken recents store must not leave the previous file as the resume.
                 pass
-            # Clear the flag before announcing readiness: the page polls the state and
-            # offers its buttons the moment it sees "ready", so "ready" has to mean it
-            # will accept a close or an export rather than answering "busy".
+            # Publish readiness and the busy flag under the same lock. The page offers
+            # its buttons the moment it sees "ready", and /close must never observe an
+            # idle opening before the ready session itself has been published.
             with self._lock:
+                self.status, self.stage = "ready", "Ready"
                 self._opening = False
-            self.status, self.stage = "ready", "Ready"
             return self.payload
         except ptrms.AnalysisCancelled:
             # Nothing was decided and nothing was half-written: the file closes and
@@ -659,9 +659,13 @@ class Session:
         self._close_save.set()
 
     def wait_for_close_save(self, timeout=1.0) -> bool:
-        """Give a closing page a bounded opportunity to publish its last edit."""
+        """Give this closing page a bounded opportunity to publish its last edit."""
         if not self.config_path:
             return True
+        # A pagehide from an earlier refresh may have completed a different close-save.
+        # Clear that sticky signal at shutdown initiation; if the current beacon already
+        # finished, the data is safe and this only costs the bounded wait.
+        self._close_save.clear()
         return self._close_save.wait(timeout)
 
     @property
@@ -717,9 +721,12 @@ class Session:
         return {"status": "idle"}
 
     def state(self) -> dict:
-        loading = self.status == "loading"
+        with self._lock:
+            status = self.status
+            opening = self._opening
+        loading = status == "loading"
         return {
-            "status": self.status,
+            "status": status,
             "stage": self.stage,
             "error": self.error,
             "error_details": self.error_details,
@@ -735,7 +742,7 @@ class Session:
                 if loading and self.progress is not None
                 else None
             ),
-            "cancellable": bool(loading and self._opening),
+            "cancellable": bool(loading and opening),
             # "window" or "browser": how the user is looking at this app right
             # now. A bundle that meant to open a window and did not has to be able to say
             # so — otherwise the only evidence is a tab the user has to notice.

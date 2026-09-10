@@ -422,12 +422,34 @@ def test_window_shutdown_waits_for_a_delayed_close_time_save(tmp_path, monkeypat
         "mass_axis_version": 1,
     }
 
+    save_entered = threading.Event()
+    release_save = threading.Event()
+    real_save = session.save_config
+
+    def blocked_save(body, version=None):
+        save_entered.set()
+        assert release_save.wait(TIMEOUT)
+        return real_save(body, version=version)
+
+    session.save_config = blocked_save
+    session.finish_close_save()  # stale signal from an earlier page refresh
     assert desktop.close_window() is True
-    threading.Event().wait(0.1)
+    assert _wait_for(lambda: not session._close_save.is_set())
     api = _Server(captured["url"])
-    assert api.post("/save?version=1&closing=1", config)[0] == 200
+    response = {}
+    request = threading.Thread(
+        target=lambda: response.setdefault(
+            "value", api.post("/save?version=1&closing=1", config)
+        )
+    )
+    request.start()
+    assert save_entered.wait(TIMEOUT)
+    assert thread.is_alive()  # shutdown is draining this close's save
+    release_save.set()
+    request.join(TIMEOUT)
     thread.join(TIMEOUT)
 
+    assert response["value"][0] == 200
     assert not thread.is_alive()
     assert json.loads((tmp_path / "run.json").read_text(encoding="utf-8")) == config
 

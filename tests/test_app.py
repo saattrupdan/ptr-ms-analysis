@@ -527,34 +527,53 @@ def test_export_keeps_the_server_and_the_file_open(server, tmp_path):
     assert b"Sniff" in page and b"PTR-MS review" in page  # and the app is still serving
 
 
-def test_close_cannot_race_the_resume_pointer_back_into_existence(
-    server, tmp_path, monkeypatch
-):
+def test_close_waits_for_ready_to_be_published_atomically(server, tmp_path):
     api, session = server
     h5 = tmp_path / "run.h5"
     make_h5(h5)
-    entered = threading.Event()
+    publishing = threading.Event()
     release = threading.Event()
-    real_remember_active = app.remember_active
+    close_waiting = threading.Event()
 
-    def blocked_remember_active(path):
-        entered.set()
-        assert release.wait(5)
-        real_remember_active(path)
+    class PausingLock:
+        def __init__(self, lock):
+            self.lock = lock
 
-    monkeypatch.setattr(app, "remember_active", blocked_remember_active)
+        def __enter__(self):
+            if publishing.is_set() and not release.is_set():
+                close_waiting.set()
+            self.lock.acquire()
+            return self
+
+        def __exit__(self, *_args):
+            if session.status == "ready" and not session._opening:
+                publishing.set()
+                assert release.wait(5)
+            self.lock.release()
+
+    session._lock = PausingLock(session._lock)
     with (
         mock.patch.object(app, "auto_peaks", return_value=[]),
         mock.patch.object(app, "auto_ranges", return_value=[]),
         mock.patch.object(app.viz, "build_viz_data", payload_stub),
     ):
         assert api.post("/open", {"path": str(h5)})[0] == 202
-        assert entered.wait(5)
-        assert session.busy is True
-        assert api.post("/close")[0] == 409
+        assert publishing.wait(5)
+        response = {}
+
+        def close_review():
+            response["value"] = api.post("/close")
+
+        close_thread = threading.Thread(target=close_review, name="close-request")
+        close_thread.start()
+        assert close_waiting.wait(5)
+        assert close_thread.is_alive()
         release.set()
-        _wait_ready(api)
-    assert api.post("/close")[0] == 200
+        close_thread.join(5)
+
+    assert response["value"][0] == 200
+    assert session.status == "empty"
+    assert session.path is None
     assert app.load_active() is None
 
 
@@ -749,7 +768,9 @@ def test_export_is_refused_while_one_is_running(server, tmp_path):
 # --------------------------------------------------------------------------
 # durability of the saved config
 # --------------------------------------------------------------------------
-def test_older_delayed_save_cannot_replace_the_close_time_snapshot(server, tmp_path):
+def test_older_delayed_save_cannot_replace_the_close_time_snapshot(
+    server, tmp_path, monkeypatch
+):
     api, session = server
     session.path = str(tmp_path / "run.h5")
     session.config_path = tmp_path / "run.json"
@@ -760,11 +781,44 @@ def test_older_delayed_save_cannot_replace_the_close_time_snapshot(server, tmp_p
         "mass_axis_domain": "corrected",
         "mass_axis_version": 1,
     }
+    newer = {**base, "peaks": [{"mz": 2.0}]}
+    older = {**base, "peaks": [{"mz": 1.0}]}
+    newer_writing = threading.Event()
+    release_newer = threading.Event()
+    older_arrived = threading.Event()
+    real_write = app._write_json
+    real_save = session.save_config
 
-    code, answer = api.post("/save?version=200", {**base, "peaks": [{"mz": 2.0}]})
-    assert code == 200 and answer["saved"] is True
-    code, answer = api.post("/save?version=100", {**base, "peaks": [{"mz": 1.0}]})
-    assert code == 200 and answer["saved"] is False
+    def blocked_write(path, value):
+        if value.get("peaks") == newer["peaks"]:
+            newer_writing.set()
+            assert release_newer.wait(5)
+        real_write(path, value)
+
+    def observed_save(config, version=None):
+        if version == 100:
+            older_arrived.set()
+        return real_save(config, version=version)
+
+    monkeypatch.setattr(app, "_write_json", blocked_write)
+    session.save_config = observed_save
+    responses = {}
+    new_thread = threading.Thread(
+        target=lambda: responses.setdefault("new", api.post("/save?version=200", newer))
+    )
+    old_thread = threading.Thread(
+        target=lambda: responses.setdefault("old", api.post("/save?version=100", older))
+    )
+    new_thread.start()
+    assert newer_writing.wait(5)
+    old_thread.start()
+    assert older_arrived.wait(5)
+    release_newer.set()
+    new_thread.join(5)
+    old_thread.join(5)
+
+    assert responses["new"][0] == 200 and responses["new"][1]["saved"] is True
+    assert responses["old"][0] == 200 and responses["old"][1]["saved"] is False
     saved = json.loads(session.config_path.read_text(encoding="utf-8"))
     assert saved["peaks"] == [{"mz": 2.0}]
 
