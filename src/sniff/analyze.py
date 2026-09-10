@@ -89,14 +89,32 @@ def _load_config(args):
 
 
 def _migrate_loaded_config(config, args, mass_axis):
-    """Migrate a file-backed config after successful internal calibration."""
+    """Migrate and scrub a file-backed config after successful calibration."""
     if not getattr(args, "config", None) or not config:
         return config
     migrated, changed = ptrms.migrate_config_mass_axis(config, mass_axis)
-    if changed:
+    migrated, retired_fields_removed = _scrub_retired_review_fields(migrated)
+    if changed or retired_fields_removed:
         with open(args.config, "w", encoding="utf-8") as fh:
             json.dump(migrated, fh, indent=2)
     return migrated
+
+
+def _scrub_retired_review_fields(config):
+    """Remove retired checklist fields without discarding unknown config data."""
+    cleaned = dict(config)
+    changed = "checklist" in cleaned
+    cleaned.pop("checklist", None)
+    review = cleaned.get("review")
+    if isinstance(review, dict) and "checklist" in review:
+        review = dict(review)
+        review.pop("checklist", None)
+        changed = True
+        if review:
+            cleaned["review"] = review
+        else:
+            cleaned.pop("review", None)
+    return cleaned, changed
 
 
 def resolve_analysis_settings(config=None, args=None):
@@ -1019,27 +1037,6 @@ def _load_ranges(args, f, mass_axis=None):
     return None
 
 
-def _load_checklist(args):
-    """Read the agent-authored review checklist from the config, if any.
-
-    Accepts a top-level ``checklist`` (list of strings or {text, detail} objects)
-    or ``review.checklist``. These are notes the agent wants the human to confirm
-    in the browser review — surfaced as a checklist in the viz app instead of being
-    dumped as a wall of text after `viz` launches."""
-    path = getattr(args, "config", None)
-    if not path or not os.path.exists(path):
-        return []
-    try:
-        with open(path, encoding="utf-8") as fh:
-            cfg = json.load(fh)
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return []
-    cl = cfg.get("checklist")
-    if cl is None and isinstance(cfg.get("review"), dict):
-        cl = cfg["review"].get("checklist")
-    return cl or []
-
-
 def _resolve_ranges(f, ranges_cfg):
     ncyc = int(f["SPECdata/Intensities"].shape[0])
     if not ranges_cfg:
@@ -1403,7 +1400,6 @@ def cmd_viz(args):
             analysis_settings=settings,
             config_base=config,
             x_axis_unit=x_axis_unit,
-            checklist=_load_checklist(args),
             merge_note=config.get("merge_note") or "",
             mass_axis=mass_axis,
         )

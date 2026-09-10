@@ -126,6 +126,23 @@ def _config_key(config) -> str:
     return json.dumps(config, sort_keys=True, separators=(",", ":"))
 
 
+def _scrub_retired_review_fields(config):
+    """Remove the retired checklist fields without discarding unknown config data."""
+    cleaned = dict(config)
+    changed = "checklist" in cleaned
+    cleaned.pop("checklist", None)
+    review = cleaned.get("review")
+    if isinstance(review, dict) and "checklist" in review:
+        review = dict(review)
+        review.pop("checklist", None)
+        changed = True
+        if review:
+            cleaned["review"] = review
+        else:
+            cleaned.pop("review", None)
+    return cleaned, changed
+
+
 def _write_json(path: Path, value) -> None:
     """Durably replace a JSON file without exposing a partial write.
 
@@ -224,9 +241,8 @@ def bootstrap_config(
 ) -> dict:
     """Build a config from the file alone, with no agent and no judgement calls.
 
-    Peaks and intervals come from the deterministic pipeline; the checklist says
-    plainly what was decided automatically and what still needs a human. ``f`` may be
-    an already-open file, since opening a 2 GB run costs tens of seconds.
+    Peaks and intervals come from the deterministic pipeline. ``f`` may be an
+    already-open file, since opening a 2 GB run costs tens of seconds.
     ``progress`` and ``should_stop`` are the same pair :func:`ptrms.extract_traces`
     takes: detection is one call each for peaks and intervals, so it reports at the
     boundaries between them (auto_peaks 0.1 s, auto_ranges 0.8 s on the 2 GB run).
@@ -275,34 +291,11 @@ def bootstrap_config(
             source.close()
 
     settings = resolve_analysis_settings({})
-    checklist = [
-        {
-            "text": "This config was generated automatically — nothing has been "
-            "curated yet.",
-            "detail": "Peaks and intervals come from the deterministic pipeline. "
-            "The judgment calls stay with the reviewer: the pipeline cannot tell "
-            "a real low-level analyte from an artifact, and it classifies "
-            "intervals purely by signal level.",
-        },
-        f"{len(peaks)} channels and {len(ranges)} intervals were detected.",
-        "Check each interval's class: a plateau at analyte levels that matches the "
-        "background is a background, whatever the level detector said.",
-        "Confirm or correct the chemistry on the named channels, and name the rest.",
-        "Look for artifact channels — mass-locked fragments and ringing combs sit "
-        "at fixed offsets from strong ions and have no plausible formula.",
-    ]
-    if not peaks:
-        checklist.insert(
-            1,
-            "No significant signal was detected in this file: treat it as a blank or "
-            "a no-beam capture rather than an analyte panel.",
-        )
     config = {
         "peaks": peaks,
         "ranges": ranges,
         "analyze": {k: v for k, v in settings.items() if k != "sources"},
         "viz": {"x_axis_unit": "cycle"},
-        "checklist": checklist,
         "mass_axis_domain": ptrms.MASS_AXIS_CONFIG_DOMAIN,
         "mass_axis_version": ptrms.MASS_AXIS_CONFIG_VERSION,
         "mass_axis_calibration": mass_axis.to_dict(),
@@ -519,7 +512,8 @@ class Session:
                 raise ValueError(f"{config_path} is not a sniff config")
             if config is not None:
                 config, migrated = ptrms.migrate_config_mass_axis(config, mass_axis)
-                if migrated:
+                config, retired_fields_removed = _scrub_retired_review_fields(config)
+                if migrated or retired_fields_removed:
                     _write_json(config_path, config)
             prep_start = P_CAL
             if config is None:
@@ -627,6 +621,7 @@ class Session:
         # Agent responses are edits to the already corrected automatic config, not
         # pre-calibration exports. Keep the domain marker authoritative even when an
         # otherwise valid agent omits unknown top-level fields.
+        answer, _ = _scrub_retired_review_fields(answer)
         answer.setdefault("mass_axis_domain", config["mass_axis_domain"])
         answer.setdefault("mass_axis_version", config["mass_axis_version"])
         if (
@@ -650,7 +645,6 @@ class Session:
             mass_axis=mass_axis,
             analysis_settings=settings,
             config_base=config,
-            checklist=config.get("checklist"),
             x_axis_unit=resolve_x_axis_unit(config),
             merge_note=config.get("merge_note") or "",
             progress=progress,
@@ -709,6 +703,7 @@ class Session:
             and version < self._save_version
         ):
             return False
+        config, _ = _scrub_retired_review_fields(config)
         _write_json(self.config_path, config)
         self.config = config
         if version is not None:
