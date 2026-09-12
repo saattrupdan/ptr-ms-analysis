@@ -273,6 +273,19 @@ def main(argv) -> int:
         if post(base + "/close") != 200:
             print("frozen app smoke: FAIL — could not close the file", file=sys.stderr)
             return 1
+        # Run each launch in isolation. Concurrent AppKit/pywebview processes add no
+        # coverage and can stall a second windowed launch on hosted macOS runners.
+        if post(base + "/shutdown") != 200:
+            print("frozen app smoke: FAIL — could not stop the first app", file=sys.stderr)
+            return 1
+        try:
+            proc.wait(timeout=LAUNCH_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            print(
+                "frozen app smoke: FAIL — the first app did not stop",
+                file=sys.stderr,
+            )
+            return 1
 
         # Second phase: the same executable with no arguments at all, which is how
         # Finder and the Start Menu shortcut launch it. The command line would answer
@@ -392,7 +405,8 @@ def main(argv) -> int:
         )
         return 0
     finally:
-        proc.kill()
+        if proc.poll() is None:
+            proc.kill()
         proc.wait(timeout=10)
 
 

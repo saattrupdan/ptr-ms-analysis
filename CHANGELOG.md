@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   a transparent contextual prior for candidate ranking. The modal can be skipped, and
   the prior never forces an identification or suppresses other detected peaks.
 
+### Fixed
+
+- The frozen-app smoke now stops each app process before testing the next launch mode,
+  avoiding spurious macOS CI stalls from concurrent AppKit/pywebview processes.
+
 ### Changed
 
 - The app landing page now shows the installed Sniff version discreetly in its footer.
