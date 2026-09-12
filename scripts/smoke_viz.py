@@ -757,15 +757,20 @@ def _start_screen_browser_pass() -> None:
                 "invalid:document.querySelector('#compound-input').getAttribute('aria-invalid'), "
                 "expanded:document.querySelector('#compound-input').getAttribute('aria-expanded'), "
                 "active:document.querySelector('#compound-input').getAttribute('aria-activedescendant'), "
-                "suggestions:Array.from(document.querySelectorAll('.suggestion')).map(e=>e.innerText)})",
+                "suggestions:Array.from(document.querySelectorAll('.suggestion')).map(e=>e.innerText), "
+                "dialogScroll:(()=>{const e=document.querySelector('.priorcard'); "
+                "return e.scrollHeight>e.clientHeight})(), suggestionScroll:(()=>{const e="
+                "document.querySelector('#compound-suggestions'); return e.scrollHeight>e.clientHeight})()})",
             )
             _assert(
                 partial["open"]
                 and partial["invalid"] == "true"
                 and partial["expanded"] == "true"
                 and partial["active"] == "compound-option-0"
-                and any("acetone" in name for name in partial["suggestions"]),
-                "compound modal does not expose live autocomplete for a partial name",
+                and any("acetone" in name for name in partial["suggestions"])
+                and not partial["dialogScroll"]
+                and partial["suggestionScroll"],
+                "compound autocomplete is missing or makes the dialog itself scroll",
             )
             _browser(
                 session,

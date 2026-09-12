@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The compound autocomplete now scrolls within a shorter suggestion list instead of
+  making the entire pre-analysis modal scroll.
+
 ## [0.7.0] - 2026-09-12
 
 ### Added
