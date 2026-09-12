@@ -17,6 +17,8 @@ from importlib import resources
 
 import numpy as np
 
+from . import isotopes, peak_fit
+
 PROTON = 1.007276
 
 # Date.toISOString() switches to expanded years outside this UTC interval.
@@ -1377,6 +1379,35 @@ def deconvolve_cluster(
     return {m: traces[:, k] for k, m in enumerate(centers_m)}
 
 
+def _profile_report(profile):
+    if profile is None:
+        return {"usable": False, "reason": "legacy model selected"}
+    return {
+        "usable": bool(profile["usable"]),
+        "reason": profile["reason"],
+        "n_reference_peaks": int(profile["n_reference_peaks"]),
+    }
+
+
+def _fit_report(masses, fitted, n_reference_peaks):
+    def _finite(value):
+        return round(float(value), 6) if np.isfinite(value) else None
+
+    return {
+        "masses": [float(mass) for mass in masses],
+        "method": "empirical-v1",
+        "status": fitted["status"],
+        "reason": fitted["reason"],
+        "n_reference_peaks": int(n_reference_peaks),
+        "shift_timebins": round(float(fitted["shift_tb"]), 4),
+        "width_scale": round(float(fitted["width_scale"]), 4),
+        "rank": int(fitted["rank"]),
+        "condition": _finite(fitted["condition"]),
+        "component_correlation": _finite(fitted["correlation"]),
+        "relative_residual": _finite(fitted["relative_residual"]),
+    }
+
+
 def extract_traces(
     f,
     target_masses,
@@ -1392,6 +1423,8 @@ def extract_traces(
     mass_axis=None,
     progress=None,
     should_stop=None,
+    peak_fit_model="gaussian-v1",
+    fit_diagnostics=None,
 ):
     """Return dict m -> (raw_trace[ncycles], apex_m). One streaming pass.
 
@@ -1417,8 +1450,11 @@ def extract_traces(
     28.6 s they share, so a bar driven by the first pass alone would sit at 100 %
     through the second. It is 89 % of the ~33 s an open costs in total.
     should_stop: optional callback polled once per block in both passes; when it
-    returns true the pass raises AnalysisCancelled. Both default to None, which
-    changes nothing — no arithmetic and no ordering depends on them."""
+    returns true the pass raises AnalysisCancelled. ``peak_fit_model`` may be the
+    historical ``gaussian-v1`` or measured-shape ``empirical-v1``. Diagnostics are
+    written into the optional mutable ``fit_diagnostics`` mapping. All additions
+    default to the historical arithmetic.
+    """
     if mass_axis is None:
         mass_axis = load_mass_axis(f)
     else:
@@ -1477,12 +1513,71 @@ def extract_traces(
         for m in isolated
     }
     iso_buf = {m: np.empty(ncyc) for m in isolated}
-    cluster_apex = [[apexes[m] for m in g] for g in clusters]
+    empirical_profile = None
+    if peak_fit_model == "empirical-v1":
+        isolated_tb = [m_to_tb(apexes[m], a, b, mass_axis) for m in isolated]
+        isolated_sigma = [
+            _sigma_tb(apexes[m], a, R_phys, mass_axis=mass_axis) for m in isolated
+        ]
+        empirical_profile = peak_fit.estimate_empirical_profile(
+            avg, isolated_tb, isolated_sigma
+        )
+    elif peak_fit_model != "gaussian-v1":
+        raise ValueError(f"unknown peak-fit model: {peak_fit_model}")
+
     cluster_design = []
-    for g, caps in zip(clusters, cluster_apex):
-        apex_hw = {ap: _hw_for(m, ap, R, windows) for m, ap in zip(g, caps)}
-        cluster_design.append(
-            _cluster_design(
+    cluster_reports = []
+    for g in clusters:
+        caps = [apexes[m] for m in g]
+        design = None
+        if empirical_profile is not None:
+            centers_tb = np.array([m_to_tb(m, a, b, mass_axis) for m in caps])
+            sigmas_tb = np.array(
+                [_sigma_tb(m, a, R_phys, mass_axis=mass_axis) for m in caps]
+            )
+            fitted = peak_fit.fit_group_design(
+                avg, centers_tb, sigmas_tb, empirical_profile
+            )
+            if fitted["usable"]:
+                shifted_tb = centers_tb + fitted["shift_tb"]
+                shifted_m = [tb_to_m(value, a, b, mass_axis) for value in shifted_tb]
+                for m, measured in zip(g, shifted_m):
+                    apexes[m] = measured
+                norm = np.zeros(len(g))
+                for k, (m, measured) in enumerate(zip(g, shifted_m)):
+                    hw_l, hw_r = _hw_for(m, measured, R, windows)
+                    wl, wr = peak_window_lr(
+                        measured, a, b, hw_l, hw_r, mass_axis
+                    )
+                    left = max(0, wl - fitted["lo"])
+                    right = min(fitted["components"].shape[0], wr - fitted["lo"])
+                    norm[k] = fitted["components"][left:right, k].sum()
+                design = {
+                    "method": "empirical-v1",
+                    "fit": fitted,
+                    "norm": norm,
+                }
+                report = _fit_report(
+                    g, fitted, empirical_profile["n_reference_peaks"]
+                )
+                if not empirical_profile["usable"]:
+                    report["method"] = "gaussian-fallback-v1"
+                    report["fallback_reason"] = empirical_profile["reason"]
+                cluster_reports.append(report)
+            else:
+                design = {"method": "unresolved"}
+                cluster_reports.append(
+                    {
+                        "masses": [float(m) for m in g],
+                        "method": "gaussian-fallback-v1",
+                        "status": "unresolved",
+                        "reason": fitted["reason"],
+                        "fallback_reason": empirical_profile["reason"],
+                    }
+                )
+        if design is None:
+            apex_hw = {ap: _hw_for(m, ap, R, windows) for m, ap in zip(g, caps)}
+            gaussian = _cluster_design(
                 caps,
                 a,
                 b,
@@ -1492,8 +1587,26 @@ def extract_traces(
                 nbin=nbin,
                 mass_axis=mass_axis,
             )
-        )
+            design = {"method": "gaussian-v1", "design": gaussian}
+            cluster_reports.append(
+                {
+                    "masses": [float(m) for m in g],
+                    "method": "gaussian-v1",
+                    "status": "legacy",
+                    "reason": "legacy model selected",
+                }
+            )
+        cluster_design.append(design)
     cluster_buf = [np.empty((ncyc, len(g))) for g in clusters]
+    if fit_diagnostics is not None:
+        fit_diagnostics.clear()
+        fit_diagnostics.update(
+            {
+                "model": peak_fit_model,
+                "profile": _profile_report(empirical_profile),
+                "clusters": cluster_reports,
+            }
+        )
 
     # Cycles the two passes read between them: every cycle once here, plus every
     # cycle the interval re-centring below reads again. On the 2 GB fixture with its
@@ -1512,10 +1625,21 @@ def extract_traces(
         for m in isolated:
             wl, wr = win_tb[m]
             iso_buf[m][i:j] = chunk[:, wl:wr].sum(axis=1)
-        for ci, (tlo, thi, P, norm) in enumerate(cluster_design):
-            A = chunk[:, tlo:thi] @ P
-            np.clip(A, 0, None, out=A)
-            cluster_buf[ci][i:j, :] = A * norm[None, :]
+        for ci, design in enumerate(cluster_design):
+            if design["method"] == "empirical-v1":
+                fitted = design["fit"]
+                if fitted["status"] == "reliable":
+                    amplitudes = peak_fit.apply_group_design(chunk, fitted)
+                    cluster_buf[ci][i:j, :] = amplitudes * design["norm"][None, :]
+                else:
+                    cluster_buf[ci][i:j, :] = np.nan
+            elif design["method"] == "unresolved":
+                cluster_buf[ci][i:j, :] = np.nan
+            else:
+                tlo, thi, projection, norm = design["design"]
+                amplitudes = chunk[:, tlo:thi] @ projection
+                np.clip(amplitudes, 0, None, out=amplitudes)
+                cluster_buf[ci][i:j, :] = amplitudes * norm[None, :]
         for lbl, (lo, hi) in want_ranges.items():  # cycles are 1-based inclusive
             c0, c1 = max(i, lo - 1), min(j, hi)
             if c1 > c0:
@@ -1560,7 +1684,52 @@ def extract_traces(
                 *_hw_for(m, ap, R, windows),
                 mass_axis=mass_axis,
             )
-        if not rwin:
+        range_cluster_design = []
+        if empirical_profile is not None:
+            for cluster_index, group in enumerate(clusters):
+                centres_tb = np.array(
+                    [m_to_tb(apexes[m], a, b, mass_axis) for m in group]
+                )
+                sigmas_tb = np.array(
+                    [
+                        _sigma_tb(apexes[m], a, R_phys, mass_axis=mass_axis)
+                        for m in group
+                    ]
+                )
+                fitted = peak_fit.fit_group_design(
+                    avg_r, centres_tb, sigmas_tb, empirical_profile
+                )
+                if not fitted["usable"]:
+                    continue
+                norm = np.zeros(len(group))
+                shifted_tb = centres_tb + fitted["shift_tb"]
+                for k, (m, centre_tb) in enumerate(zip(group, shifted_tb)):
+                    measured = tb_to_m(centre_tb, a, b, mass_axis)
+                    hw_l, hw_r = _hw_for(m, measured, R, windows)
+                    window_lo, window_hi = peak_window_lr(
+                        measured, a, b, hw_l, hw_r, mass_axis
+                    )
+                    left = max(0, window_lo - fitted["lo"])
+                    right = min(
+                        fitted["components"].shape[0],
+                        window_hi - fitted["lo"],
+                    )
+                    norm[k] = fitted["components"][left:right, k].sum()
+                range_cluster_design.append(
+                    (cluster_index, {"fit": fitted, "norm": norm})
+                )
+                range_report = _fit_report(
+                    group,
+                    fitted,
+                    empirical_profile["n_reference_peaks"],
+                )
+                if not empirical_profile["usable"]:
+                    range_report["method"] = "gaussian-fallback-v1"
+                    range_report["fallback_reason"] = empirical_profile["reason"]
+                cluster_reports[cluster_index].setdefault("ranges", {})[lbl] = (
+                    range_report
+                )
+        if not rwin and not range_cluster_design:
             continue
         for i in range(lo - 1, hi, block):
             if should_stop is not None and should_stop():
@@ -1570,6 +1739,16 @@ def extract_traces(
             chunk[~np.isfinite(chunk)] = 0.0
             for m, (wl, wr) in rwin.items():
                 traces[m][i:j] = chunk[:, wl:wr].sum(axis=1)
+            for cluster_index, design in range_cluster_design:
+                fitted = design["fit"]
+                group = clusters[cluster_index]
+                if fitted["status"] == "reliable":
+                    amplitudes = peak_fit.apply_group_design(chunk, fitted)
+                    values = amplitudes * design["norm"][None, :]
+                else:
+                    values = np.full((j - i, len(group)), np.nan)
+                for k, mass in enumerate(group):
+                    traces[mass][i:j] = values[:, k]
             if progress is not None:
                 read += j - i
                 progress(min(read, span) / span)
@@ -2093,6 +2272,8 @@ def quantify(
     humidity_ref=None,
     humidity_p=1.0,
     mass_axis=None,
+    isotope_plan=None,
+    isotope_abundance_basis="unknown",
 ):
     """Turn raw traces into Corrected / Conc / Conc[ug] and per-range statistics.
 
@@ -2146,17 +2327,38 @@ def quantify(
             hfac = humidity_factor(humidity_ratio, humidity_ref, humidity_p)
             humid_applied = True
 
+    corrected = {}
+    for mass, (raw_trace, apex_mass) in traces.items():
+        transmission = float(np.interp(apex_mass, tm, tf))
+        corrected[mass] = raw_trace / transmission
+    isotope_diagnostics = []
+    if isotope_plan is not None:
+        net_corrected, isotope_diagnostics = isotopes.correct_parent_signals(
+            corrected,
+            isotope_plan,
+            abundance_basis=isotope_abundance_basis,
+        )
+        parent_masses = {
+            float(mass) for mass in isotope_plan.get("analyte_masses", [])
+        }
+    else:
+        net_corrected = corrected
+        parent_masses = set(traces)
+
     rows = []
     for m, (raw, apex_m) in traces.items():
+        if m not in parent_masses:
+            continue
         T = float(np.interp(apex_m, tm, tf))
-        cor = raw / T
+        cor = corrected[m]
+        quantitative_signal = net_corrected.get(m, cor)
         kfac = 1.0
         # hybrid kinetic: only scale by a compound's own k when that k is a
         # measured value; compounds with an estimated k stay on the shared K.
         if k_map and k_map.get(m, {}).get("k") and not k_map[m].get("k_estimated"):
             kfac = k_anchor / float(k_map[m]["k"])
         if norm is not None:
-            con = cor * norm * kfac
+            con = quantitative_signal * norm * kfac
             if hfac is not None and m in humid_masses:
                 con = con * hfac
             ug = con * (m - PROTON) / molar_volume
@@ -2190,6 +2392,15 @@ def quantify(
         "humidity_ref": humidity_ref,
         "humidity_p": humidity_p if humid_applied else None,
         "molar_volume_source": molar_volume_source,
+        "isotopes": {
+            "enabled": isotope_plan is not None,
+            "model": isotope_plan.get("version") if isotope_plan is not None else None,
+            "abundance_basis": isotope_abundance_basis,
+            "warnings": isotope_plan.get("warnings", [])
+            if isotope_plan is not None
+            else [],
+            "corrections": isotope_diagnostics,
+        },
     }
 
 

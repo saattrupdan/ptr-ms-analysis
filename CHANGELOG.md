@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- New analyses learn an empirical peak shape from clean isolated channels and use
+  bounded, non-negative run/interval fits for overlapping groups. Rank, conditioning,
+  correlation, residual and fallback diagnostics prevent unresolved components from
+  receiving plausible-looking independent concentrations.
+- Accepted formulas now derive exact natural M+1/M+2 auxiliary channels, show
+  expected/observed isotope evidence, and support guarded isotope-spillover correction
+  without adding duplicate analyte rows. Monoisotopic-abundance scaling remains withheld
+  unless the calibration basis explicitly supports it.
+- Hand-drawn review peaks now snap to a measured apex and request formula candidates
+  from the local server. **Use table on another file** conservatively transfers
+  identities to an explicitly selected run while retaining every credible new detection.
+
+### Changed
+
+- New app-generated configs use analysis schema 2 with `empirical-v1` fitting and
+  `formula-v1` isotope handling. Legacy configs retain their previous Gaussian and
+  isotope-off arithmetic, and both models remain explicit rollback settings.
+
 ## [0.8.0] - 2026-09-12
 
 ### Added

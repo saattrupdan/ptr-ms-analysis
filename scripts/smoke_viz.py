@@ -1479,7 +1479,7 @@ def _review_round_browser_pass(session: str) -> None:
         "the corrected label still shows a name/formula warning",
     )
 
-    # --- a hand-drawn peak is only named when its mass really sits on the library ---
+    # --- a hand-drawn peak stays unknown until a formula candidate is accepted ---
     hand = _eval(
         session,
         "(() => { setTab('spec'); const rect=plotC.getBoundingClientRect(); "
@@ -1498,8 +1498,9 @@ def _review_round_browser_pass(session: str) -> None:
         "return {named, unnamed}; })()",
     )
     _assert(
-        hand["named"]["label"] == "toluene" and hand["named"]["formula"] == "C7H8",
-        "a hand-drawn peak on a library mass was not named consistently: "
+        hand["named"]["label"].startswith("unknown m/z 93.")
+        and hand["named"]["formula"] == "",
+        "a hand-drawn library mass was assigned without candidate review: "
         + str(hand["named"]),
     )
     _assert(
@@ -2396,9 +2397,19 @@ def main() -> int:
             "sidebar abundance did not follow the selected spectrum",
         )
         _assert(
-            "fixed model centre" in clustered["note"]
-            and "not a measured apex" in clustered["note"],
+            "deconvolved component" in clustered["note"]
+            and "Unresolved fits are withheld" in clustered["note"],
             "clustered-peak wording is missing from the identification card",
+        )
+        unavailable = _eval(
+            session,
+            "(() => { const p=peaks[5],old=p.fit; p.fit={status:'unresolved'}; "
+            "SHOWSPEC=SPEC; SPECWIN={lo:1,hi:NCYC}; const value=peakAbundance(p), "
+            "note=peakAbundanceNote(p); p.fit=old; return {value,note}; })()",
+        )
+        _assert(
+            unavailable["value"] is None and "Unavailable" in unavailable["note"],
+            "an unresolved component was displayed as a combined spectrum integral",
         )
         preview = _eval(
             session, "({whole:M.whole_run_windows, first:rawTrace(peaks[0])})"

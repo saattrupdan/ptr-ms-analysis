@@ -33,7 +33,7 @@ from urllib.parse import parse_qs, urlparse
 
 import h5py
 
-from . import __version__, brand, desktop, formula_id, ptrms, viz
+from . import __version__, brand, desktop, formula_id, panel, ptrms, viz
 from . import update as updates
 from .analyze import (
     analyze_config_to_csv,
@@ -361,6 +361,7 @@ def bootstrap_config(
     mass_axis=None,
     progress=None,
     should_stop=None,
+    template_peaks=None,
 ) -> dict:
     """Build a config from the file alone, with no agent and no judgement calls.
 
@@ -403,6 +404,9 @@ def bootstrap_config(
         else:
             ptrms.validate_mass_axis(mass_axis)
         peaks = _detect(auto_peaks)
+        adaptation = None
+        if template_peaks is not None:
+            peaks, adaptation = panel.adapt_peak_table(template_peaks, peaks)
         _say(0.1)
         _halt()  # detection is the only cancellable gap before the review data
         ranges = _detect(auto_ranges)
@@ -414,7 +418,15 @@ def bootstrap_config(
             source.close()
 
     settings = resolve_analysis_settings({})
+    settings.update(
+        {
+            "peak_fit": "empirical-v1",
+            "isotope_mode": "formula-v1",
+            "isotope_abundance_basis": "unknown",
+        }
+    )
     config = {
+        "analysis_schema_version": 2,
         "peaks": peaks,
         "ranges": ranges,
         "analyze": {k: v for k, v in settings.items() if k != "sources"},
@@ -427,6 +439,7 @@ def bootstrap_config(
             "n_ranges": len(ranges),
             "ncyc": ncyc,
             "instrument": instrument,
+            **({"peak_table_adaptation": adaptation} if adaptation is not None else {}),
         },
     }
     # Preserve automatic join provenance for CLI/config compatibility without showing
@@ -604,6 +617,7 @@ class Session:
         agent_timeout=300.0,
         reserved=False,
         compounds_of_interest=None,
+        template_peaks=None,
     ):
         """Load ``path``, making a config first if the file has never been reviewed.
 
@@ -630,6 +644,10 @@ class Session:
             config = _read_json(config_path) if config_path.exists() else None
             if config is not None and not _valid_config(config):
                 raise ValueError(f"{config_path} is not a sniff config")
+            if config is not None and template_peaks is not None:
+                raise ValueError(
+                    "the target already has a saved review; open it normally instead"
+                )
             config_prior_changed = False
             if config is not None:
                 config, config_prior_changed = _canonicalise_config_compounds(config)
@@ -670,6 +688,7 @@ class Session:
                     mass_axis=mass_axis,
                     progress=self._band(P_CAL, P_DETECT),
                     should_stop=self._cancel.is_set,
+                    template_peaks=template_peaks,
                 )
                 self._halt()  # a cancel must not leave a half-made config on disk
                 config = _with_mass_axis_cache(config, mass_axis, fingerprint)
@@ -902,6 +921,25 @@ class Session:
             self.payload = payload
             self._payload_config = config_key
             return payload
+
+    def peak_preview(self, lo, hi):
+        """Return a snapped apex and candidates for a hand-drawn spectrum region."""
+        with self._save_lock:
+            if not self.path or self.config is None or self.mass_axis is None:
+                raise RuntimeError("no file is open")
+            path = self.path
+            mass_axis = self.mass_axis
+            settings = resolve_analysis_settings(self.config)
+            compounds = self.config.get("compounds_of_interest")
+        with h5py.File(path, "r") as source:
+            return viz.preview_peak(
+                source,
+                lo,
+                hi,
+                R=settings["R"],
+                mass_axis=mass_axis,
+                compounds_of_interest=compounds,
+            )
 
     def prepare_review_page(self):
         """Return one generation-consistent payload, target path and page token."""
@@ -2044,6 +2082,17 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 self._send(200, session.status_payload())
             elif route.path == "/api/recent":
                 self._send(200, _recent_entries(session.path))
+            elif route.path == "/peak-preview":
+                if not session.path:
+                    self._send(404, {"error": "no file is open"})
+                    return
+                query = parse_qs(route.query)
+                try:
+                    lo = float(query.get("lo", [""])[0])
+                    hi = float(query.get("hi", [""])[0])
+                    self._send(200, session.peak_preview(lo, hi))
+                except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                    self._send(500, {"error": str(exc)})
             elif route.path == "/spectrum":
                 if not session.path:
                     self._send(404, {"error": "no file is open"})
@@ -2098,6 +2147,15 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 if not Path(target).expanduser().is_file():
                     self._send(404, {"error": f"no such file: {target}"})
                     return
+                if body.get("adapt_peaks") is not None and config_path_for(target).exists():
+                    self._send(
+                        409,
+                        {
+                            "error": "the target already has a saved review; "
+                            "open it normally instead"
+                        },
+                    )
+                    return
                 try:
                     compounds_of_interest = (
                         _normalise_compounds_of_interest(body["compounds_of_interest"])
@@ -2106,6 +2164,16 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                     )
                 except ValueError as exc:
                     self._send(400, {"error": str(exc)})
+                    return
+                template_peaks = body.get("adapt_peaks")
+                if template_peaks is not None and (
+                    not isinstance(template_peaks, list)
+                    or any(
+                        not isinstance(peak, dict) or "mz" not in peak
+                        for peak in template_peaks
+                    )
+                ):
+                    self._send(400, {"error": "adapt_peaks must be a peak list"})
                     return
                 if not session.reserve_open():
                     self._send(409, {"error": "the app is busy with the current file"})
@@ -2117,6 +2185,7 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                     agent_timeout=agent_timeout,
                     reserved=True,
                     compounds_of_interest=compounds_of_interest,
+                    template_peaks=template_peaks,
                 )
                 self._send(202, {"ok": True})
             elif route.path == "/save":

@@ -25,6 +25,8 @@ from __future__ import annotations
 import math
 import re
 
+from . import isotopes
+
 PROTON = 1.007276
 
 # the auto-generated "unknown m/z 73.029" placeholder, and nothing looser
@@ -289,20 +291,7 @@ def _elem_pattern(shift_ab, n):
 
 def isotope_ratios(counts, protonated=True):
     """Predicted (M+1)/M and (M+2)/M intensity ratios for the [M+H]+ ion."""
-    c = dict(counts)
-    if protonated:
-        c["H"] = c.get("H", 0) + 1  # the extra proton is an H atom
-    acc = [1.0, 0.0, 0.0]
-    for el, n in c.items():
-        d = _elem_pattern(ISO.get(el, [(0, 1.0)]), n)
-        acc = [
-            acc[0] * d[0],
-            acc[0] * d[1] + acc[1] * d[0],
-            acc[0] * d[2] + acc[1] * d[1] + acc[2] * d[0],
-        ]
-    if acc[0] <= 0:
-        return 0.0, 0.0
-    return acc[1] / acc[0], acc[2] / acc[0]
+    return isotopes.isotope_ratios(counts, protonated=protonated)
 
 
 # ---- name / rate-constant lookup from the curated table (by formula) ----

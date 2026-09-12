@@ -2125,3 +2125,55 @@ def test_the_start_screen_no_longer_stops_the_app_from_its_main_panel():
     assert '<a class="link" id="quit" href="#" hidden>Stop the app</a>' in html
     assert "s.surface!=='browser'" in html, "the link is not tied to the surface"
     assert "'/shutdown'" in html, "the route lost its only page caller"
+
+
+def test_new_configs_enable_smart_models_and_adapt_explicit_tables(tmp_path):
+    h5 = tmp_path / "adapted.h5"
+    make_h5(h5)
+    template = [{"mz": 59.0, "label": "acetone", "formula": "C3H6O"}]
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[{"mz": 59.004}, {"mz": 73.0}]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+    ):
+        config = app.bootstrap_config(str(h5), template_peaks=template)
+
+    assert config["analysis_schema_version"] == 2
+    assert config["analyze"]["peak_fit"] == "empirical-v1"
+    assert config["analyze"]["isotope_mode"] == "formula-v1"
+    assert config["peaks"][0]["formula"] == "C3H6O"
+    assert [peak["mz"] for peak in config["peaks"]] == [59.004, 73.0]
+    adaptation = config["diagnostics"]["peak_table_adaptation"]
+    assert adaptation["n_matched"] == 1
+    assert adaptation["n_new"] == 1
+
+
+def test_adaptation_refuses_to_replace_an_existing_target_review(tmp_path):
+    h5 = tmp_path / "reviewed.h5"
+    make_h5(h5)
+    h5.with_suffix(".json").write_text(
+        json.dumps({"peaks": [{"mz": 59.0}], "ranges": []}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="already has a saved review"):
+        app.Session().open(str(h5), template_peaks=[{"mz": 59.0}])
+
+
+def test_review_offers_explicit_table_adaptation_and_peak_preview():
+    page = viz.render_html(
+        {
+            "meta": {},
+            "config_base": {},
+            "per_cycle": {},
+            "spectrum": [],
+            "peaks": [],
+            "ranges": [],
+            "transmission": {"masses": [], "factors": []},
+            "rate_constants": [],
+        },
+        mode="app",
+    )
+
+    assert "Use table on another file" in page
+    assert "adapt_peaks:cfg.peaks" in page
+    assert "'/peak-preview?lo='" in page

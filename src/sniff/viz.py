@@ -66,6 +66,110 @@ def _scrub_retired_review_fields(config):
     return cleaned
 
 
+def _isotope_preview(plan, mass, traces, transmission_masses, transmission_factors):
+    if plan is None:
+        return None
+    parent = next(
+        (item for item in plan.get("parents", []) if item["mz"] == mass), None
+    )
+    if parent is None or mass not in traces:
+        return None
+    parent_raw, parent_apex = traces[mass]
+    parent_transmission = float(
+        np.interp(parent_apex, transmission_masses, transmission_factors)
+    )
+    parent_corrected = np.asarray(parent_raw, dtype=np.float64) / parent_transmission
+    channels = []
+    for channel in parent["channels"]:
+        observation = channel["observation_mz"]
+        observed = None
+        status = "missing"
+        if channel.get("overlaps_parent_mz") is not None:
+            status = "shared-parent-channel"
+        elif observation in traces:
+            child_raw, child_apex = traces[observation]
+            child_transmission = float(
+                np.interp(child_apex, transmission_masses, transmission_factors)
+            )
+            child_corrected = np.asarray(child_raw, dtype=np.float64) / child_transmission
+            valid = (
+                np.isfinite(parent_corrected)
+                & np.isfinite(child_corrected)
+                & (parent_corrected > 0)
+            )
+            if valid.any():
+                observed = float(
+                    np.median(child_corrected[valid] / parent_corrected[valid])
+                )
+                status = "observed"
+        channels.append(
+            {
+                "order": channel["order"],
+                "mz": round(float(channel["mz"]), 5),
+                "ratio_expected": round(float(channel["ratio"]), 6),
+                "ratio_observed": None if observed is None else round(observed, 6),
+                "status": status,
+                "overlaps_parent_mz": channel.get("overlaps_parent_mz"),
+            }
+        )
+    return {
+        "version": parent["version"],
+        "monoisotopic_fraction": round(
+            float(parent["monoisotopic_fraction"]), 6
+        ),
+        "channels": channels,
+    }
+
+
+def preview_peak(f, lo, hi, R=1200.0, *, mass_axis=None, compounds_of_interest=None):
+    """Snap a drawn spectrum region and return authoritative formula candidates."""
+    if mass_axis is None:
+        mass_axis = ptrms.load_mass_axis(f)
+    else:
+        ptrms.validate_mass_axis(mass_axis)
+    lower, upper = sorted((float(lo), float(hi)))
+    if upper - lower <= 0:
+        raise ValueError("peak preview needs a non-empty mass range")
+    average = np.asarray(f["SPECdata/AverageSpec"][:], dtype=np.float64)
+    average = np.where(np.isfinite(average), average, 0.0)
+    first = max(0, int(np.floor(ptrms.m_to_tb(lower, mass_axis.a, mass_axis.b, mass_axis))))
+    last = min(
+        len(average),
+        int(np.ceil(ptrms.m_to_tb(upper, mass_axis.a, mass_axis.b, mass_axis))) + 1,
+    )
+    if last <= first:
+        raise ValueError("peak preview range lies outside the measured spectrum")
+    timebin = first + int(np.argmax(average[first:last]))
+    apex = float(ptrms.tb_to_m(timebin, mass_axis.a, mass_axis.b, mass_axis))
+
+    def _window_sum(centre):
+        window_lo, window_hi = ptrms.peak_window(
+            centre, mass_axis.a, mass_axis.b, R, mass_axis
+        )
+        window_lo = max(0, window_lo)
+        window_hi = min(len(average), window_hi)
+        return float(average[window_lo:window_hi].sum())
+
+    parent = _window_sum(apex)
+    observed = None
+    if parent > 0:
+        observed = (
+            _window_sum(apex + formula_id.DM1) / parent,
+            _window_sum(apex + formula_id.DM2) / parent,
+        )
+    candidates = formula_id.score_peak(
+        apex,
+        1.0,
+        obs_ratios=observed,
+        compounds_of_interest=compounds_of_interest,
+    )
+    for candidate in candidates:
+        candidate["isotope_model"] = ptrms.isotopes.formula_isotope_model(
+            candidate["formula"]
+        )
+    return {"apex": round(apex, 5), "candidates": candidates}
+
+
 def _validate_embedded_absolute_axis(payload):
     """Reject an absolute axis that cannot support unambiguous interpolation."""
     embedded = json.loads(payload)
@@ -232,6 +336,14 @@ def build_viz_data(
         )
 
     masses = [float(p["mz"]) for p in peaks_cfg]
+    isotope_plan = (
+        ptrms.isotopes.build_isotope_plan(peaks_cfg, R_phys=R_phys)
+        if analysis_settings.get("isotope_mode") == "formula-v1"
+        else None
+    )
+    extraction_masses = (
+        isotope_plan["extraction_masses"] if isotope_plan is not None else masses
+    )
 
     # per-peak integration-window overrides: number (symmetric full width) or
     # {"left":hwL,"right":hwR} half-widths (asymmetric)
@@ -246,6 +358,7 @@ def build_viz_data(
     # are the EXACT analyze Raw (window-sum for isolated peaks, deconvolution for
     # overlapping ones) and drive all live recompute.
     apexes, raw_traces = {}, {}
+    fit_diagnostics = {}
     if masses:
         real_ranges = not (len(ranges) == 1 and ranges[0]["label"] == "All")
         per_range = (
@@ -255,7 +368,7 @@ def build_viz_data(
         )
         traces, (a, b) = ptrms.extract_traces(
             f,
-            masses,
+            extraction_masses,
             R=R,
             R_phys=R_phys,
             windows=windows or None,
@@ -263,11 +376,13 @@ def build_viz_data(
             progress=_stream,
             should_stop=should_stop,
             mass_axis=mass_axis,
+            peak_fit_model=analysis_settings.get("peak_fit", "gaussian-v1"),
+            fit_diagnostics=fit_diagnostics,
         )
-        apexes = {m: ap for m, (_, ap) in traces.items()}
-        raw_traces = {m: raw for m, (raw, _) in traces.items()}
+        apexes = {m: traces[m][1] for m in masses}
+        raw_traces = {m: traces[m][0] for m in masses}
     clustered = set()
-    for g in ptrms._cluster(masses) if masses else []:
+    for g in ptrms._cluster(extraction_masses) if masses else []:
         if len(g) > 1:
             clustered.update(g)
 
@@ -316,6 +431,13 @@ def build_viz_data(
             obs_ratios=obs_ratios(apex),
             compounds_of_interest=compounds_of_interest,
         )
+        for candidate in cands:
+            try:
+                candidate["isotope_model"] = ptrms.isotopes.formula_isotope_model(
+                    candidate["formula"]
+                )
+            except ValueError:
+                candidate["isotope_model"] = None
         id_conf = cands[0]["probability"] if cands else None
         id_amb = bool(
             cands
@@ -347,6 +469,14 @@ def build_viz_data(
         finite_trace = trace_values[np.isfinite(trace_values)]
         abundance = float(np.mean(finite_trace)) if finite_trace.size else None
         name = formula_id.identity_label(p.get("label"), p.get("formula"))
+        fit_info = next(
+            (
+                report
+                for report in fit_diagnostics.get("clusters", [])
+                if m in report.get("masses", [])
+            ),
+            None,
+        )
         peaks.append(
             {
                 # Keep the authored object separate from preview-only fields. The
@@ -385,7 +515,18 @@ def build_viz_data(
                 "id_confidence": id_conf,
                 "id_ambiguous": id_amb,
                 "overlap": overlap,
-                "trace": [round(float(x), 1) for x in raw_traces[m]],
+                "fit": fit_info,
+                "isotopes": _isotope_preview(isotope_plan, m, traces, tm, tf),
+                "trace": (
+                    [
+                        round(float(value), 1)
+                        if np.isfinite(value)
+                        else "NaN"
+                        for value in raw_traces[m]
+                    ]
+                    if finite_trace.size
+                    else None
+                ),
             }
         )
     _say(1.0)
@@ -436,6 +577,11 @@ def build_viz_data(
             "humidity_p": analysis_settings["humidity_p"],
             "humidity_ref": analysis_settings["humidity_ref"],
             "whole_run_windows": analysis_settings["whole_run_windows"],
+            "peak_fit": fit_diagnostics,
+            "isotope_mode": analysis_settings.get("isotope_mode", "off"),
+            "isotope_abundance_basis": analysis_settings.get(
+                "isotope_abundance_basis", "unknown"
+            ),
             "K_default": None if K is None else round(float(K), 4),
             "K_source": K_source,
             "K_file": None if file_K is None else round(float(file_K), 4),
@@ -515,6 +661,7 @@ def serve(
     open_browser=True,
     run_analysis=None,
     spectrum_fn=None,
+    peak_preview_fn=None,
     ready_callback=None,
 ):
     """Serve the review app on localhost so the page can live-save the config.
@@ -588,6 +735,24 @@ def serve(
                 self._json(
                     {"status": state["status"], "out": out, "error": state["error"]}
                 )
+            elif self.path.startswith("/peak-preview"):
+                if peak_preview_fn is None:
+                    self._send(404)
+                    return
+                from urllib.parse import parse_qs, urlparse
+
+                query = parse_qs(urlparse(self.path).query)
+                try:
+                    lo = float(query.get("lo", [""])[0])
+                    hi = float(query.get("hi", [""])[0])
+                    preview = peak_preview_fn(lo, hi)
+                    self._send(
+                        200,
+                        json.dumps(preview).encode("utf-8"),
+                        "application/json",
+                    )
+                except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                    self._send(500, str(exc).encode("utf-8"))
             elif self.path.startswith("/spectrum"):
                 if spectrum_fn is None:
                     self._send(404)
@@ -1054,7 +1219,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
           <select id="scoperange" aria-label="Interval in scope"></select></label>
       </div>
       <div class="scroll" id="peaksbody" style="max-height:calc(100vh - 190px);overflow-x:hidden"></div>
-      <div class="hint">Click a peak to select &amp; zoom · ⌘/Ctrl-drag the mass spectrum to add · remove via ✕ in details</div>
+      <div class="hint">Click a peak to select &amp; zoom · double-click empty spectrum or ⌘/Ctrl-drag to add · remove via ✕ in details</div>
     </div>
   </aside>
 
@@ -1099,7 +1264,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
         <span class="legend"><span class="swatch" style="background:rgba(100,116,139,.35)"></span>background</span>
       </span>
       <span class="grow"></span>
-      <span class="mut" id="spechint">drag to pan · scroll to zoom · sideways-scroll to pan · click a peak to zoom · ⌘/Ctrl-drag to add a peak · double-click to move its centre · drag the overview</span>
+      <span class="mut" id="spechint">drag to pan · scroll to zoom · click a peak to zoom · double-click empty spectrum or ⌘/Ctrl-drag to add · double-click a selected peak to move it</span>
       <span class="mut" id="tracehint" style="display:none">drag to pan · scroll to zoom · sideways-scroll to pan · drag an interval edge to resize · ⌘/Ctrl-drag to add · Del to remove selected</span>
     </div>
   </div>
@@ -1189,16 +1354,16 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   <h3>3 · Integration (Raw)</h3>
   <p><b>Isolated peaks:</b> Raw is a plain <b>window-sum</b> of the measured intensities across the peak's m/z window — no peak shape assumed, so asymmetric or flat-topped peaks are handled as-is. You set that window by dragging the dashed handles (left and right independently). The default R window setting is recomputed in the preview; the delivered CSV re-extracts it at full precision.</p>
-  <p><b>Clustered peaks</b> (within ~0.2 Da) are Gaussian/deconvolved fitted components at fixed model centres; a component may not form a visible local maximum in every selected interval, so its model centre is not a measured apex. Their amplitudes are separated by <b>linear Gaussian deconvolution</b> (σ from the instrument resolution), rescaled back to the window-sum scale. Peaks closer than the resolution are flagged <i>unresolved</i> — their Raw is unreliable even after deconvolution.</p>
+  <p><b>Clustered peaks</b> (within ~0.2 Da) use a measured line shape learned from clean isolated peaks in the same run. A bounded shared centre shift and width are fitted on the run and interval spectra, then non-negative amplitudes are solved per cycle and rescaled to the window-sum scale. If no trustworthy empirical profile exists, Sniff reports a Gaussian fallback. Rank-deficient, highly correlated, or poor-residual groups are marked <i>unresolved</i> and their independent values are withheld.</p>
 
   <h3>4 · Transmission → Corrected</h3>
   <p>Ion transmission varies with m/z; the file's transmission curve gives the factor at each apex. <b>Corrected = Raw / transmission(apex)</b>.</p>
 
   <h3>5 · Concentration</h3>
-  <p>Primary-ion-normalised model: <b>Conc[ppb] = Corrected · K / I<sub>primary</sub>(t)</b>, where I<sub>primary</sub> is the configured reagent-ion signal (m/z 21.022 by default) per cycle and <b>K</b> is one sensitivity constant. K is the only quantity not fixed by the raw file — the default is the file's own acquisition calibration; set it in Configuration (or calibrate against a reference). <b>Conc[µg/m³] = Conc · (m − proton) / V<sub>m</sub></b>, with molar volume V<sub>m</sub> from the drift-tube temperature.</p>
+  <p>Primary-ion-normalised model: <b>Conc[ppb] = quantitative signal · K / I<sub>primary</sub>(t)</b>. The quantitative signal is Corrected unless a validated isotope spillover or abundance adjustment applies; Raw and Corrected themselves retain their measured and transmission-normalised meanings. I<sub>primary</sub> is the configured reagent-ion signal (m/z 21.022 by default) per cycle and <b>K</b> is one sensitivity constant. K is the only quantity not fixed by the raw file — the default is the file's own acquisition calibration. <b>Conc[µg/m³] = Conc · (m − proton) / V<sub>m</sub></b>.</p>
 
   <h3>6 · Optional corrections</h3>
-  <p><b>Per-compound k (kinetic):</b> scales each compound by its own proton-transfer rate constant (Conc ∝ 1/k) relative to an anchor — physically more accurate than one shared sensitivity. When enabled, this runs in a hybrid mode: a compound is scaled by its own k only when that k is a <i>measured</i> value; compounds whose k is only estimated (or unknown) stay on the shared K, since applying an uncertain k would add error rather than remove it. Estimated k's are marked with <b>~</b> in the Identification card. <b>Humidity:</b> low-proton-affinity compounds (HCN, formaldehyde, formic acid…) have humidity-dependent sensitivity; flagged <i>humid-sensitive</i>, and optionally normalised by the per-cycle water-cluster ratio X = I(m37)/I(primary) raised to a power p — off by default.</p>
+  <p><b>Natural isotopes:</b> an accepted formula automatically derives exact M+1/M+2 auxiliary channels. Their transmission-corrected ratios support identification, and a lower-mass parent's predictable isotope contribution is removed from an assigned overlapping parent where the evidence is physically valid. The main table still has one row per analyte. Monoisotopic-abundance scaling is applied only when the calibration basis explicitly supports it; unknown legacy calibration conventions are never guessed. <b>Per-compound k (kinetic):</b> measured rate constants may scale compounds relative to the shared anchor. Estimated rates remain on shared K. <b>Humidity:</b> flagged low-proton-affinity compounds may use the configured water-cluster model.</p>
 
   <h3>7 · Time intervals</h3>
   <p>The signal is split into stable plateaus by log-space gradient detection on a composite VOC signal (high = sample, low = background/setup). Adjacent plateaus of one class are joined only where the unclassified gap between them never left that class's level — a gap that fell toward the background, or strayed out of the phase, stays a boundary however short it is, and an interval of the other class in between always is one. You rename, reclassify, resize (drag edges), add (⌘/Ctrl-drag) and remove (select + Del) intervals. For each interval the CSV reports Max / Min / Average / Std-dev of Raw, Corrected, Conc and Conc[µg] per compound.</p>
@@ -1208,7 +1373,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   <h3>Assumptions &amp; limitations</h3>
   <ul>
-    <li><b>One peak shape / resolution</b> across the spectrum — deconvolution of overlaps assumes a Gaussian of width σ set from the resolving power; genuinely non-Gaussian or coalesced peaks aren't modelled.</li>
+    <li><b>One empirical profile family</b> across the spectrum — version-2 deconvolution learns asymmetry from clean run peaks and permits bounded centre/width changes, but physically coalesced components remain unidentifiable and are withheld.</li>
     <li><b>Single sensitivity K</b> unless per-compound kinetic mode is on; the shared-K assumption is only exact for compounds with similar reaction rate constants.</li>
     <li><b>No fragmentation correction</b> — each peak is treated as a parent ion. Compounds that fragment (flagged where known) spread signal across masses that this tool does not recombine.</li>
     <li><b>Humidity dependence</b> is an optional, empirical normalisation, not a full ion-chemistry model; leave it off unless you have reason to apply it.</li>
@@ -1511,10 +1676,25 @@ function nearestCompound(mz){ let best=null,bd=0.05;
 // 'unknown m/z …' with no formula, so a generated name can never contradict the
 // formula candidates shown in the Identification card.
 const NAME_MDA=10;
-function nameNewPeak(apex){ const c=nearestCompound(apex), dda=c?Math.abs(apex-c.mz)*1000:1e9;
-  if(c && dda<=NAME_MDA) return {label:c.name||c.formula, formula:c.formula||"",
-    k:c.k||null, k_estimated:!!c.k_estimated, flags:c.flags||[]};
-  return {label:"unknown m/z "+apex.toFixed(3), formula:"", k:null, k_estimated:false, flags:[]}; }
+function nameNewPeak(apex){ return {label:"unknown m/z "+apex.toFixed(3), formula:"",
+  k:null, k_estimated:false, flags:[]}; }
+function snapPeakApex(lo,hi){ const a=Math.max(0,Math.floor(m2tb(lo))), b=Math.min(NBIN,Math.ceil(m2tb(hi))+1);
+  if(b<=a)return (lo+hi)/2; let best=a; for(let i=a+1;i<b;i++)if(SPEC[i]>SPEC[best])best=i;
+  return tb2m(best); }
+function nearMassPeak(mz,except){ const tol=Math.max(.003,mz/M.R_phys*.5);
+  return peaks.find(p=>p!==except&&Math.abs(p.mz-mz)<=tol)||null; }
+async function hydratePeakPreview(p,lo,hi){ if(!SERVED)return;
+  try{ const r=await fetch('/peak-preview?lo='+encodeURIComponent(lo)+'&hi='+encodeURIComponent(hi));
+    if(!r.ok)return; const data=await r.json(); if(!peaks.includes(p))return;
+    const duplicate=nearMassPeak(+data.apex,p); if(duplicate){ peaks=peaks.filter(q=>q!==p);
+      selId=duplicate.id; renderPeaks(); jumpToPeak(duplicate); scheduleSave(); return; }
+    p.mz=+data.apex; p.apex=+data.apex; p._apex0=+data.apex;
+    p.label='unknown m/z '+p.apex.toFixed(3); p.labelAuto=p.label;
+    p.candidates=data.candidates||[]; p.id_confidence=p.candidates.length?p.candidates[0].probability:null;
+    p.id_ambiguous=!!(p.candidates.length&&(p.candidates[0].probability<.6||
+      (p.candidates.length>1&&p.candidates[0].probability-p.candidates[1].probability<.2)));
+    renderPeaks(); redraw(); scheduleSave();
+  }catch(e){} }
 // the name and the assigned formula must tell the same story: 'acetone' is C3H6O, so a
 // peak whose label belongs to a different compound than its assigned formula is a
 // mistake to show, not a detail hidden one card away. 'unknown …' plus a formula counts
@@ -1693,8 +1873,9 @@ let SHOWSPEC = SPEC;   // spectrum currently drawn (whole run or a chosen interv
 // Peak positions drift between intervals (mass-cal drift; a compound may be
 // absent in a background). When an interval is shown, refine each isolated peak's
 // apex to THAT interval's spectrum so the apex line + window sit on its real peak.
-// Clustered fitted components remain at their fixed model centres. This is a DISPLAY
-// overlay only — p.apex/p.winL/p.winR (saved to config, used by the delivered CSV)
+// Clustered components retain their canonical preview centre; the authoritative HDF5
+// rerun performs the bounded interval fit. This is a DISPLAY overlay only —
+// p.apex/p.winL/p.winR (saved to config, used by the delivered CSV)
 // are untouched. null = whole run, no refinement.
 let intervalApex = null;
 function dispApex(p){ return (intervalApex && intervalApex[p.id]!=null) ? intervalApex[p.id] : p.apex; }
@@ -1936,12 +2117,15 @@ window.addEventListener("mouseup",e=>{ if(!drag) return; setCur("grab");
     else selRange=null;
     renderRanges(); drawMain(); return; }
   if(d.mode==="newpeak"){ const lo=Math.min(d.m0,d.m1), hi=Math.max(d.m0,d.m1);
-    if(hi-lo>0.004){ pushUndo(); const apex=+((lo+hi)/2).toFixed(4), hw=(hi-lo)/2, nm=nameNewPeak(apex);
-      const p={id:nextId++,mz:apex,apex:apex,_apex0:apex,label:nm.label,
+    if(hi-lo>0.004){ const apex=+snapPeakApex(lo,hi).toFixed(4), existing=nearMassPeak(apex);
+      if(existing){ selId=existing.id; renderPeaks(); jumpToPeak(existing); return; }
+      pushUndo(); const hw=(hi-lo)/2, nm=nameNewPeak(apex);
+      const p={id:nextId++,mz:apex,apex:apex,_apex0:apex,label:nm.label,labelAuto:nm.label,
         formula:nm.formula,k:nm.k,k_estimated:nm.k_estimated,flags:nm.flags,clustered:false,trace:null,
+        candidates:[],id_confidence:null,id_ambiguous:false,
         winL:hw,winR:hw,_winL0:hw,_winR0:hw,winManual:true};
       p.use=true; p.samples=sampleLabels();
-      peaks.push(p); selId=p.id; renderPeaks(); }
+      peaks.push(p); selId=p.id; renderPeaks(); hydratePeakPreview(p,lo,hi); }
     else drawMain();
     return; }
   if(d.mode==="newseg"){ const s=Math.min(d.c0,d.c1), en=Math.max(d.c0,d.c1);
@@ -1953,7 +2137,15 @@ window.addEventListener("mouseup",e=>{ if(!drag) return; setCur("grab");
   if(d.mode==="win"){ renderPeaks(); redraw(); return; }
   if(d.mode==="edge"){ if(!d.moved){ selRange=d.r._id; renderRanges(); drawMain(); }
     else { sortRanges(); renderRanges(); syncSpecRange(); redraw(); } return; } });
-plotC.addEventListener("dblclick",e=>{ if(tab!=="spec") return; const p=selPeak(); if(!p) return;
+plotC.addEventListener("dblclick",e=>{ if(tab!=="spec") return; const p=selPeak();
+  if(!p){ const centre=specMzAtX(e.offsetX),hw=Math.max(.006,centre/(2*cfg.R));
+    const lo=centre-hw,hi=centre+hw,apex=+snapPeakApex(lo,hi).toFixed(4),existing=nearMassPeak(apex);
+    if(existing){selId=existing.id;renderPeaks();jumpToPeak(existing);return;}
+    pushUndo(); const nm=nameNewPeak(apex),added={id:nextId++,mz:apex,apex:apex,_apex0:apex,
+      label:nm.label,labelAuto:nm.label,formula:"",k:null,k_estimated:false,flags:[],clustered:false,
+      trace:null,candidates:[],id_confidence:null,id_ambiguous:false,
+      winL:hw,winR:hw,_winL0:hw,_winR0:hw,winManual:false,use:true,samples:sampleLabels()};
+    peaks.push(added);selId=added.id;renderPeaks();hydratePeakPreview(added,lo,hi);return;}
   pushUndo(); p.apex=+specMzAtX(e.offsetX).toFixed(4);
   if(!p.winManual){ const hw=p.apex/(2*cfg.R); p.winL=hw; p.winR=hw; } renderPeaks(); redraw(); });
 plotC.addEventListener("wheel",e=>{ e.preventDefault(); anim=null; const v=view();
@@ -1980,8 +2172,8 @@ function peakPills(p){
     (p.flags||[]).map(fl=>`<span class="pill ${fl}" title="${fl==='humid'?'proton affinity near water — a fixed k is humidity/temperature dependent':(fl==='frag'?'fragments off the parent ion':'')}">${fl==='humid'?'humid-sensitive':fl}</span>`).join(' ')+
     (dup?`<span class="pill ovl" title="same compound also assigned to m/z ${dup.mz.toFixed(3)}">⚠ duplicate</span>`:'')+
     (p.id_ambiguous?`<span class="pill hi" title="ambiguous identification; top candidate relative score/share">? ${Math.round((p.id_confidence||0)*100)}% share</span>`:'')+
-    (p.overlap&&p.overlap.level==='unresolved'?'<span class="pill hi" title="unresolved overlap">⚠ overlap</span>':
-      (p.clustered?'<span class="pill clus" title="Gaussian/deconvolved fitted component at a fixed model centre; may not form a visible local maximum in every interval">overlap</span>':''))+
+    ((p.fit&&p.fit.status==='unresolved')||(p.overlap&&p.overlap.level==='unresolved')?'<span class="pill hi" title="independent overlap fit unavailable">⚠ unresolved</span>':
+      (p.clustered?'<span class="pill clus" title="Measured-shape deconvolved component; Export verifies interval fit reliability">overlap</span>':''))+
     (!p.trace?'<span class="pill">re-run</span>':'')+
     (p.trace&&moved(p)?'<span class="pill hi" title="approximate — re-run analyze for the exact value">≈</span>':'');
 }
@@ -2045,11 +2237,18 @@ function unitScale(p){
 // compound's own concentration correction, so it belongs on the sidebar value
 function peakKfac(p){ return (quant==="con"||quant==="ug") && cfg.kinetic && p.k && !p.k_estimated
   ? cfg.kanchor/p.k : 1.0; }
-function peakRaw(p){ return (SHOWSPEC===SPEC && Number.isFinite(p.abundance))
+function peakFitUnavailable(p){ if(!p.fit)return false;
+  if(SHOWSPEC===SPEC)return p.fit.status==='unresolved';
+  const r=ranges.find(x=>x.start===SPECWIN.lo&&x.end===SPECWIN.hi);
+  const report=r&&p.fit.ranges?p.fit.ranges[r.label]:null;
+  return !!(report&&report.status==='unresolved'); }
+function peakRaw(p){ if(peakFitUnavailable(p))return NaN;
+  return (SHOWSPEC===SPEC && Number.isFinite(p.abundance))
   ? p.abundance : peakSpectrumIntegral(p); }
 // a value that cannot be converted is shown as Raw and says why, never as a dash that
 // could be read as a measurement of zero
 function peakAbundance(p){
+  if(peakFitUnavailable(p))return NaN;
   const s=unitScale(p);
   if(quant==="raw") return peakRaw(p);
   if(quant==="cor") return peakRaw(p)/interpT(peakDisplayMz(p));
@@ -2068,17 +2267,19 @@ function peakAbundance(p){
     const con=(raw/T)*(cfg.K/ip)*peakKfac(p)*hf;
     sum += quant==="ug" ? con*(p.mz-M.proton)/cfg.Vm : con; n++;
   }
-  const v = n ? sum/n : peakRaw(p)*s.f(peakDisplayMz(p))*peakKfac(p);
+  const v = n ? sum/n : NaN;
   p._uKey=key; p._uVal=v; return v;
 }
 function peakAbundanceNote(p){ const s=unitScale(p);
+  if(peakFitUnavailable(p)) return "Unavailable: this overlap is not independently identifiable in the selected spectrum.";
   if(!s.ok) return `Raw shown: ${s.why}.`;
   if(quant!=="raw" && quant!=="cor" && !p.trace)
     return "Converted from the displayed spectrum: this peak has no per-cycle trace.";
   return ""; }
 function orderedPeaks(){
   return [...peaks].sort((a,b)=>{
-    if(peakOrder==="abundance") return peakAbundance(b)-peakAbundance(a) || peakDisplayMz(a)-peakDisplayMz(b);
+    if(peakOrder==="abundance"){ const av=peakAbundance(a),bv=peakAbundance(b);
+      return (Number.isFinite(bv)?bv:-Infinity)-(Number.isFinite(av)?av:-Infinity) || peakDisplayMz(a)-peakDisplayMz(b); }
     if(peakOrder==="label"){
       const la=(a.label||"").toLocaleLowerCase(), lb=(b.label||"").toLocaleLowerCase();
       return (la<lb?-1:(la>lb?1:0)) || peakDisplayMz(a)-peakDisplayMz(b);
@@ -2191,8 +2392,13 @@ function renderId(){ const el=document.getElementById("idpanel"), conf=document.
   const priorText=interests.length
     ? ` The ${interests.length} user-selected compound${interests.length===1?'':'s'} of interest provide a modest contextual ranking prior; this is not evidence that they are present.`:'';
   const provenance='<div class="idnote"><b>Evidence:</b> candidates are inferred from measured exact mass, isotope evidence, and chemistry plausibility.'+priorText+' Names and isomer labels come from the bundled PTR Library mapping; formula ranking cannot determine structural isomers.</div>';
+  const fitModel=((DATA.meta||{}).peak_fit||{}).model||'gaussian-v1';
+  const fitStatus=p&&p.fit?(p.fit.status||'unknown'):null;
   const clusterNote=p&&p.clustered
-    ? '<div class="idnote warn"><b>Clustered peak:</b> Gaussian/deconvolved fitted component at a fixed model centre. It may not form a visible local maximum in every selected interval; this model centre is not a measured apex.</div>'
+    ? '<div class="idnote warn"><b>Clustered peak:</b> '+(fitModel==='empirical-v1'?'measured-shape':'Gaussian')+' deconvolved component'+(fitStatus?' — '+fitStatus:'')+'. Unresolved fits are withheld rather than reported as independent concentrations.</div>'
+    : '';
+  const isotopeNote=p&&p.isotopes
+    ? '<div class="idnote"><b>Natural isotopes:</b> '+p.isotopes.channels.map(ch=>'M+'+ch.order+' '+(+ch.mz).toFixed(4)+' expected '+pct(ch.ratio_expected)+(ch.ratio_observed==null?' · '+ch.status:' / observed '+pct(ch.ratio_observed))).join('<br>')+'<br>Monoisotopic fraction '+pct(p.isotopes.monoisotopic_fraction)+'. Isotope agreement supports the formula but does not prove identity.</div>'
     : '';
   const nameConf=p?labelConflict(p):null;
   const confNote=nameConf?'<div class="idnote warn" style="margin-bottom:8px"><b>Name and formula disagree:</b> '+esc(nameConf)+'.</div>':'';
@@ -2209,19 +2415,19 @@ function renderId(){ const el=document.getElementById("idpanel"), conf=document.
       // a compound with an assigned formula is not 'unknown': show the formula, and
       // only add a name when the label actually carries one
       const showName=p.formula&&!/^unknown\b/i.test(p.label||'')?p.label:(p.formula?'':p.label);
-      el.innerHTML=provenance+confNote+clusterNote+'<div class="cand chosen"><span class="f">'+esc(p.formula||p.label)+'</span>'+
+      el.innerHTML=provenance+confNote+clusterNote+isotopeNote+'<div class="cand chosen"><span class="f">'+esc(p.formula||p.label)+'</span>'+
         (showName?'<span class="cname">'+esc(showName)+'</span>':'')+
         '<span class="meta">'+(assigned?'current formula assignment':'label only; not formula-assigned')+'</span></div>'+
         '<div class="idnote" style="margin-top:8px">No enumerated formula candidates for this m/z — it looks like a reagent/inorganic ion, a manually-added peak, or a mass outside the organic window. The existing '+(assigned?'formula assignment':'label')+' is kept as-is.</div>';
     } else {
-      el.innerHTML=provenance+confNote+clusterNote+'<div class="mut">No candidate formulas for this peak (a reagent/inorganic ion, added manually, or outside the mass window).</div>';
+      el.innerHTML=provenance+confNote+clusterNote+isotopeNote+'<div class="mut">No candidate formulas for this peak (a reagent/inorganic ion, added manually, or outside the mass window).</div>';
     }
     return; }
   if(conf) conf.innerHTML=status+` <span class="mut">· ${p.candidates.length===1
     ? 'only generated formula candidate — not a confidence estimate'
     : 'relative candidate score/share (not identification confidence)'}</span>`+
     (p.id_ambiguous?' <span class="pill hi">ambiguous</span>':'');
-  el.innerHTML=provenance+confNote+clusterNote;
+  el.innerHTML=provenance+confNote+clusterNote+isotopeNote;
   p.candidates.forEach(c=>{ const row=document.createElement("div");
     const chosen=!!(p.formula&&c.formula===p.formula);
     row.className="cand"+(chosen?" chosen":"");
@@ -2238,7 +2444,7 @@ function renderId(){ const el=document.getElementById("idpanel"), conf=document.
   if(p.overlap){ const n=document.createElement("div"); n.className="idnote warn"; n.style.marginTop="8px";
     n.textContent=(p.overlap.level==="unresolved"
       ? "⚠ Unresolved overlap with m/z "+p.overlap.neighbor+" ("+p.overlap.sep_mDa+" mDa) — closer than the instrument resolution, so this peak's Raw is unreliable even after deconvolution."
-      : "Overlaps m/z "+p.overlap.neighbor+" ("+p.overlap.sep_mDa+" mDa) — Raw comes from Gaussian deconvolution (extra uncertainty).");
+      : "Overlaps m/z "+p.overlap.neighbor+" ("+p.overlap.sep_mDa+" mDa) — Raw comes from measured-shape deconvolution when the fit is identifiable.");
     el.appendChild(n); } }
 function assignCandidate(p,c){
   // guard against assigning the same compound to two peaks (a compound = one m/z)
@@ -2248,6 +2454,10 @@ function assignCandidate(p,c){
   if(clash && !confirm((c.name||c.formula)+" is already assigned to m/z "+clash.mz.toFixed(3)+
       ".\nAssign it here too? (a compound normally appears at only one m/z)")) return;
   pushUndo(); p.formula=c.formula; p.label=c.name||c.formula;
+  if(c.isotope_model){ p.isotopes={version:c.isotope_model.version,
+    monoisotopic_fraction:c.isotope_model.monoisotopic_fraction,
+    channels:c.isotope_model.channels.map(ch=>({order:ch.order,mz:p.mz+ch.shift,
+      ratio_expected:ch.ratio,ratio_observed:null,status:'stale until Done/Export'}))}; }
   if(c.k) p.k=c.k; p.k_estimated=!!c.k_estimated; if(c.flags) p.flags=c.flags; renderPeaks(); redraw(); }
 let _lastScrolledRange=null;
 function renderRanges(){ const tb=document.querySelector("#rngtbl tbody"); if(!tb) return; tb.innerHTML="";
@@ -2660,7 +2870,7 @@ function updateMethods(){
     <h3>Effective settings</h3>
     <p><b>Mass axis:</b> ${massAxis}. The HDF5 a,b timebin mapping remains unchanged.</p>
     <p><b>R integration windows:</b> R = ${cfg.R} (${rSource}); manual peak windows override the default.
-    <b>R<sub>phys</sub> Gaussian/deconvolution resolution:</b> ${cfg.Rphys} (${rPhysSource}).</p>
+    <b>R<sub>phys</sub> physical/deconvolution resolution:</b> ${cfg.Rphys} (${rPhysSource}).</p>
     <p><b>K:</b> ${fmt(cfg.K)} (${effectiveKSource}); <b>molar volume:</b> ${fmt(cfg.Vm)} L/mol (${effectiveVmSource});
     <b>primary m/z:</b> ${cfg.primarymz} (${primarySource}).</p>
     <p><b>Kinetic correction:</b> ${kinetic} (${kineticSource}); k_anchor = ${cfg.kanchor} x 10<sup>-9</sup> cm³/s (${anchorSource}).
@@ -2669,13 +2879,14 @@ function updateMethods(){
     <p><b>Humidity correction:</b> ${cfg.humid?"on":"off"} (${humiditySource}); p = ${cfg.hump} (${humidityPSource});
     water-cluster ratio is m/z 37 / m/z ${cfg.primarymz}; reference =
     ${cfg.href==null?"run median":cfg.href} (${hrefSource}).</p>
-    <p><b>Windows:</b> ${windows} (${windowSource}); manual windows remain manual. Clustered components use fixed-centre
-    Gaussian/deconvolution models, not interval apexes. Transmission uses ${trans}.
-    Concentration is <b>${conc}</b>.</p>
+    <p><b>Windows:</b> ${windows} (${windowSource}); manual windows remain manual. Clustered components use
+    ${(((M.peak_fit||{}).model||'gaussian-v1')==='empirical-v1')?'a measured empirical line shape with bounded interval fits':'the legacy fixed Gaussian model'}.
+    Transmission uses ${trans}. Natural-isotope mode is <b>${M.isotope_mode||'off'}</b> with abundance basis
+    <b>${M.isotope_abundance_basis||'unknown'}</b>. Concentration is <b>${conc}</b>.</p>
     <p><b>Contextual compound prior:</b> ${interests.length?interestNames:'none supplied'}.
     ${interests.length?'These names double the matching formula ranking weight but do not establish presence, identity, or calibration.':'Candidate ranking uses spectral and general chemistry evidence only.'}</p>
     <h3>Authoritative export</h3>
-    <p>Browser values are a preview. Live-safe controls update embedded data, but settings marked stale above need raw HDF5 re-extraction. ${exportAction()} The authoritative analysis includes Gaussian deconvolution.</p>`;
+    <p>Browser values are a preview. Live-safe controls update embedded data, but measured-shape and isotope corrections require raw HDF5 re-extraction. ${exportAction()} The authoritative analysis applies the selected fit model and guarded isotope corrections.</p>`;
 }
 document.querySelectorAll("#qtabs button").forEach(b=>b.onclick=()=>{ quant=b.dataset.q;
   document.querySelectorAll("#qtabs button").forEach(x=>x.classList.remove("on")); b.classList.add("on");
@@ -2769,7 +2980,7 @@ function tourSteps(){ const s=[];
     body:"Now switch to Mass spectrum to review each compound. Drag to pan, scroll to zoom."});
   s.push({sel:".sidebar .card",place:"right",tab:"spec",title:"Peaks",
 body:"Every compound we detected. Click one to select it and zoom to its mass peak; the shaded band is the m/z window that’s integrated for it."});  s.push({sel:"#scoperange",place:"right",tab:"spec",title:"Review peaks per interval",
-    body:"The interval selector above the peak list picks which spectrum you’re looking at — it starts on the whole run. Isolated peaks can move a little between intervals, so their apex line and window re-centre on the local maximum; clustered Gaussian/deconvolved components stay at fixed model centres (not measured apexes). The tick boxes follow this choice: on one sample they are that sample’s own tick, on the whole run they show all / some / none."});
+    body:"The interval selector above the peak list picks which spectrum you’re looking at — it starts on the whole run. Isolated peaks can move a little between intervals, so their apex line and window re-centre on the local maximum. Clustered components keep their canonical preview centre; Export performs the authoritative measured-shape interval fit. The tick boxes follow this choice: on one sample they are that sample’s own tick, on the whole run they show all / some / none."});
   s.push({sel:"#idcard",place:"top",tab:"spec",title:"Identification",
     body:"Candidate formulas for the selected peak, ranked by exact mass and isotope pattern. Click one to assign it."});
   s.push({sel:"#cfgBtn",place:"bottom",title:"Settings",
@@ -2864,10 +3075,23 @@ if(SERVED){ const b=document.createElement("button"); b.className="primary";
 } else { const b=document.createElement("button"); b.className="primary"; b.textContent="Download config";
   b.onclick=()=>download("config.json",JSON.stringify(buildConfig(),null,2)); erow.appendChild(b);
   b.title="Hand this config back to the agent; it re-runs the analysis at full precision."; }
-if(APPMODE){ const hdr=document.querySelector("header");
+if(APPMODE){ const hdr=document.querySelector("header"),grow=hdr.querySelector(".grow");
+  const adapt=document.createElement("button"); adapt.className="hbtn"; adapt.textContent="Use table on another file";
+  adapt.title="Open another run, match this table to its measured peaks, and retain all credible new peaks.";
+  adapt.onclick=async()=>{ adapt.disabled=true; setStat("saving…");
+    try{ const cfg=buildConfig(),version=nextSaveVersion(); await postSave(version,JSON.stringify(cfg));
+      const picked=await fetch('/browse',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+      const choice=await picked.json(); if(!picked.ok)throw new Error(choice.error||'browse failed');
+      if(choice.cancelled){adapt.disabled=false;setStat('saved ✓');return;}
+      const opened=await fetch('/open',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({path:choice.path,adapt_peaks:cfg.peaks})});
+      const result=await opened.json(); if(!opened.ok)throw new Error(result.error||'open failed');
+      location.href='/';
+    }catch(e){adapt.disabled=false;setStat("adaptation failed");} };
+  hdr.insertBefore(adapt,grow);
   const a=document.createElement("a"); a.className="hbtn"; a.href="/"; a.textContent="Open another file";
   a.title="Nothing is lost: this file's config is already saved, and opening another file closes this one.";
-  const grow=hdr.querySelector(".grow"); hdr.insertBefore(a,grow); }
+  hdr.insertBefore(a,grow); }
 renderXAxis();
 initSpecView(); clampView(); renderPeaks(); renderRanges();
 // initial mass-spectrum view: zoomed onto the first compound rather than the whole range

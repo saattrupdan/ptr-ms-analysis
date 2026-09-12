@@ -119,12 +119,16 @@ calibrated again. Starting Sniff always shows the opening screen; it does not re
 previous run automatically. The H5 is still read to reconstruct spectra and traces,
 which are deliberately not duplicated in the JSON. A file that has never been reviewed
 gets the deterministic pipeline — detected peaks and detected intervals — written to
-that path and then loaded, so
-the panel starts as a starting point rather than an empty table. **Export** runs the
-full-precision analysis to `<name>.csv` beside the file and leaves everything open; if a
-table that is not a sniff summary already sits at that name — a Viewer export, say — it
-writes `<name>-sniff.csv` instead of overwriting it. Opening another file closes the
-current one, since a large run holds its data in memory.
+that path and then loaded, so the panel starts as a starting point rather than an empty
+table. **Use table on another file** explicitly carries the current chemical identities
+to a newly selected run. Sniff matches them one-to-one to that file's measured peaks,
+adds every other credible detection as an unknown, and never transfers ranges, manual
+windows, or calibration. Missing or ambiguous targets are reported rather than snapped
+to unrelated peaks. **Export** runs the full-precision analysis to `<name>.csv` beside
+the file and leaves everything open; if a table that is not a sniff summary already
+sits at that name — a Viewer export, say — it writes `<name>-sniff.csv` instead of
+overwriting it. Opening another file closes the current one, since a large run holds its
+memory.
 
 The opening screen is deliberately uncluttered: use **Browse this computer…** to
 choose a run in the native file dialog. Before analysis starts, an optional modal
@@ -295,8 +299,9 @@ The **Peaks** sidebar can also be ordered by descending abundance or alphabetica
 label. Abundance is the mean per-cycle integrated Raw signal (the peak integral), with
 m/z used to break ties. The compact list shows only the active sort field; the details
 view shows both m/z and abundance. The m/z and abundance values follow the interval
-selected above the peak list; isolated peaks use that interval's apex and clustered
-peaks retain their fixed model centres. The choice is saved as
+selected above the peak list. Isolated peaks use that interval's apex; clustered peaks
+retain the canonical preview centre while the authoritative Export performs the bounded
+interval fit. The choice is saved as
 `viz.peak_order` and does not change the peak order in the analysis config or CSV.
 Arrow keys move the selection down and up the order you chose, not the stored one.
 
@@ -393,10 +398,11 @@ water-cluster ratios are reported separately and are not calibration evidence.
 By default `analyze` integrates each interval with each isolated peak's apex/window
 **re-centred on that interval's own spectrum** — peaks drift between intervals (a
 compound may be absent in a background), so one whole-run window sits off-peak
-elsewhere. Clustered peaks are Gaussian/deconvolved fitted components at fixed model
-centres, so their centre is not a measured apex and may not be a visible local maximum in
-every interval. The delivered CSV is unchanged in shape (still one row per compound ×
-interval); only each row's numbers reflect its interval's real peak. Set
+elsewhere. In version-2 analyses, clustered peaks use the run's empirical line shape
+with bounded centre and width fits on each interval spectrum. Components that cannot be
+identified independently become unavailable rather than inheriting a combined signal.
+The delivered CSV is unchanged in shape (still one row per compound × interval); only
+each row's numbers reflect its interval's real peak. Set
 `whole_run_windows: true` or pass `--no-per-interval` for one whole-run window per
 compound. Manual peak windows remain manual. The Methods card reports these effective
 values, their provenance, and whether the transmission curve and concentration are
@@ -429,10 +435,14 @@ carries the same attribution.
 The baseline timebin calibration, transmission, concentration constant K and molar volume are read from the `.h5`. A separate, conservative water/iodobenzene affine
 correction aligns the mass domain only after both internal references and their mandatory
 raw-cycle persistence pass; otherwise analysis stops with a structured calibration
-error. Isolated peaks use an apex-centred resolution window;
-overlapping peaks are separated by linear Gaussian deconvolution. Time segments are
-found by log-space plateau detection on a composite VOC signal. Before a run starts, the
-app can accept compounds of particular interest from the bundled PTR Library. These
+error. Isolated peaks use an apex-centred resolution window. New configs separate
+overlapping peaks with a measured line shape learned from clean isolated peaks in the
+same run: bounded centre and width parameters are fitted on run and interval spectra,
+then non-negative amplitudes are solved per cycle. Ill-conditioned components are
+withheld, and a reported Gaussian fallback is used when no trustworthy empirical
+profile exists. Time segments are found by log-space plateau detection on a composite
+VOC signal. Before a run starts, the app can accept compounds of particular interest
+from the bundled PTR Library. These
 names provide a modest contextual prior by doubling the matching formula's ranking
 weight; they do not force detection, prove presence, establish identity, or suppress
 other credible peaks.
@@ -448,8 +458,20 @@ compiled from the **PTR Library** (Pagonis, Sekimoto & de Gouw, *J. Am. Soc. Mas
 Spectrom.* 2019, doi.org/10.1007/s13361-019-02209-3; tinyurl.com/PTRLibrary), with
 measured k where available (else Su-Chesnavich capture-theory k, flagged
 `k_estimated`), plus proton affinity, isomer names, and fragmentation flags. Use
-`sniff rates` to browse the bundled values. The installed package also includes the
+`sniff rates` to browse the bundled values. Accepting a formula automatically derives
+its exact natural M+1 and M+2 auxiliary channels. These support expected/observed
+isotope diagnostics and guarded subtraction when a lower-mass compound's isotope
+overlaps another assigned parent. They do not become additional analytes.
+Monoisotopic-abundance
+scaling is available only when the calibration basis is explicitly `total`; legacy or
+unknown K conventions are never guessed. The installed package also includes the
 ionisation, compound-assignment, and HCN/humidity reference documents.
+
+New app-generated configs carry `analysis_schema_version: 2`, use `empirical-v1` peak
+fitting and `formula-v1` isotope handling, and retain the same review and Export flow.
+Unversioned configs resolve to `gaussian-v1` with isotope handling off, preserving their
+historical arithmetic. Both model names remain explicit rollback settings under
+`analyze`.
 
 ## Accuracy
 
@@ -460,4 +482,7 @@ calibrated K): Raw 0.7 %, Corrected 3.1 %, Conc 2.6 %, Conc[µg] 2.5 %.
 Concentration carries one calibration constant K not uniquely fixed by the raw file (a
 Viewer project uses its own sensitivity). Default K is the file's own acquisition
 calibration; run `calibrate FILE.h5 reference.csv` and pass `--K` to match a specific
-Viewer project exactly. Raw and Corrected are file-derived and robust.
+Viewer project exactly. Raw and Corrected are file-derived and robust. The published
+figures above remain the legacy comparison baseline; empirical-fit and isotope-adjusted
+concentrations additionally report their fit/correction status and fall back or become
+unavailable rather than forcing a result where the components are not identifiable.

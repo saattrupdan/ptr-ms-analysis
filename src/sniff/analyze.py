@@ -61,6 +61,9 @@ _ANALYSIS_DEFAULTS = {
     "humidity_p": 1.0,
     "humidity_ref": None,
     "whole_run_windows": False,
+    "peak_fit": "gaussian-v1",
+    "isotope_mode": "off",
+    "isotope_abundance_basis": "unknown",
 }
 
 _X_AXIS_UNITS = ("cycle", "relative", "absolute")
@@ -145,6 +148,18 @@ def resolve_analysis_settings(config=None, args=None):
         else:
             settings[key] = default
             sources[key] = "legacy default"
+    if settings["peak_fit"] not in ("gaussian-v1", "empirical-v1"):
+        raise ValueError("peak_fit must be gaussian-v1 or empirical-v1")
+    if settings["isotope_mode"] not in ("off", "formula-v1"):
+        raise ValueError("isotope_mode must be off or formula-v1")
+    if settings["isotope_abundance_basis"] not in (
+        "unknown",
+        "calibrated",
+        "total",
+    ):
+        raise ValueError(
+            "isotope_abundance_basis must be unknown, calibrated, or total"
+        )
     settings["sources"] = sources
     settings["per_interval_windows"] = not bool(settings["whole_run_windows"])
     return settings
@@ -506,8 +521,8 @@ def annotate_peaks(
                     "neighbor": round(nb, 4),
                     "sep_mDa": round(sep * 1000, 1),
                     "level": "deconvolved",
-                    "note": "overlaps a neighbour; Raw comes from Gaussian "
-                    "deconvolution (moderate extra uncertainty)",
+                    "note": "overlaps a neighbour; the configured analysis model "
+                    "must establish whether independent deconvolution is reliable",
                 }
         flags = []
         for rmz, rname in _REAGENT_MZ.items():
@@ -1124,14 +1139,25 @@ def cmd_analyze(args):
         per_range = (
             ranges if (real_ranges and settings["per_interval_windows"]) else None
         )
+        isotope_plan = (
+            ptrms.isotopes.build_isotope_plan(peaks, R_phys=R_phys)
+            if settings["isotope_mode"] == "formula-v1"
+            else None
+        )
+        extraction_masses = (
+            isotope_plan["extraction_masses"] if isotope_plan is not None else masses
+        )
+        fit_diagnostics = {}
         traces, _ = ptrms.extract_traces(
             f,
-            masses,
+            extraction_masses,
             R=R,
             R_phys=R_phys,
             windows=_peak_windows(peaks) or None,
             per_range=per_range,
             mass_axis=mass_axis,
+            peak_fit_model=settings["peak_fit"],
+            fit_diagnostics=fit_diagnostics,
         )
         rows, params = ptrms.quantify(
             traces,
@@ -1148,8 +1174,11 @@ def cmd_analyze(args):
             humidity_ref=settings["humidity_ref"],
             humidity_p=settings["humidity_p"],
             mass_axis=mass_axis,
+            isotope_plan=isotope_plan,
+            isotope_abundance_basis=settings["isotope_abundance_basis"],
         )
-        apexes = {m: ap for m, (_, ap) in traces.items()}
+        params["peak_fit"] = fit_diagnostics
+        apexes = {m: traces[m][1] for m in masses}
         humidity_ref = settings["humidity_ref"]
         if humidity_ref is None and hum_ratio is not None:
             good = np.isfinite(hum_ratio) & (hum_ratio > 0)
@@ -1429,6 +1458,19 @@ def cmd_viz(args):
             args.h5, cfg, args.out, args.sep, args.include_cycle_rows
         )
         spec_fn = lambda lo, hi: interval_spectrum(args.h5, lo, hi)
+
+        def peak_preview_fn(lo, hi):
+            with h5py.File(args.h5, "r") as source:
+                axis = ptrms.load_mass_axis(source)
+                return viz.preview_peak(
+                    source,
+                    lo,
+                    hi,
+                    R=settings["R"],
+                    mass_axis=axis,
+                    compounds_of_interest=config.get("compounds_of_interest"),
+                )
+
         final, finished, summary = viz.serve(
             html,
             cfg_path,
@@ -1437,6 +1479,7 @@ def cmd_viz(args):
             open_browser=not args.no_open,
             run_analysis=run,
             spectrum_fn=spec_fn,
+            peak_preview_fn=peak_preview_fn,
         )
         if final is not None:
             cfg = final
@@ -1583,7 +1626,12 @@ def cmd_calibrate(args):
         R_phys = settings["R_phys"]
         primary_mz = settings["primary_mz"]
         traces, _ = ptrms.extract_traces(
-            f, masses, R=R, R_phys=R_phys, mass_axis=mass_axis
+            f,
+            masses,
+            R=R,
+            R_phys=R_phys,
+            mass_axis=mass_axis,
+            peak_fit_model=settings["peak_fit"],
         )
         K, resid, n = ptrms.calibrate_K(
             f,
@@ -1762,14 +1810,25 @@ def analyze_config_to_csv(h5_path, config, out, sep=";", include_cycle_rows=True
         per_range = (
             ranges if (ranges_cfg and settings["per_interval_windows"]) else None
         )
+        isotope_plan = (
+            ptrms.isotopes.build_isotope_plan(peaks, R_phys=R_phys)
+            if settings["isotope_mode"] == "formula-v1"
+            else None
+        )
+        extraction_masses = (
+            isotope_plan["extraction_masses"] if isotope_plan is not None else masses
+        )
+        fit_diagnostics = {}
         traces, _ = ptrms.extract_traces(
             f,
-            masses,
+            extraction_masses,
             R=R,
             R_phys=R_phys,
             windows=windows or None,
             per_range=per_range,
             mass_axis=mass_axis,
+            peak_fit_model=settings["peak_fit"],
+            fit_diagnostics=fit_diagnostics,
         )
         rows, params = ptrms.quantify(
             traces,
@@ -1786,7 +1845,10 @@ def analyze_config_to_csv(h5_path, config, out, sep=";", include_cycle_rows=True
             humidity_ref=settings["humidity_ref"],
             humidity_p=settings["humidity_p"],
             mass_axis=mass_axis,
+            isotope_plan=isotope_plan,
+            isotope_abundance_basis=settings["isotope_abundance_basis"],
         )
+        params["peak_fit"] = fit_diagnostics
         humidity_ref = settings["humidity_ref"]
         if humidity_ref is None and hum_ratio is not None:
             good = np.isfinite(hum_ratio) & (hum_ratio > 0)

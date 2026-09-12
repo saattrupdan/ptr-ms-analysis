@@ -51,6 +51,9 @@ class AnalysisSettingsTest(unittest.TestCase):
         self.assertEqual(settings["primary_mz"], 21.022)
         self.assertFalse(settings["kinetic"])
         self.assertTrue(settings["per_interval_windows"])
+        self.assertEqual(settings["peak_fit"], "gaussian-v1")
+        self.assertEqual(settings["isotope_mode"], "off")
+        self.assertEqual(settings["isotope_abundance_basis"], "unknown")
 
     def test_explicit_cli_values_override_curated_values(self):
         args = dict(_KEYS)

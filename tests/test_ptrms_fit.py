@@ -1,0 +1,135 @@
+"""Integration tests for measured-shape extraction and isotope-aware quantification."""
+
+import unittest
+from unittest import mock
+
+import h5py
+import numpy as np
+from calibration_helpers import identity_mass_axis
+
+from sniff import isotopes, ptrms
+
+
+class EmpiricalExtractionTest(unittest.TestCase):
+    def test_empirical_cluster_fit_runs_in_the_streaming_and_interval_paths(self):
+        a = 10000.0
+        bins = 105000
+        cycles = 4
+        axis = identity_mass_axis(a=a, b=0.0)
+        masses = [40.0, 60.0, 80.0, 100.0, 100.025]
+        first_amplitudes = np.array([100.0, 50.0, 80.0, 40.0])
+        second_amplitudes = np.array([30.0, 80.0, 20.0, 60.0])
+        x = np.arange(bins, dtype=np.float64)
+        data = np.full((cycles, bins), 2.0, dtype=np.float32)
+
+        def shape(mass):
+            centre = a * np.sqrt(mass)
+            sigma = ptrms._sigma_tb(mass, a, 2400.0, mass_axis=axis)
+            normalised = (x - centre) / sigma
+            profile = np.exp(-0.5 * normalised**2)
+            profile[normalised > 0] *= np.exp(-0.12 * normalised[normalised > 0])
+            return profile
+
+        for mass in masses[:3]:
+            data += (200.0 * shape(mass))[None, :]
+        data += first_amplitudes[:, None] * shape(masses[3])[None, :]
+        data += second_amplitudes[:, None] * shape(masses[4])[None, :]
+
+        diagnostics = {}
+        with h5py.File("in-memory", "w", driver="core", backing_store=False) as h5:
+            h5.create_dataset("SPECdata/Intensities", data=data)
+            h5.create_dataset("SPECdata/AverageSpec", data=data.mean(axis=0))
+            traces, _ = ptrms.extract_traces(
+                h5,
+                masses,
+                mass_axis=axis,
+                peak_fit_model="empirical-v1",
+                fit_diagnostics=diagnostics,
+                per_range={"sample_01": (1, 2), "sample_02": (3, 4)},
+                block=2,
+            )
+            profile_x = np.linspace(-4.5, 4.5, 181)
+            unavailable_profile = {
+                "usable": False,
+                "reason": "no clean references",
+                "n_reference_peaks": 0,
+                "x": profile_x,
+                "y": np.exp(-0.5 * profile_x**2),
+            }
+            fallback_diagnostics = {}
+            with mock.patch.object(
+                ptrms.peak_fit,
+                "estimate_empirical_profile",
+                return_value=unavailable_profile,
+            ):
+                fallback_traces, _ = ptrms.extract_traces(
+                    h5,
+                    masses,
+                    mass_axis=axis,
+                    peak_fit_model="empirical-v1",
+                    fit_diagnostics=fallback_diagnostics,
+                    block=2,
+                )
+
+        self.assertTrue(diagnostics["profile"]["usable"])
+        self.assertEqual(diagnostics["clusters"][0]["method"], "empirical-v1")
+        self.assertEqual(diagnostics["clusters"][0]["status"], "reliable")
+        self.assertEqual(
+            set(diagnostics["clusters"][0]["ranges"]),
+            {"sample_01", "sample_02"},
+        )
+        first_trace = traces[masses[3]][0]
+        second_trace = traces[masses[4]][0]
+        self.assertAlmostEqual(first_trace[0] / first_trace[1], 2.0, delta=0.15)
+        self.assertAlmostEqual(second_trace[0] / second_trace[1], 0.375, delta=0.05)
+        fallback = fallback_diagnostics["clusters"][0]
+        self.assertEqual(fallback["method"], "gaussian-fallback-v1")
+        self.assertNotEqual(fallback["status"], "legacy")
+        if fallback["status"] == "unresolved":
+            self.assertTrue(np.isnan(fallback_traces[masses[3]][0]).all())
+
+
+class IsotopeQuantificationTest(unittest.TestCase):
+    def test_auxiliary_channels_do_not_create_rows(self):
+        source = {"mz": 59.0, "formula": "C3H6O"}
+        model = isotopes.formula_isotope_model(source["formula"])
+        ratio = model["channels"][0]["ratio"]
+        target_mass = source["mz"] + model["channels"][0]["shift"]
+        target = {"mz": target_mass, "formula": "CH4O"}
+        plan = isotopes.build_isotope_plan([source, target])
+        traces = {
+            source["mz"]: (np.full(4, 100.0), source["mz"]),
+            target_mass: (
+                np.full(4, 20.0 + 100.0 * ratio),
+                target_mass,
+            ),
+        }
+
+        with mock.patch.object(
+            ptrms,
+            "load_transmission",
+            return_value=(np.array([1.0, 200.0]), np.ones(2)),
+        ), mock.patch.object(ptrms, "has_transmission", return_value=True):
+            rows, params = ptrms.quantify(
+                traces,
+                object(),
+                {"sample_01": (1, 4)},
+                K=1.0,
+                primary=np.ones(4),
+                molar_volume=24.0,
+                isotope_plan=plan,
+            )
+
+        self.assertEqual(len(rows), 2)
+        target_row = next(row for row in rows if row["mass"] == target_mass)
+        self.assertGreater(target_row["cor"]["Average"], 20.0)
+        self.assertAlmostEqual(target_row["con"]["Average"], 20.0)
+        self.assertTrue(params["isotopes"]["enabled"])
+        self.assertEqual(
+            params["isotopes"]["corrections"][1]["status"],
+            "spillover-corrected",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

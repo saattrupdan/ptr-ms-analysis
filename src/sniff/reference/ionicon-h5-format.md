@@ -138,7 +138,11 @@ the raw file — a specific PTR-MS Viewer project uses its own sensitivity setti
 - `calibrate` fits `K` against a reference CSV
   (`K = median[ref_conc × I_primary / Corrected]`), matching a Viewer project to
   ≈ 3 %.
-Raw and Corrected do not depend on K.
+Raw and Corrected do not depend on K. Formula-derived isotope handling preserves both
+quantities: spillover-adjusted signal affects concentration only. Dividing by the
+formula's monoisotopic fraction is permitted only when calibration metadata says its
+signal basis is `total`; a standards-derived or unknown K may already contain that
+factor and is not silently adjusted.
 
 ### 4. Concentration [µg/m³]
 `Conc_µg = Conc_ppb × M_neutral / Vₘ`, where `M_neutral = m_ion − m_proton`
@@ -148,15 +152,24 @@ CSV's µg/ppb ratio equals `M_neutral/28.90` across all masses to <0.1 %.
 
 ## Overlapping peaks (isobaric interference)
 
-The central difficulty of PTR-TOF. A window wide enough for accurate area on
-isolated peaks reaches into neighbours < ~0.05 m/z away. The pipeline groups
-peaks within `cluster_gap` (0.2 m/z) and separates them by **vectorised linear
-least-squares Gaussian unmixing**: build unit-Gaussian basis functions at each
-(scale-corrected) centre with σ from `R_phys`, solve `A = Y·G(GᵀG)⁻¹` for all
-cycles at once, clip negatives, and rescale each amplitude to the window-sum
-definition so isolated and deconvolved peaks share one Raw scale. This turns
-100 %+ errors on close pairs (m43.020/m43.052, m47.013/m47.049,
-m57.035/m57.071) into 1–4 %.
+The central difficulty of PTR-TOF. A window wide enough for accurate area on isolated
+peaks reaches into neighbours < ~0.05 m/z away. Version-2 analyses group peaks within
+`cluster_gap` (0.2 m/z), learn an empirical line shape from clean isolated peaks in the
+same run, and fit bounded shared centre and width changes on the run and interval
+average spectra. A dependency-free non-negative least-squares solve then obtains
+amplitudes per cycle and rescales them to the window-sum Raw definition. Numerical
+rank, condition, component correlation and residual diagnostics decide whether the
+components are
+independently identifiable. Unreliable values become unavailable rather than being
+clipped into plausible concentrations. The previous fixed-centre Gaussian model remains
+available as `gaussian-v1` and is the reported fallback when an empirical profile cannot
+be established.
+
+Assigned formulas also derive exact natural M+1/M+2 auxiliary channels. After
+transmission correction, a predictable lower-mass parent isotope can be subtracted from
+a shared assigned-parent channel. The correction is withheld when its source or target
+is unavailable, its result is materially negative, or the formula is not assigned.
+Auxiliary channels are evidence and correction inputs, not independent analyte rows.
 
 ## What is NOT in the raw file (must be supplied)
 
