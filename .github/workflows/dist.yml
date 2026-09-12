@@ -33,13 +33,23 @@ jobs:
             label: windows-x86_64
             # WiX needs the .NET SDK, which the Windows runner image already has.
             installer: msi
+            package: ".[desktop]"
             exe: dist/sniff/sniff.exe
+            artifact: dist/sniff-review-windows-x86_64.msi
           - os: macos-latest
             label: macos-arm64
             installer: pkg
+            package: ".[desktop]"
             exe: dist/Sniff.app/Contents/MacOS/sniff
-            # An Intel Mac build would be a third entry: { os: macos-13,
-            # label: macos-x86_64, exe: dist/Sniff.app/Contents/MacOS/sniff }.
+            artifact: dist/sniff-review-macos-arm64.pkg
+            # An Intel Mac build would be another native matrix entry.
+          - os: ubuntu-22.04
+            label: linux-x86_64
+            installer: linux
+            # Browser-first by design: no pywebview or distro-specific GUI backend.
+            package: "."
+            exe: dist/sniff/sniff
+            artifact: dist/sniff-review-linux-x86_64.*
 
     steps:
       - uses: actions/checkout@v4
@@ -51,9 +61,9 @@ jobs:
       - name: Install the package and PyInstaller
         run: |
           python -m pip install --upgrade pip
-          # The desktop extra is what makes the bundle open a window rather than a
-          # browser tab; the spec picks it up automatically when it is installed.
-          pip install ".[desktop]" pyinstaller
+          # macOS and Windows bundle pywebview. Linux is deliberately browser-first,
+          # avoiding a dependency on one distribution's GUI toolkit and web renderer.
+          pip install "${{ matrix.package }}" pyinstaller
 
       - name: Remove stale bundle output
         run: python -c "import shutil; [shutil.rmtree(path, ignore_errors=True) for path in ('dist', 'build')]"
@@ -61,11 +71,15 @@ jobs:
       - name: Build the bundle
         run: pyinstaller --noconfirm packaging/sniff-app.spec
 
-      - name: Check the bundle actually serves a review
+      - name: Check the desktop bundle actually serves a review
         if: matrix.installer == 'msi'
         # The installed PKG is the stronger macOS check. Hosted macOS stalls every
         # second invocation of a windowed frozen executable before Python starts.
         run: python scripts/smoke_frozen.py "${{ matrix.exe }}"
+
+      - name: Check the Linux bundle actually serves a browser review
+        if: matrix.installer == 'linux'
+        run: python scripts/smoke_frozen.py "${{ matrix.exe }}" --expect-browser
 
       - name: Build the Windows installer
         if: matrix.installer == 'msi'
@@ -128,15 +142,46 @@ jobs:
           echo "installed at: $installed"
           python scripts/smoke_frozen.py "$installed/Contents/MacOS/sniff" --single-launch
 
+      - name: Build the Linux installer and portable archive
+        if: matrix.installer == 'linux'
+        run: |
+          python packaging/make_linux.py \
+            --bundle dist/sniff --output-dir dist --arch x86_64
+          dpkg-deb --info dist/sniff-review-linux-x86_64.deb
+          dpkg-deb --contents dist/sniff-review-linux-x86_64.deb
+
+      - name: Check the portable Linux archive
+        if: matrix.installer == 'linux'
+        run: |
+          mkdir -p "$RUNNER_TEMP/sniff-portable"
+          tar -xzf dist/sniff-review-linux-x86_64.tar.gz \
+            -C "$RUNNER_TEMP/sniff-portable"
+          python scripts/smoke_frozen.py \
+            "$RUNNER_TEMP/sniff-portable/sniff-review-linux-x86_64/sniff" \
+            --expect-browser
+
+      - name: Check the installed Linux package
+        if: matrix.installer == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y desktop-file-utils \
+            ./dist/sniff-review-linux-x86_64.deb
+          desktop-file-validate \
+            /usr/share/applications/dk.samsmart.sniff.desktop
+          test "$(readlink -f /usr/bin/sniff)" = /opt/sniff/sniff-cli
+          /usr/bin/sniff --help
+          python scripts/smoke_frozen.py /opt/sniff/sniff --expect-browser
+
       # Named after the installer exists: naming it before building it is a mistake
       # worth remembering, because the smoke test above passes either way.
-      - name: Name it
+      - name: Name the desktop installer
+        if: matrix.installer != 'linux'
         run: mv "dist/sniff.${{ matrix.installer }}" "dist/sniff-review-${{ matrix.label }}.${{ matrix.installer }}"
 
       - uses: actions/upload-artifact@v4
         with:
           name: sniff-review-${{ matrix.label }}
-          path: dist/sniff-review-${{ matrix.label }}.${{ matrix.installer }}
+          path: ${{ matrix.artifact }}
           if-no-files-found: error
 
   release:

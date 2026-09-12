@@ -628,19 +628,22 @@ def _app_args(**overrides):
 
 
 @pytest.mark.parametrize(
-    ("frozen", "overrides", "expected"),
+    ("platform", "frozen", "overrides", "expected"),
     [
-        (False, {}, False),  # a checkout keeps the browser it always had
-        (False, {"no_browser": True}, False),
-        (False, {"window": True}, True),
-        (True, {}, True),  # a double-clicked bundle has no terminal to read a URL in
-        (True, {"no_browser": True}, False),
-        (True, {"window": True, "no_browser": True}, True),
+        ("darwin", False, {}, False),  # a checkout keeps the browser it always had
+        ("linux", False, {"no_browser": True}, False),
+        ("linux", False, {"window": True}, True),
+        ("darwin", True, {}, True),
+        ("win32", True, {}, True),
+        ("linux", True, {}, False),  # the portable bundle opens a browser directly
+        ("linux", True, {"no_browser": True}, False),
+        ("linux", True, {"window": True, "no_browser": True}, True),
     ],
 )
 def test_the_window_is_a_bundle_default_and_an_opt_in_elsewhere(
-    monkeypatch, frozen, overrides, expected
+    monkeypatch, platform, frozen, overrides, expected
 ):
+    monkeypatch.setattr(sys, "platform", platform)
     if frozen:
         monkeypatch.setattr(sys, "frozen", True, raising=False)
     else:

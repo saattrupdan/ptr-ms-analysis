@@ -7,16 +7,18 @@
 #
 # macOS gets a real .app wrapper around that folder, because LaunchServices only gives
 # a plain executable a Dock icon, a name, and a right-click "Open" to get past
-# Gatekeeper. Windows gets the folder, which the WiX project turns into an .msi.
+# Gatekeeper. Windows gets the folder, which the WiX project turns into an .msi. Linux
+# gets the same folder in a .deb and portable archive, deliberately using a browser tab
+# rather than binding the package to one GUI toolkit and web renderer.
 #
 # Build on the machine you are targeting — PyInstaller cannot cross-compile. The
-# `package` workflow does exactly that on native macOS and Windows runners.
+# `package` workflow does exactly that on native macOS, Windows and Linux runners.
 #
-#   uv sync --extra desktop
+#   uv sync --extra desktop  # macOS and Windows only
 #   uv run --with pyinstaller pyinstaller --noconfirm packaging/sniff-app.spec
 #
-# The desktop extra is what gives the bundle a window of its own; built without it the
-# bundle still works, and opens a browser tab instead. The spec says so in its log.
+# The desktop extra gives macOS and Windows bundles a window of their own. Linux ignores
+# it intentionally and opens a browser tab. The spec says which surface it bundled.
 
 import ast
 import importlib.util
@@ -105,7 +107,7 @@ def _backend_toolkits():
     )
 
 
-if importlib.util.find_spec("webview") is not None:
+if sys.platform != "linux" and importlib.util.find_spec("webview") is not None:
     _w_datas, _w_binaries, _w_hidden = collect_all("webview")
     datas += _w_datas
     binaries += _w_binaries
@@ -131,6 +133,8 @@ if importlib.util.find_spec("webview") is not None:
     # WinForms/WebView2 bridge on Windows.
     hiddenimports += _backend_toolkits()
     print("sniff-app.spec: bundling the desktop window (pywebview + its dependencies)")
+elif sys.platform == "linux":
+    print("sniff-app.spec: building the portable Linux browser interface")
 else:
     # Loud, because the alternative is a shipped installer that opens a browser tab and
     # a build log that says nothing about it.

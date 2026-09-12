@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Linux x86_64 releases now include an Ubuntu/Debian `.deb` installer and a portable
+  `.tar.gz` bundle, both built and smoke-tested on Ubuntu 22.04. Linux deliberately
+  opens Sniff's local interface in the default browser to avoid distro-specific GUI
+  toolkit dependencies; the `.deb` adds the application-menu entry, icon, native file
+  chooser dependency and `/usr/bin/sniff` command.
+
+### Fixed
+
+- Browser-based file selection now invokes KDE's `kdialog` with its supported open-file
+  option, so Linux systems without `zenity` can still choose an H5 run.
+
 ## [0.7.1] - 2026-09-12
 
 ### Fixed

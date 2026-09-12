@@ -1835,7 +1835,14 @@ def _pick_file():
     else:
         for tool, extra in (
             ("zenity", ["--file-selection"]),
-            ("kdialog", ["--getexistingfile", "*"]),
+            (
+                "kdialog",
+                [
+                    "--getopenfilename",
+                    os.path.expanduser("~"),
+                    "*.h5|IONICON runs (*.h5)",
+                ],
+            ),
         ):
             if shutil.which(tool):
                 cmd = [tool] + extra

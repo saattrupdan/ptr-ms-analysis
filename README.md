@@ -12,13 +12,35 @@ CLI. The commands below describe the complete package interface.
 
 ## Install / run
 
-For normal use, download the Sniff installer for your platform from the repository's
-GitHub Release page. The macOS `.pkg` installs **Sniff.app** in `/Applications`; the
-Windows `.msi` installs Sniff in `Program Files`. The installers include Python,
-NumPy, h5py and the PTR reference data — no separate Python installation is needed.
+For normal use, download Sniff for your platform from the repository's GitHub Release
+page. The macOS `.pkg` installs **Sniff.app** in `/Applications`; the Windows `.msi`
+installs Sniff in `Program Files`; and the Linux `.deb` installs Sniff in `/opt/sniff`
+with an application-menu entry and a `sniff` command. All three include Python, NumPy,
+h5py and the PTR reference data — no separate Python installation is needed.
 
-After installation, launch Sniff from the Applications folder or Start Menu. The
-command-line executable is also available as `sniff`:
+On Ubuntu 22.04+, Debian 12+, and their compatible derivatives, install the downloaded
+Linux package with:
+
+```bash
+sudo apt install ./sniff-review-linux-x86_64.deb
+sniff app
+```
+
+Linux intentionally opens the local interface in the default browser rather than
+shipping one distribution's GUI toolkit. The package installs `zenity` or `kdialog`
+for the native file chooser. A portable archive is also available for other modern,
+glibc-based x86_64 distributions:
+
+```bash
+tar -xzf sniff-review-linux-x86_64.tar.gz
+./sniff-review-linux-x86_64/sniff
+```
+
+The portable build is best-effort outside Ubuntu and Debian. It does not support
+Alpine/musl, and ARM systems need a separate build. Its folder must remain intact; use
+`sniff-cli` inside that folder for terminal commands. On installed systems, launch
+Sniff from the Applications folder, Start Menu or application menu. The command-line
+executable is available as `sniff`:
 
 ```bash
 sniff --help
@@ -34,9 +56,9 @@ uv run sniff --help
 uv run sniff rates water
 ```
 
-Sniff requires Python 3.9 or newer when run from a checkout. It works on macOS,
-Linux and Windows; packaged desktop installers are currently produced for macOS and
-Windows.
+Sniff requires Python 3.9 or newer when run from a checkout. It works on macOS, Linux
+and Windows; packaged releases are produced for macOS arm64, Windows x86_64 and Linux
+x86_64.
 
 ## Commands (all discovery output is JSON)
 
@@ -71,12 +93,13 @@ sniff app --port 8791            # fixed port (it probes upward if the port is t
 sniff app --agent URL            # let an agent curate a newly detected config
 ```
 
-Installed as an app bundle, `sniff app` opens a **desktop window** — its own window,
-menus and file dialog rather than a tab in whatever browser you happen to use. From a
-source checkout it opens a browser tab unless you ask for `--window`, because there the
-terminal is right beside you. The packaged installer includes the desktop window. A checkout can use the optional
-`pywebview` dependency with `uv sync --extra desktop`; without it, Sniff logs one line
-and opens a browser tab, so nothing is ever lost — the same page, the same localhost
+Installed on macOS or Windows, `sniff app` opens a **desktop window** — its own
+window, menus and file dialog rather than a tab in whatever browser you happen to use.
+Linux packages deliberately open the same localhost interface in the default browser,
+which avoids tying the portable build to one GUI toolkit and web renderer. From a
+source checkout it also opens a browser tab unless you ask for `--window`. A checkout
+can use the optional `pywebview` dependency with `uv sync --extra desktop`; without it,
+Sniff opens a browser tab, so nothing is ever lost — the same page, the same localhost
 server, the same Export.
 
 Each file's config sits beside it under the same name: `sniff.h5` → `sniff.json`.
@@ -125,26 +148,29 @@ a file that is already open.
 `sniff app` freezes into something a reviewer can run with no Python installed:
 
 ```bash
-uv sync --extra desktop
+uv sync --extra desktop  # omit the extra for a browser-first Linux build
 # Remove stale one-dir output: PyInstaller cannot repair an old executable/data collision.
 uv run python -c "import shutil; [shutil.rmtree(path, ignore_errors=True) for path in ('dist', 'build')]"
 uv run --with pyinstaller pyinstaller --noconfirm packaging/sniff-app.spec
 uv run python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/sniff"  # macOS
 uv run python scripts/smoke_frozen.py dist/sniff/sniff.exe                    # Windows
+uv run python scripts/smoke_frozen.py dist/sniff/sniff --expect-browser       # Linux
 ```
 
 On Windows that leaves the quiet desktop launcher at `dist/sniff/sniff.exe` and a
-terminal launcher at `dist/sniff/sniff-cli.exe`; on macOS it leaves `dist/Sniff.app`.
-The visible executables stay at those paths while PyInstaller keeps package data,
-Python modules and shared libraries separate from them: under `_internal/` on Windows,
-and under the app bundle's `Contents/Resources/` on macOS. Either way the bundle is
-the same ~40 MB of interpreter, NumPy, HDF5 and bundled reference data.
+terminal launcher at `dist/sniff/sniff-cli.exe`; on macOS it leaves `dist/Sniff.app`;
+and on Linux it leaves browser and terminal launchers at `dist/sniff/sniff` and
+`dist/sniff/sniff-cli`. The visible executables stay at those paths while PyInstaller
+keeps package data, Python modules and shared libraries separate under `_internal/` on
+Windows and Linux, and under `Contents/Resources/` on macOS. Each bundle carries the
+interpreter, NumPy, HDF5 and bundled reference data.
 `scripts/smoke_frozen.py` starts it against a tiny synthetic file and
 checks it really serves the review page, because `sniff --help` would pass on a bundle
 that cannot do anything else.
 
 Then wrap it the way each system expects — a `.pkg` built by `pkgbuild` and
-`productbuild` on macOS, an `.msi` built by WiX on Windows:
+`productbuild` on macOS, an `.msi` built by WiX on Windows, or a `.deb` and portable
+archive authored by `packaging/make_linux.py` on Linux:
 
 ```bash
 version=$(uv run python packaging/make_pkg.py --print-version)                  # macOS
@@ -156,13 +182,16 @@ productbuild --distribution build/pkg/distribution.xml --package-path build/pkg 
 uv run python packaging/make_msi.py dist/sniff build/msi/sniff-app.wxs        # Windows
 candle.exe -arch x64 -out build/msi/sniff-app.wixobj build/msi/sniff-app.wxs
 light.exe  -o dist/sniff.msi build/msi/sniff-app.wixobj
+
+uv run python packaging/make_linux.py --bundle dist/sniff --output-dir dist \
+  --arch x86_64                                                               # Linux
 ```
 
-`packaging/README.md` is the guide to all of it — both command pairs in full, why
-PyInstaller cannot cross-compile, why WiX v3.14 is the pinned toolchain, what each
-installer contains and where it lands (`/Applications/Sniff.app`,
-`C:\Program Files\Sniff`), how to check an artifact, and what a signed build
-would still need.
+`packaging/README.md` is the guide to all of it — the commands in full, why
+PyInstaller cannot cross-compile, why WiX v3.14 is pinned, what each installer contains
+and where it lands (`/Applications/Sniff.app`, `C:\Program Files\Sniff`, or
+`/opt/sniff`), how to
+check an artifact, and what a signed build would still need.
 
 Both installers are generated from what the build produced rather than from a
 hand-maintained file list. `packaging/make_msi.py` writes the WiX source with one
@@ -174,11 +203,11 @@ EULA is accepted, which asks a fee of anyone shipping a product for money.
 version, the minimum system and the architecture, with no paths and no timestamps in it,
 so the same checkout gives the same file twice.
 
-Each operating system needs its own build: PyInstaller cannot cross-compile, and neither
-can an installer tool. The `package` workflow does all of it on native macOS and Windows
-runners and uploads the two installers; pushing a `v*` tag also publishes them as a
-GitHub Release. To build for Windows without any of that, run the commands above on a
-Windows machine.
+Each operating system needs its own build: PyInstaller cannot cross-compile. The
+`package` workflow builds on native macOS, Windows and Ubuntu 22.04 runners and uploads
+the `.pkg`, `.msi`, `.deb` and portable Linux archive; pushing a `v*` tag publishes them
+as a GitHub Release. Building Linux on Ubuntu 22.04 sets a conservative glibc floor for
+newer distributions, but does not make the binary universal.
 
 Neither installer is signed, so the first run warns. To install the macOS package, either
 double-click it or install it from a terminal:

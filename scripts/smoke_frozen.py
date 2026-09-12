@@ -8,6 +8,7 @@ nothing but a synthetic file and a few seconds of patience.
 Usage:  uv run python scripts/smoke_frozen.py dist/sniff/sniff.exe
         uv run python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/sniff"
         uv run python scripts/smoke_frozen.py ".../sniff" --single-launch
+        uv run python scripts/smoke_frozen.py dist/sniff/sniff --expect-browser
 """
 
 from __future__ import annotations
@@ -168,11 +169,13 @@ def await_logged_url(proc, log_path, offset, timeout):
 
 
 def main(argv) -> int:
-    if len(argv) not in (2, 3) or (len(argv) == 3 and argv[2] != "--single-launch"):
+    options = set(argv[2:])
+    if len(argv) < 2 or options - {"--single-launch", "--expect-browser"}:
         print(__doc__, file=sys.stderr)
         return 2
     exe = Path(argv[1]).resolve()
-    single_launch = len(argv) == 3
+    single_launch = "--single-launch" in options
+    expect_browser = "--expect-browser" in options
     if not exe.is_file():
         print(
             f"frozen app smoke: FAIL — no such executable file: {exe}", file=sys.stderr
@@ -186,8 +189,8 @@ def main(argv) -> int:
             file=sys.stderr,
         )
         return 1
-    if exe.suffix.lower() == ".exe":
-        cli = exe.with_name("sniff-cli.exe")
+    if exe.parent.name != "MacOS":
+        cli = exe.with_name(f"sniff-cli{exe.suffix}")
         if not cli.is_file():
             print(
                 f"frozen app smoke: FAIL — no terminal launcher beside {exe}",
@@ -199,7 +202,7 @@ def main(argv) -> int:
         )
         if result.returncode != 0 or "usage: sniff" not in result.stdout:
             print(
-                "frozen app smoke: FAIL — sniff-cli.exe did not return CLI help",
+                f"frozen app smoke: FAIL — {cli.name} did not return CLI help",
                 file=sys.stderr,
             )
             print(result.stdout, result.stderr, file=sys.stderr)
@@ -343,6 +346,17 @@ def main(argv) -> int:
                     file=sys.stderr,
                 )
                 return 1
+            if expect_browser:
+                surface = json.loads(get(bare_url.rstrip("/") + "/api/state")[1]).get(
+                    "surface"
+                )
+                if surface != "browser":
+                    print(
+                        "frozen app smoke: FAIL — the bundle did not choose the "
+                        f"browser surface: {surface!r}",
+                        file=sys.stderr,
+                    )
+                    return 1
             post(bare_url.rstrip("/") + "/shutdown")
         finally:
             bare.kill()

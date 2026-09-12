@@ -1489,10 +1489,10 @@ def cmd_app(args):
     deterministic pipeline to make one, and exporting writes the CSV without shutting
     anything down.
 
-    The app normally opens in a browser tab. Inside a frozen bundle it opens in a
+    The app normally opens in a browser tab. Frozen macOS and Windows bundles open in a
     desktop window instead, because a double-clicked app has no terminal to read a URL
-    out of and no tab the user asked for; `--window` asks for the same thing from an
-    ordinary install, and `--no-browser` declines both.
+    out of. Frozen Linux bundles deliberately retain the browser for portability;
+    `--window` asks for a desktop window explicitly, and `--no-browser` declines both.
     """
     from . import app as app_mode
 
@@ -1513,14 +1513,18 @@ def cmd_app(args):
 def _wants_window(args) -> bool:
     """Window, browser tab, or neither: the precedence, in one place.
 
-    An explicit `--window` wins. Otherwise a packaged bundle defaults to the window —
-    there is no terminal there, so a browser tab is a guess about someone else's
-    desktop — unless `--no-browser` says nothing is to be opened at all. Anywhere else
-    the browser is left exactly as it was.
+    An explicit `--window` wins. Otherwise packaged macOS and Windows bundles default
+    to the window unless `--no-browser` says nothing is to be opened. Linux deliberately
+    keeps the browser-based surface so its package does not depend on a particular GUI
+    toolkit or web renderer. Anywhere else the browser is left exactly as it was.
     """
     if getattr(args, "window", False):
         return True
-    return bool(getattr(sys, "frozen", False)) and not args.no_browser
+    desktop_bundle = bool(getattr(sys, "frozen", False)) and sys.platform in (
+        "darwin",
+        "win32",
+    )
+    return desktop_bundle and not args.no_browser
 
 
 def cmd_rates(args):

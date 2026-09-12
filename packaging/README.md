@@ -1,24 +1,25 @@
 # Building the installers
 
-Two artifacts, each built on the machine it is meant for:
+Four artifacts, each built on the operating system it is meant for:
 
 | Platform | Artifact | Authoring tool | Lands in |
 | --- | --- | --- | --- |
 | macOS (arm64) | `sniff-review-macos-arm64.pkg` | `pkgbuild` + `productbuild` | `/Applications/Sniff.app` |
 | Windows (x86_64) | `sniff-review-windows-x86_64.msi` | WiX v3 `candle` + `light` | `C:\Program Files\Sniff` |
+| Ubuntu/Debian (x86_64) | `sniff-review-linux-x86_64.deb` | `dpkg-deb` | `/opt/sniff` |
+| Linux portable | `sniff-review-linux-x86_64.tar.gz` | `tarfile` | extracted folder |
 
-Both carry the same payload: a PyInstaller one-dir bundle — a Python interpreter,
-NumPy, h5py, this package, and the bundled reference data — so a reviewer with no
-Python installed can double-click it and review a run. At 0.5.0 that is 306 files and
-46 MB on disk, 20 MB once packaged — the extra files over the 273 an unsigned
-browser-only bundle carried are pywebview and PyObjC, which give it a window. Neither installer is signed or notarised; see
+All carry a PyInstaller one-dir bundle: a Python interpreter, NumPy, h5py, this
+package and the bundled reference data. macOS and Windows include pywebview for a
+native window. Linux is deliberately browser-first, avoiding a dependency on one
+distribution's GUI toolkit and renderer. None of the installers is signed; see
 [What is not done yet](#what-is-not-done-yet).
 
-This guide builds both by hand. The `package` workflow
-(`.github/workflows/dist.yml`) runs exactly these commands on native macOS and
-Windows runners, and a `v*` tag publishes the results as a GitHub Release.
+This guide builds them by hand. The `package` workflow
+(`.github/workflows/dist.yml`) runs the commands on native macOS, Windows and Ubuntu
+22.04 runners, and a `v*` tag publishes the results as a GitHub Release.
 
-## One payload, two installers
+## One payload, three platform builds
 
 PyInstaller analyses the interpreter it is running under: it walks the import
 graph, then copies the shared libraries and native extensions that interpreter
@@ -26,37 +27,38 @@ actually loads. A Linux or macOS machine has no Windows `python3xx.dll` to copy
 and no way to learn which one is needed, so **PyInstaller cannot cross-compile**
 — each bundle must be built on its target operating system.
 
-The installers have the same problem in a different dress. An `.msi` is a
-Windows Installer database, written by `candle`/`light` and validated against
-the Windows Installer schema; a `.pkg` is a flat package holding a payload, a
-bill of materials and a distribution script, written by `pkgbuild` and
-`productbuild`, which ship with the macOS command line tools. Neither toolchain
-runs usefully on the other platform. So there is one build per platform, which
-is also what the CI matrix encodes.
+The installers have the same problem in a different dress. An `.msi` is a Windows
+Installer database; a `.pkg` is a macOS flat package; and a `.deb` is a Debian
+archive with control metadata. Each needs its native toolchain. There is therefore one
+build per target operating system, which is what the CI matrix encodes.
 
-What *is* shared is the authoring: `packaging/sniff-app.spec` describes the bundle
-identically on both, and `packaging/make_msi.py` and `packaging/make_pkg.py`
-generate their installer sources from what the build produced rather than from a
-hand-maintained file list.
+What *is* shared is the authoring: `packaging/sniff-app.spec` describes each native
+bundle, while `packaging/make_msi.py`, `packaging/make_pkg.py` and
+`packaging/make_linux.py` generate artifacts from what the build produced rather than
+from a hand-maintained payload list.
 
-## 1. Build the bundle (both platforms)
+A Linux binary also inherits the glibc floor of its build host. Build on Ubuntu 22.04,
+not `ubuntu-latest`, to support Ubuntu 22.04+, Debian 12+ and best-effort use on newer
+glibc distributions. This does not cover Alpine/musl. Each CPU architecture requires
+its own artifact.
+
+## 1. Build the bundle (all platforms)
 
 In an isolated environment — a virtualenv you activate, or `uv run` — with the
 version of Python you want to ship:
 
 ```bash
-uv sync --extra desktop
+uv sync --extra desktop  # macOS and Windows
+uv sync                  # Linux: intentionally omit pywebview
 # A stale one-dir tree can contain the old executable/package collision.
 uv run python -c "import shutil; [shutil.rmtree(path, ignore_errors=True) for path in ('dist', 'build')]"
 uv run --with pyinstaller pyinstaller --noconfirm packaging/sniff-app.spec
 ```
 
 `pyinstaller` is a build tool, never a runtime dependency. The `desktop` extra
-(`pywebview`) is optional by design: the spec collects it when it is present so
-a double-click opens a real window, and leaves it out when it is not, where the
-same bundle falls back to a browser tab instead of failing. If you want the
-window in the artifact — you do — install the extra before building, and check
-the build log says so:
+(`pywebview`) gives macOS and Windows their own window; install it before those builds
+and check the log says so. Linux excludes pywebview even if it is installed and should
+instead log `building the portable Linux browser interface`.
 
 ```
 sniff-app.spec: bundling the desktop window (pywebview + its dependencies)
@@ -95,17 +97,15 @@ machine `--window` must report `window`; a CI runner with no window server may r
 registered with the window server — a bundle that only opened a tab never appears
 there at all.
 
-That leaves `dist/Sniff.app/Contents/MacOS/sniff` on macOS. Windows gets the quiet
-desktop launcher `dist/sniff/sniff.exe` plus `dist/sniff/sniff-cli.exe` for terminal
-commands and JSON output. The executables remain visible at the bundle root; PyInstaller
-keeps the package data, Python modules and shared libraries in the app's
-`Contents/Resources/` on macOS and its private `_internal/` directory on Windows. This
-avoids the executable colliding with the collected `sniff/` package. Check it
-before wrapping it:
+That leaves `dist/Sniff.app/Contents/MacOS/sniff` on macOS. Windows gets
+`dist/sniff/sniff.exe` and `dist/sniff/sniff-cli.exe`; Linux gets the same pair without
+`.exe`. PyInstaller keeps private contents under `Contents/Resources/` on macOS and
+`_internal/` elsewhere. Check the bundle before wrapping it:
 
 ```bash
-uv run python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/sniff"   # macOS
-uv run python scripts/smoke_frozen.py dist/sniff/sniff.exe                              # Windows
+uv run python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/sniff"  # macOS
+uv run python scripts/smoke_frozen.py dist/sniff/sniff.exe                   # Windows
+uv run python scripts/smoke_frozen.py dist/sniff/sniff --expect-browser      # Linux
 ```
 
 The smoke script writes a tiny synthetic `.h5` file, starts the bundle against
@@ -190,22 +190,59 @@ reason to hang that condition over this project's builds, so the authoring here
 is deliberately v3-shaped (`candle` then `light`, a `<Wix>` root in the 2006
 namespace) and will not feed a v6 toolchain.
 
+## 4. Linux: the `.deb` and portable archive
+
+Build on Ubuntu 22.04 x86_64 without the desktop extra, then author both artifacts from
+the same `dist/sniff/` folder:
+
+```bash
+uv sync
+rm -rf dist build
+uv run --with pyinstaller pyinstaller --noconfirm packaging/sniff-app.spec
+uv run python scripts/smoke_frozen.py dist/sniff/sniff --expect-browser
+uv run python packaging/make_linux.py --bundle dist/sniff --output-dir dist \
+  --arch x86_64
+```
+
+The `.deb` installs the private bundle under `/opt/sniff`, links the terminal launcher
+as `/usr/bin/sniff`, and installs `dk.samsmart.sniff.desktop` plus its 256 px icon under
+`/usr/share`. Its `xdg-utils` and `zenity | kdialog` dependencies provide browser and
+file-dialog integration on Ubuntu and Debian desktops. The menu launcher uses the
+console-free executable, while `/usr/bin/sniff` retains JSON and terminal output.
+
+The archive extracts to one movable `sniff-review-linux-x86_64/` folder. Run `sniff`
+inside it for the app or `sniff-cli` for terminal commands; keep `_internal/` beside
+them. The archive is the cross-distro fallback, not a universal binary: it should work
+on newer glibc-based x86_64 distributions, but is not promised for Alpine/musl, older
+glibc releases or other architectures.
+
+Inspect and install the Debian package with:
+
+```bash
+dpkg-deb --info dist/sniff-review-linux-x86_64.deb
+dpkg-deb --contents dist/sniff-review-linux-x86_64.deb
+sudo apt install ./dist/sniff-review-linux-x86_64.deb
+desktop-file-validate /usr/share/applications/dk.samsmart.sniff.desktop
+sniff --help
+sudo apt remove sniff
+```
+
 ## What is inside, and where it lands
 
-Both installers put the same bundle in a system location and leave the user's
-data alone. Nothing is downloaded or uploaded: the app serves its page on
-`127.0.0.1` and writes its config beside the `.h5` file it opened.
+The installers put the bundle in a system location and leave the user's data alone.
+Nothing is uploaded: the app serves its page on `127.0.0.1` and writes its config
+beside the `.h5` file it opened.
 
-| | macOS | Windows |
-| --- | --- | --- |
-| payload | `dist/Sniff.app` | `dist/sniff/` |
-| installs to | `/Applications/Sniff.app` | `C:\Program Files\Sniff\` |
-| desktop executable | `Contents/MacOS/sniff` | `sniff.exe` |
-| terminal executable | the installed `sniff` command | `sniff-cli.exe` |
-| private contents | `Contents/Resources/` | `_internal/` |
-| entry point | double-click, or `open -a "Sniff"` | Start Menu → Sniff |
-| console window | none; logs to `~/.sniff/log.txt` | none for the app; CLI terminal only |
-| scope | the machine, needs administrator rights | the machine (`InstallScope: perMachine`), needs administrator rights |
+| | macOS | Windows | Linux `.deb` |
+| --- | --- | --- | --- |
+| payload | `dist/Sniff.app` | `dist/sniff/` | `dist/sniff/` |
+| installs to | `/Applications/Sniff.app` | `C:\Program Files\Sniff\` | `/opt/sniff/` |
+| desktop executable | `Contents/MacOS/sniff` | `sniff.exe` | `sniff` |
+| terminal executable | installed `sniff` | `sniff-cli.exe` | `/usr/bin/sniff` |
+| private contents | `Contents/Resources/` | `_internal/` | `_internal/` |
+| entry point | Applications | Start Menu | application menu or browser |
+| interface | native window | native window | default browser |
+| scope | machine | machine | machine, via APT |
 
 A double-clicked bundle arrives **with no arguments at all** — that is how
 Finder and the Start Menu shortcut launch it, and the plain `sniff` command line
@@ -265,9 +302,12 @@ installer worked:
 ```bash
 uv run python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/sniff"
 uv run python scripts/smoke_frozen.py "/Applications/Sniff.app/Contents/MacOS/sniff"
+uv run python scripts/smoke_frozen.py dist/sniff/sniff --expect-browser
+uv run python scripts/smoke_frozen.py /opt/sniff/sniff --expect-browser
 ```
 
-On Windows it checks the terminal launcher first. It then runs three app phases:
+On Windows and Linux it checks the adjacent terminal launcher first. It then runs three
+app phases:
 `app <file> --no-browser --port N` must serve the review page for a synthetic run and
 write its startup log; the same executable with no arguments must open the start screen;
 and `--window` must report which surface it got, never die on a machine with no window
@@ -389,12 +429,19 @@ below.
 no Authenticode signature. "More info" → "Run anyway" installs it; your
 corporate antivirus may still take an interest in an unsigned bundle.
 
-Both warnings disappear once the artifact is signed and notarised.
+**Linux.** A downloaded `.deb` is not part of an authenticated APT repository, so APT
+may warn that the local package cannot be authenticated. Inspect the release checksum
+and package contents before installing it. The package itself does not trigger a
+platform security prompt.
+
+The platform warnings disappear only when the artifacts are signed and distributed
+through their platform trust channels.
 
 ## What is not done yet
 
-Nothing signs either artifact. There is no Developer ID certificate, no
-notarization, no Authenticode certificate, and no signing step in the workflow —
+Nothing signs the release artifacts. There is no Developer ID certificate,
+notarisation, Authenticode certificate, Debian repository signature, or signing step
+in the workflow —
 `pkgbuild` and `productbuild` will happily sign a package and `codesign` a bundle
 if a Developer ID is in the keychain of whoever runs them, but nothing does so
 today. Concretely, a build is missing:
@@ -410,9 +457,11 @@ today. Concretely, a build is missing:
   then `xcrun stapler staple dist/sniff-signed.pkg` — notarize it, so the warning
   is gone on a machine with no network view of your certificate.
 - Authenticode on the `.msi`, and `signtool`/`msiexec`-friendly timestamps.
+- A signed APT repository with `InRelease` metadata for automatic Linux updates. A
+  downloaded `.deb` alone is not an update channel.
 
-The spec and both authoring scripts need no changes for any of that: signing is a
-step to add between the build and the archive. Until then, ship the installers
+The spec and authoring scripts need no changes for any of that: signing is a step to
+add between the build and publication. Until then, ship the installers
 with the first-run instructions above, and say plainly that an unsigned `.pkg`
 still trips Gatekeeper on first run.
 

@@ -1698,6 +1698,32 @@ def test_browse_says_so_when_the_system_has_no_file_dialog(server, monkeypatch):
     assert body["error"] == "Native file browsing is unavailable."
 
 
+def test_kde_browse_uses_kdialogs_open_file_command(monkeypatch):
+    """A KDE-only installation must still be able to choose an H5 file."""
+    monkeypatch.setattr(app.sys, "platform", "linux")
+    monkeypatch.setattr(app.os, "name", "posix")
+    monkeypatch.setattr(
+        app.shutil,
+        "which",
+        lambda command: "/usr/bin/kdialog" if command == "kdialog" else None,
+    )
+    run = mock.Mock(return_value=mock.Mock(stdout="/data/run.h5\n"))
+    monkeypatch.setattr(app.subprocess, "run", run)
+
+    assert app._pick_file() == "/data/run.h5"
+    run.assert_called_once_with(
+        [
+            "kdialog",
+            "--getopenfilename",
+            app.os.path.expanduser("~"),
+            "*.h5|IONICON runs (*.h5)",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+
 def test_the_start_screen_uses_browse_for_files_and_compound_input_only():
     """The intro must not expose a manual file-path control."""
     html = app._START_HTML
