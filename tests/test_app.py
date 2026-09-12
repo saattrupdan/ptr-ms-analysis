@@ -735,6 +735,43 @@ def test_update_route_checks_once_and_opens_the_verified_installer(server, monke
     assert json.loads(api.get("/api/update")[1]) == {"available": False}
 
 
+def test_concurrent_update_requests_cannot_share_a_download(server, monkeypatch):
+    api, _ = server
+    available = app.updates.Update(
+        version="1.2.0",
+        asset_name="sniff-review-macos-arm64.pkg",
+        download_url=(
+            "https://github.com/saattrupdan/sniff/releases/download/"
+            "v1.2.0/sniff-review-macos-arm64.pkg"
+        ),
+        digest="sha256:" + "a" * 64,
+        release_url="https://github.com/saattrupdan/sniff/releases/tag/v1.2.0",
+    )
+    started = threading.Event()
+    release = threading.Event()
+    first_response = []
+    monkeypatch.setattr(app.updates, "find_update", lambda _version: available)
+
+    def install(_candidate):
+        started.set()
+        assert release.wait(5)
+
+    monkeypatch.setattr(app.updates, "install_update", install)
+    thread = threading.Thread(
+        target=lambda: first_response.append(api.post("/update")), daemon=True
+    )
+    thread.start()
+    assert started.wait(5)
+
+    second_status, second_body = api.post("/update")
+    release.set()
+    thread.join(timeout=5)
+
+    assert second_status == 409
+    assert second_body == {"error": "an update is already being opened"}
+    assert first_response == [(200, {"ok": True, "version": "1.2.0"})]
+
+
 def test_install_later_defers_the_update_for_this_app_launch(server, monkeypatch):
     api, _ = server
     available = mock.Mock(version="1.2.0", release_url="https://example.invalid")
@@ -745,12 +782,16 @@ def test_install_later_defers_the_update_for_this_app_launch(server, monkeypatch
     assert json.loads(api.get("/api/update")[1]) == {"available": False}
 
 
-def test_cross_origin_websites_cannot_open_the_installer(server):
+@pytest.mark.parametrize(
+    "origin",
+    ["https://example.com", "http://127.0.0.1:bad", "http://[broken"],
+)
+def test_cross_origin_websites_cannot_open_the_installer(server, origin):
     api, _ = server
     request = urllib.request.Request(
         api.base + "update",
         data=b"{}",
-        headers={"Content-Type": "application/json", "Origin": "https://example.com"},
+        headers={"Content-Type": "application/json", "Origin": origin},
         method="POST",
     )
 

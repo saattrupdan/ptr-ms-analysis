@@ -1950,6 +1950,7 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
     """
     session = Session()
     update_lock = threading.Lock()
+    update_install_lock = threading.Lock()
     update_checked = False
     update_deferred = False
     available_update = None
@@ -1990,11 +1991,15 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
             origin = self.headers.get("Origin")
             if not origin:
                 return True
-            parsed = urlparse(origin)
+            try:
+                parsed = urlparse(origin)
+                port = parsed.port
+            except ValueError:
+                return False
             return (
                 parsed.scheme == "http"
                 and parsed.hostname == "127.0.0.1"
-                and parsed.port == self.server.server_address[1]
+                and port == self.server.server_address[1]
             )
 
         def do_GET(self):
@@ -2065,17 +2070,23 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 self._send(400, {"error": "invalid JSON"})
                 return
             if route.path == "/update":
-                available = latest_update()
-                if available is None:
-                    self._send(409, {"error": "no compatible update is available"})
+                if not update_install_lock.acquire(blocking=False):
+                    self._send(409, {"error": "an update is already being opened"})
                     return
                 try:
-                    updates.install_update(available)
-                except (OSError, TypeError, ValueError) as exc:
-                    self._send(503, {"error": f"could not open the update: {exc}"})
-                    return
-                defer_update()
-                self._send(200, {"ok": True, "version": available.version})
+                    available = latest_update()
+                    if available is None:
+                        self._send(409, {"error": "no compatible update is available"})
+                        return
+                    try:
+                        updates.install_update(available)
+                    except (OSError, TypeError, ValueError) as exc:
+                        self._send(503, {"error": f"could not open the update: {exc}"})
+                        return
+                    defer_update()
+                    self._send(200, {"ok": True, "version": available.version})
+                finally:
+                    update_install_lock.release()
             elif route.path == "/update/later":
                 defer_update()
                 self._send(200, {"ok": True})

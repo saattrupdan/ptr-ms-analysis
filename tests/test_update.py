@@ -3,7 +3,6 @@
 import hashlib
 import io
 import json
-from pathlib import Path
 
 import pytest
 
@@ -104,13 +103,81 @@ def test_release_check_uses_each_supported_platform_asset(monkeypatch):
             ),
         )
         available = update.find_update(
-            "1.1.0", system=system, machine=machine
+            "1.1.0",
+            system=system,
+            machine=machine,
+            linux_ids={"ubuntu"} if system == "linux" else None,
         )
         assert available is not None
         assert available.asset_name == release["assets"][0]["name"]
 
     assert update.find_update("1.1.0", system="darwin", machine="x86_64") is None
-    assert update.find_update("1.1.0", system="linux", machine="arm64") is None
+    assert (
+        update.find_update(
+            "1.1.0",
+            system="linux",
+            machine="arm64",
+            linux_ids={"ubuntu"},
+        )
+        is None
+    )
+
+
+def test_linux_update_is_limited_to_debian_compatible_systems(monkeypatch):
+    monkeypatch.setattr(
+        update.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: pytest.fail("an incompatible system checked GitHub"),
+    )
+
+    assert (
+        update.find_update(
+            "1.1.0",
+            system="linux",
+            machine="x86_64",
+            linux_ids={"fedora"},
+        )
+        is None
+    )
+    assert update._installer_name(
+        system="linux", machine="x86_64", linux_ids={"linuxmint", "ubuntu"}
+    ) == "sniff-review-linux-x86_64.deb"
+
+
+def test_os_release_identifies_a_distribution_and_its_family(tmp_path):
+    os_release = tmp_path / "os-release"
+    os_release.write_text('ID="linuxmint"\nID_LIKE="ubuntu debian"\n', encoding="utf-8")
+
+    assert update._linux_distribution_ids(os_release) == {
+        "linuxmint",
+        "ubuntu",
+        "debian",
+    }
+
+
+def test_stable_release_replaces_the_same_version_prerelease(monkeypatch):
+    monkeypatch.setattr(
+        update.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _Response(json.dumps(_release("v1.2.0")).encode()),
+    )
+
+    assert (
+        update.find_update("1.2.0rc1", system="darwin", machine="arm64")
+        is not None
+    )
+
+
+def test_release_check_rejects_a_prerelease_tag(monkeypatch):
+    monkeypatch.setattr(
+        update.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _Response(
+            json.dumps(_release("v1.2.1-rc1")).encode()
+        ),
+    )
+
+    assert update.find_update("1.2.0", system="darwin", machine="arm64") is None
 
 
 def test_release_check_rejects_an_untrusted_download(monkeypatch):
@@ -128,6 +195,8 @@ def test_release_check_rejects_an_untrusted_download(monkeypatch):
 
 
 def test_installer_is_verified_before_it_is_opened(tmp_path, monkeypatch):
+    monkeypatch.setattr(update.sys, "platform", "darwin")
+    monkeypatch.setattr(update.platform, "machine", lambda: "arm64")
     payload = b"trusted installer"
     available = update.Update(
         version="1.2.0",
@@ -149,13 +218,38 @@ def test_installer_is_verified_before_it_is_opened(tmp_path, monkeypatch):
     monkeypatch.setattr(update, "_open_installer", lambda path: opened.append(path))
 
     target = update.install_update(available)
+    second_target = update.install_update(available)
 
     assert target.read_bytes() == payload
-    assert opened == [target]
-    assert not Path(str(target) + ".part").exists()
+    assert second_target.read_bytes() == payload
+    assert opened == [target, second_target]
+    assert target.parent != second_target.parent
+    assert not list(tmp_path.rglob("*.part"))
+
+
+def test_install_boundary_rejects_an_untrusted_update(monkeypatch):
+    monkeypatch.setattr(update.sys, "platform", "darwin")
+    monkeypatch.setattr(update.platform, "machine", lambda: "arm64")
+    available = update.Update(
+        version="1.2.0",
+        asset_name="sniff-review-macos-arm64.pkg",
+        download_url="https://example.com/installer.pkg",
+        digest="sha256:" + "0" * 64,
+        release_url="https://example.com",
+    )
+    monkeypatch.setattr(
+        update.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: pytest.fail("an untrusted update was downloaded"),
+    )
+
+    with pytest.raises(ValueError, match="trusted installer"):
+        update.install_update(available)
 
 
 def test_a_corrupt_installer_is_removed_and_never_opened(tmp_path, monkeypatch):
+    monkeypatch.setattr(update.sys, "platform", "darwin")
+    monkeypatch.setattr(update.platform, "machine", lambda: "arm64")
     available = update.Update(
         version="1.2.0",
         asset_name="sniff-review-macos-arm64.pkg",
