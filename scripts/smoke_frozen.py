@@ -7,7 +7,7 @@ nothing but a synthetic file and a few seconds of patience.
 
 Usage:  uv run python scripts/smoke_frozen.py dist/sniff/sniff.exe
         uv run python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/sniff"
-        uv run python scripts/smoke_frozen.py ".../sniff" --headless-bare
+        uv run python scripts/smoke_frozen.py ".../sniff" --single-launch
 """
 
 from __future__ import annotations
@@ -168,11 +168,11 @@ def await_logged_url(proc, log_path, offset, timeout):
 
 
 def main(argv) -> int:
-    if len(argv) not in (2, 3) or (len(argv) == 3 and argv[2] != "--headless-bare"):
+    if len(argv) not in (2, 3) or (len(argv) == 3 and argv[2] != "--single-launch"):
         print(__doc__, file=sys.stderr)
         return 2
     exe = Path(argv[1]).resolve()
-    headless_bare = len(argv) == 3
+    single_launch = len(argv) == 3
     if not exe.is_file():
         print(
             f"frozen app smoke: FAIL — no such executable file: {exe}", file=sys.stderr
@@ -275,8 +275,18 @@ def main(argv) -> int:
         if post(base + "/close") != 200:
             print("frozen app smoke: FAIL — could not close the file", file=sys.stderr)
             return 1
-        # Run each launch in isolation. Concurrent AppKit/pywebview processes add no
-        # coverage and can stall a second windowed launch on hosted macOS runners.
+        if single_launch:
+            # Hosted macOS runners stall every second invocation of a windowed frozen
+            # executable before Python starts. Verify the start screen in the process
+            # which already proved that the frozen app can load and serve a review.
+            status, start = get(base + "/")
+            if status != 200 or b"Open an IONICON run" not in start:
+                print(
+                    f"frozen app smoke: FAIL — closing the file served {status} "
+                    "without returning to the start screen",
+                    file=sys.stderr,
+                )
+                return 1
         if post(base + "/shutdown") != 200:
             print(
                 "frozen app smoke: FAIL — could not stop the first app", file=sys.stderr
@@ -291,20 +301,19 @@ def main(argv) -> int:
             )
             return 1
 
-        # Second phase: normally use the same executable with no arguments at all,
-        # which is how Finder and the Start Menu shortcut launch it. Hosted macOS
-        # runners can stall that windowed executable before Python starts, so their
-        # workflow requests an explicit headless app launch; Windows CI, macOS local
-        # smoke and unit tests still cover the no-argument runtime hook.
+        if single_launch:
+            print(
+                f"frozen app smoke: OK  ({os.path.getsize(exe) // 1024} KiB launcher, "
+                f"served {url} and returned to the start screen in one process)"
+            )
+            return 0
+
+        # Second phase: use the same executable with no arguments at all, which is how
+        # Finder and the Start Menu shortcut launch it. The command line would answer
+        # that with usage text and exit 2, and a windowed bundle does it invisibly.
         log_offset = log_path.stat().st_size
-        bare_port = free_port() if headless_bare else None
-        bare_cmd = (
-            [str(exe), "app", "--no-browser", "--port", str(bare_port)]
-            if headless_bare
-            else [str(exe)]
-        )
         bare = subprocess.Popen(
-            bare_cmd,
+            [str(exe)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -313,12 +322,9 @@ def main(argv) -> int:
             env=dict(env, BROWSER=f"{sys.executable} -c pass"),
         )
         try:
-            if headless_bare:
-                bare_url, bare_lines = await_url(bare, bare_port, LAUNCH_TIMEOUT)
-            else:
-                bare_url, bare_lines = await_logged_url(
-                    bare, log_path, log_offset, LAUNCH_TIMEOUT
-                )
+            bare_url, bare_lines = await_logged_url(
+                bare, log_path, log_offset, LAUNCH_TIMEOUT
+            )
             if bare_url is None:
                 print(
                     "frozen app smoke: FAIL — the start-screen launch did not start "
@@ -414,8 +420,8 @@ def main(argv) -> int:
 
         print(
             f"frozen app smoke: OK  ({os.path.getsize(exe) // 1024} KiB launcher, "
-            f"served {url}, {'a headless frozen launch' if headless_bare else 'a bare launch'} "
-            f"opened the start screen, and --window {windowed})"
+            f"served {url}, a bare launch opened the start screen, and --window "
+            f"{windowed})"
         )
         return 0
     finally:

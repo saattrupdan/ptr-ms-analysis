@@ -17,9 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- The frozen-app smoke now isolates each launch mode and uses an explicit headless
-  start-screen probe on hosted macOS, where a bare windowed executable can stall before
-  Python starts. Windows CI and local macOS checks retain the no-argument launch probe.
+- The frozen-app smoke now isolates launch modes. On hosted macOS, where every second
+  invocation of a windowed executable can stall before Python starts, it verifies the
+  review and start screens in one process. Windows CI and local macOS checks retain the
+  independent no-argument and native-window launch probes.
 
 ### Changed
 
