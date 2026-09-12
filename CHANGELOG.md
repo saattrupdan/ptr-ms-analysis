@@ -18,9 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - The frozen-app smoke now isolates launch modes. On hosted macOS, where every second
-  invocation of a windowed executable can stall before Python starts, it verifies the
-  review and start screens in one process. Windows CI and local macOS checks retain the
-  independent no-argument and native-window launch probes.
+  invocation of a windowed executable can stall before Python starts, CI tests the
+  installed PKG once and verifies its review and start screens in that process. Windows
+  CI and local macOS checks retain the independent no-argument and window probes.
 
 ### Changed
 

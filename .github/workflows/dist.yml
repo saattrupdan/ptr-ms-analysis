@@ -34,15 +34,10 @@ jobs:
             # WiX needs the .NET SDK, which the Windows runner image already has.
             installer: msi
             exe: dist/sniff/sniff.exe
-            smoke_args: ""
           - os: macos-latest
             label: macos-arm64
             installer: pkg
             exe: dist/Sniff.app/Contents/MacOS/sniff
-            # Every second invocation of a windowed executable can stall before
-            # Python starts on hosted macOS. Verify review and start screens in one
-            # process there; Windows CI and local macOS retain all launch probes.
-            smoke_args: --single-launch
             # An Intel Mac build would be a third entry: { os: macos-13,
             # label: macos-x86_64, exe: dist/Sniff.app/Contents/MacOS/sniff }.
 
@@ -67,7 +62,10 @@ jobs:
         run: pyinstaller --noconfirm packaging/sniff-app.spec
 
       - name: Check the bundle actually serves a review
-        run: python scripts/smoke_frozen.py "${{ matrix.exe }}" ${{ matrix.smoke_args }}
+        if: matrix.installer == 'msi'
+        # The installed PKG is the stronger macOS check. Hosted macOS stalls every
+        # second invocation of a windowed frozen executable before Python starts.
+        run: python scripts/smoke_frozen.py "${{ matrix.exe }}"
 
       - name: Build the Windows installer
         if: matrix.installer == 'msi'
