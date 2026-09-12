@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- After an H5 file is selected, the app now offers an optional compound-of-interest
+  modal. It validates typed or pasted names against the bundled PTR Library, supports
+  autocomplete and comma/newline-separated input, and records recognised compounds as
+  a transparent contextual prior for candidate ranking. The modal can be skipped, and
+  the prior never forces an identification or suppresses other detected peaks.
+
 ### Changed
 
 - The app landing page now shows the installed Sniff version discreetly in its footer.

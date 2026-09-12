@@ -32,7 +32,7 @@ from urllib.parse import parse_qs, urlparse
 
 import h5py
 
-from . import __version__, brand, desktop, ptrms, viz
+from . import __version__, brand, desktop, formula_id, ptrms, viz
 from .analyze import (
     analyze_config_to_csv,
     auto_peaks,
@@ -595,7 +595,14 @@ class Session:
             self.error_details = None
             return True
 
-    def open(self, path, agent_url=None, agent_timeout=300.0, reserved=False):
+    def open(
+        self,
+        path,
+        agent_url=None,
+        agent_timeout=300.0,
+        reserved=False,
+        compounds_of_interest=None,
+    ):
         """Load ``path``, making a config first if the file has never been reviewed.
 
         The h5 file is opened once and reused for detection and for the review data:
@@ -621,6 +628,9 @@ class Session:
             config = _read_json(config_path) if config_path.exists() else None
             if config is not None and not _valid_config(config):
                 raise ValueError(f"{config_path} is not a sniff config")
+            config_prior_changed = False
+            if config is not None:
+                config, config_prior_changed = _canonicalise_config_compounds(config)
             saved_review = config is not None
             fingerprint = _h5_fingerprint(source_path)
             self._file = h5py.File(path, "r")
@@ -629,9 +639,10 @@ class Session:
             # A current config may reuse the complete, validated anchor evidence only
             # while it remains tied to the same unchanged H5. Legacy configs still
             # require fresh calibration before any stored masses can be migrated.
-            config_needs_write = False
+            config_needs_write = config_prior_changed
             if config is not None:
-                config, config_needs_write = _scrub_retired_review_fields(config)
+                config, scrubbed = _scrub_retired_review_fields(config)
+                config_needs_write = config_needs_write or scrubbed
             mass_axis = _cached_mass_axis(config, fingerprint)
             if mass_axis is None:
                 self.stage = "Calibrating the mass axis"
@@ -661,10 +672,18 @@ class Session:
                 self._halt()  # a cancel must not leave a half-made config on disk
                 config = _with_mass_axis_cache(config, mass_axis, fingerprint)
                 config_needs_write = True
+                if compounds_of_interest:
+                    config["compounds_of_interest"] = compounds_of_interest
                 if agent_url:
                     config = self._ask_agent(config, path, agent_url, agent_timeout)
                     self._halt()
                 prep_start = P_DETECT
+            if compounds_of_interest is not None:
+                if compounds_of_interest:
+                    config["compounds_of_interest"] = compounds_of_interest
+                else:
+                    config.pop("compounds_of_interest", None)
+                config_needs_write = True
             self.stage = (
                 "Loading H5 data for the saved review"
                 if saved_review
@@ -848,6 +867,7 @@ class Session:
         ):
             return False
         config, _ = _scrub_retired_review_fields(config)
+        config, _ = _canonicalise_config_compounds(config)
         for key in _MASS_AXIS_CACHE_FIELDS:
             if key in self.config:
                 config[key] = self.config[key]
@@ -1092,6 +1112,29 @@ class Session:
         }
 
 
+def _compound_catalogue():
+    """Return every compound name the landing page may accept."""
+    return formula_id.compound_catalogue()
+
+
+def _normalise_compounds_of_interest(raw):
+    """Validate user-selected compounds against the bundled PTR Library."""
+    return formula_id.normalise_compounds_of_interest(raw)
+
+
+def _canonicalise_config_compounds(config):
+    """Canonicalise a config's optional compound prior or reject it."""
+    if "compounds_of_interest" not in config:
+        return config, False
+    compounds = _normalise_compounds_of_interest(config["compounds_of_interest"])
+    result = dict(config)
+    if compounds:
+        result["compounds_of_interest"] = compounds
+    else:
+        result.pop("compounds_of_interest", None)
+    return result, result != config
+
+
 _START_TEMPLATE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1180,6 +1223,40 @@ footer{display:flex;gap:12px;align-items:center;justify-content:space-between;
   text-decoration:underline;cursor:pointer}
 .link:hover{color:var(--fg)}
 .link[hidden]{display:none}
+#interest{position:fixed;inset:0;z-index:8;display:grid;place-items:center;padding:24px;
+  background:var(--scrim);overscroll-behavior:contain;
+  -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+#interest[hidden]{display:none}
+.priorcard{width:min(570px,100%);max-height:min(720px,calc(100vh - 48px));overflow:auto;
+  background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px;
+  box-shadow:0 24px 60px -28px rgba(16,24,40,.45)}
+.priorcard h2{margin:0 0 4px;font-size:20px;letter-spacing:-.02em}
+.priorcard .intro{margin:0 0 5px;color:var(--mut)}
+.priorfile{margin:0 0 18px;color:var(--mut);font-size:12px;overflow-wrap:anywhere}
+.combobox{position:relative}
+#compound-input{width:100%;border:1px solid var(--line);border-radius:9px;
+  background:var(--sunk);color:var(--fg);font:inherit;padding:10px 12px}
+#compound-input:focus{outline:2px solid var(--ring);outline-offset:1px;border-color:var(--acc)}
+#compound-input[aria-invalid="true"]{border-color:var(--err)}
+.suggestions{position:absolute;z-index:2;top:calc(100% + 4px);left:0;right:0;
+  max-height:220px;overflow:auto;background:var(--card);border:1px solid var(--line);
+  border-radius:10px;box-shadow:0 14px 30px -18px rgba(16,24,40,.55)}
+.suggestions[hidden]{display:none}
+.suggestion{display:flex;width:100%;justify-content:space-between;gap:12px;border:0;
+  border-bottom:1px solid var(--line);background:transparent;color:var(--fg);
+  padding:9px 11px;text-align:left;font:inherit;cursor:pointer}
+.suggestion:last-child{border-bottom:0}.suggestion:hover,.suggestion.active{background:var(--sunk)}
+.suggestion small{color:var(--mut);white-space:nowrap}
+.inputstatus{min-height:20px;margin-top:5px;color:var(--mut);font-size:12px}
+.inputstatus.err{color:var(--err)}
+.chips{display:flex;flex-wrap:wrap;gap:7px;min-height:34px;margin:10px 0 4px}
+.chip{display:inline-flex;align-items:center;gap:7px;max-width:100%;padding:5px 8px 5px 10px;
+  border:1px solid var(--line);border-radius:999px;background:var(--sunk)}
+.chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chip small{color:var(--mut)}
+.chip button{border:0;background:none;color:var(--mut);font:18px/1 sans-serif;padding:0;cursor:pointer}
+.priorhint{margin:8px 0 0;color:var(--mut);font-size:12px}
+.prioractions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:22px}
+.prioractions .right{display:flex;gap:8px;margin-left:auto}
 /* An open blocks the whole screen. It is the one thing on this page that takes
    long enough to be worth leaving, so the page has to make leaving possible
    rather than let a second click start a second open behind the first. */
@@ -1235,6 +1312,9 @@ html.lock,html.lock body{overflow:hidden}
   .now{align-items:flex-start;row-gap:10px;flex-wrap:wrap}
   .now .txt,.now .meta{flex:1 1 100%}
   .now b,.now .sub{white-space:normal;overflow-wrap:anywhere;text-overflow:clip}
+  #interest{padding:12px}.priorcard{padding:20px;max-height:calc(100vh - 24px)}
+  .prioractions{align-items:stretch;flex-direction:column-reverse}
+  .prioractions .right{width:100%;margin:0}.prioractions .right .btn{flex:1}
 }
 </style></head><body><main>
   <div class="head">__MARK__<h1>__APP_NAME__ <span class="tag">__TAGLINE__</span></h1></div>
@@ -1271,6 +1351,33 @@ html.lock,html.lock body{overflow:hidden}
     <span class="version">v__VERSION__</span>
   </footer>
 </main>
+
+<div id="interest" role="dialog" aria-modal="true" aria-labelledby="interest-title" hidden>
+  <div class="priorcard">
+    <h2 id="interest-title">Any compounds of particular interest?</h2>
+    <p class="intro">Add compounds that are especially plausible for this sampling
+      context. Sniff will use them to prioritise candidates, not as proof of identity.</p>
+    <p class="priorfile" id="interest-file"></p>
+    <div class="combobox">
+      <input id="compound-input" type="text" autocomplete="off" role="combobox"
+        aria-autocomplete="list" aria-controls="compound-suggestions"
+        aria-expanded="false" placeholder="Start typing a compound name">
+      <div class="suggestions" id="compound-suggestions" role="listbox" hidden></div>
+    </div>
+    <div class="inputstatus" id="compound-status" role="status" aria-live="polite"></div>
+    <div class="chips" id="compound-chips" role="list"
+      aria-label="Selected compounds"></div>
+    <p class="priorhint">Press Tab, Enter, or comma to add one recognised name. You can
+      also paste names separated by commas or new lines.</p>
+    <div class="prioractions">
+      <button class="btn sec" id="interest-back" type="button">Choose another file</button>
+      <div class="right">
+        <button class="btn sec" id="interest-skip" type="button">Skip</button>
+        <button class="btn" id="interest-continue" type="button" disabled>Continue</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div id="ov" role="dialog" aria-modal="true" aria-labelledby="ovname" hidden>
   <div class="ovcard">
@@ -1311,6 +1418,7 @@ html.lock,html.lock body{overflow:hidden}
 </div>
 <script>
 const $=s=>document.querySelector(s);
+const COMPOUNDS=__COMPOUNDS__;
 const SEP=String.fromCharCode(92);          // Windows separators, without a literal
 function parts(p){const s=String(p).split(SEP).join('/'),i=s.lastIndexOf('/');
   if(i<0)return{name:s,dir:''};
@@ -1318,10 +1426,85 @@ function parts(p){const s=String(p).split(SEP).join('/'),i=s.lastIndexOf('/');
 function el(tag,cls,text){const n=document.createElement(tag);
   if(cls)n.className=cls; if(text!=null)n.textContent=text; return n;}
 
-async function openFile(path){
-  let r;
+const compoundKey=s=>String(s||'').trim().replace(/\\s+/g,' ').toLowerCase();
+const COMPOUND_BY_NAME=new Map(COMPOUNDS.map(c=>[compoundKey(c.name),c]));
+let pendingPath=null,selectedCompounds=[],shownCompounds=[],activeCompound=0;
+function compoundMatch(value){return COMPOUND_BY_NAME.get(compoundKey(value));}
+function setCompoundStatus(text,isErr=false){const s=$('#compound-status');
+  s.textContent=text||''; s.className='inputstatus'+(isErr?' err':'');}
+function renderCompoundChips(){const box=$('#compound-chips'); box.innerHTML='';
+  selectedCompounds.forEach((c,index)=>{const chip=el('span','chip');
+    chip.setAttribute('role','listitem');
+    chip.append(el('span',null,c.name),el('small',null,c.formula||''));
+    const remove=el('button',null,'×'); remove.type='button';
+    remove.setAttribute('aria-label','Remove '+c.name); remove.onclick=()=>{
+      selectedCompounds.splice(index,1); renderCompoundChips(); $('#compound-input').focus();};
+    chip.append(remove); box.append(chip); });
+  $('#interest-continue').disabled=!selectedCompounds.length;
+  $('#interest-continue').textContent=selectedCompounds.length
+    ? 'Continue with '+selectedCompounds.length : 'Continue';
+}
+function renderCompoundSuggestions(){const input=$('#compound-input'),raw=input.value,key=compoundKey(raw);
+  const exact=compoundMatch(raw); shownCompounds=key?COMPOUNDS.filter(c=>compoundKey(c.name).includes(key))
+    .sort((a,b)=>(compoundKey(a.name).startsWith(key)?0:1)-(compoundKey(b.name).startsWith(key)?0:1)
+      ||a.name.localeCompare(b.name)).slice(0,8):[];
+  activeCompound=0; const list=$('#compound-suggestions'); list.innerHTML='';
+  shownCompounds.forEach((c,index)=>{const option=el('button','suggestion'+(index===0?' active':''));
+    option.type='button'; option.id='compound-option-'+index; option.setAttribute('role','option');
+    option.setAttribute('aria-selected',index===0?'true':'false');
+    option.append(el('span',null,c.name),el('small',null,(c.formula||'')+' · m/z '+c.mz));
+    option.onmousedown=event=>{event.preventDefault(); addCompound(c);}; list.append(option); });
+  list.hidden=!shownCompounds.length; input.setAttribute('aria-expanded',String(!!shownCompounds.length));
+  if(shownCompounds.length)input.setAttribute('aria-activedescendant','compound-option-0');
+  else input.removeAttribute('aria-activedescendant');
+  input.setAttribute('aria-invalid',String(!!raw&&!exact));
+  if(!raw)setCompoundStatus('');
+  else if(exact)setCompoundStatus('Recognised: '+exact.name+' ('+exact.formula+').');
+  else if(shownCompounds.length)setCompoundStatus('Choose a recognised suggestion.');
+  else setCompoundStatus('Not recognised by the bundled PTR Library.',true);
+}
+function addCompound(compound){if(!compound)return false;
+  if(!selectedCompounds.some(c=>compoundKey(c.name)===compoundKey(compound.name))){
+    selectedCompounds.push(compound); renderCompoundChips();
+  }
+  const input=$('#compound-input'); input.value=''; renderCompoundSuggestions(); input.focus(); return true;
+}
+function addTypedCompound(useSuggestion=false){const input=$('#compound-input');
+  const match=compoundMatch(input.value)||(useSuggestion?shownCompounds[activeCompound]:null);
+  if(match)return addCompound(match);
+  if(input.value.trim())setCompoundStatus('Not recognised by the bundled PTR Library.',true);
+  input.setAttribute('aria-invalid','true'); return false;
+}
+function splitCompoundBlock(text){const good=[],bad=[];
+  for(const row of String(text).split(/\\r?\\n/)){const line=row.trim(); if(!line)continue;
+    const whole=compoundMatch(line); if(whole){good.push(whole);continue;}
+    const pieces=line.split(','); let i=0;
+    while(i<pieces.length){let found=null,end=i+1;
+      for(let j=pieces.length;j>i;j--){const candidate=pieces.slice(i,j).join(',').trim();
+        const match=compoundMatch(candidate); if(match){found=match;end=j;break;}}
+      if(found)good.push(found); else if(pieces[i].trim())bad.push(pieces[i].trim());
+      i=end;
+    }
+  }
+  return {good,bad};
+}
+function addCompoundBlock(text){const parsed=splitCompoundBlock(text); parsed.good.forEach(addCompound);
+  if(parsed.bad.length)setCompoundStatus('Rejected: '+parsed.bad.join(', ')+'. Not recognised by the bundled PTR Library.',true);
+  return parsed;
+}
+function showInterest(path){pendingPath=path; selectedCompounds=[]; renderCompoundChips();
+  const q=parts(path); $('#interest-file').textContent=q.name+(q.dir?' — '+q.dir:'');
+  $('#compound-input').value=''; renderCompoundSuggestions(); $('#interest').hidden=false;
+  lock(true); $('#compound-input').focus();}
+function closeInterest(){pendingPath=null; $('#interest').hidden=true; $('#compound-suggestions').hidden=true;
+  lock(false); setCompoundStatus('');}
+function beginPendingOpen(compounds){const path=pendingPath;if(!path)return;
+  $('#interest').hidden=true; lock(false); pendingPath=null; openFile(path,compounds);}
+
+async function openFile(path,compounds){
+  let r; const body={path}; if(compounds!==undefined)body.compounds_of_interest=compounds.map(c=>c.name);
   try{r=await fetch('/open',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({path})});}
+    body:JSON.stringify(body)});}
   catch(e){return note('The app is no longer running.',true,false,true);}
   if(!r.ok){
     const b=await r.json().catch(()=>({}));
@@ -1490,6 +1673,43 @@ async function tick(){
   setTimeout(tick, watching||s.status==='exporting'?900:2500);
 }
 
+$('#compound-input').oninput=renderCompoundSuggestions;
+$('#compound-input').onkeydown=event=>{
+  if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+    if(!shownCompounds.length)return; event.preventDefault();
+    activeCompound=(activeCompound+(event.key==='ArrowDown'?1:-1)+shownCompounds.length)%shownCompounds.length;
+    document.querySelectorAll('.suggestion').forEach((e,i)=>{
+      e.classList.toggle('active',i===activeCompound); e.setAttribute('aria-selected',i===activeCompound?'true':'false');});
+    $('#compound-input').setAttribute('aria-activedescendant','compound-option-'+activeCompound);
+    return;
+  }
+  if(event.key==='Enter'){
+    if(!$('#compound-input').value.trim())return; event.preventDefault(); addTypedCompound(true); return;
+  }
+  if(event.key==='Tab'&&!event.shiftKey&&$('#compound-input').value.trim()){
+    const match=compoundMatch($('#compound-input').value)||shownCompounds[activeCompound];
+    if(match){event.preventDefault();addCompound(match);} return;
+  }
+  if(event.key===','){
+    const input=$('#compound-input'),exact=compoundMatch(input.value);
+    const commaInsideName=COMPOUNDS.some(c=>compoundKey(c.name).startsWith(compoundKey(input.value)+','));
+    if(exact){event.preventDefault();addCompound(exact);}
+    else if(!commaInsideName){event.preventDefault();addTypedCompound(false);}
+  }
+};
+$('#compound-input').onpaste=event=>{const text=event.clipboardData&&event.clipboardData.getData('text');
+  if(text&&/[\\r\\n,]/.test(text)){event.preventDefault();addCompoundBlock(text);}};
+$('#compound-input').onfocus=renderCompoundSuggestions;
+$('#compound-input').onblur=()=>setTimeout(()=>{$('#compound-suggestions').hidden=true;
+  $('#compound-input').setAttribute('aria-expanded','false');
+  $('#compound-input').removeAttribute('aria-activedescendant');},120);
+$('#interest-back').onclick=closeInterest;
+$('#interest-skip').onclick=()=>beginPendingOpen([]);
+$('#interest-continue').onclick=()=>{
+  if($('#compound-input').value.trim()&&!addTypedCompound(false))return;
+  beginPendingOpen(selectedCompounds.slice());
+};
+
 $('#browse').onclick=async()=>{
   const btn=$('#browse'); btn.disabled=true;
   note('Choose a file in the dialog that just opened on this computer.');
@@ -1501,7 +1721,7 @@ $('#browse').onclick=async()=>{
     return note((body&&body.error)||'Native file browsing is unavailable.',true,false,true);
   }
   if(body.cancelled)return note('');
-  openFile(body.path);
+  showInterest(body.path);
 };
 $('#cancel').onclick=async()=>{
   // Disable it here rather than wait for the poll to say the open is over: a second
@@ -1524,6 +1744,10 @@ tick();
 # f-string because its CSS is full of braces.
 _START_HTML = (
     _START_TEMPLATE.replace('__MARK__', brand.MARK_SVG)
+    .replace(
+        '__COMPOUNDS__',
+        json.dumps(_compound_catalogue(), ensure_ascii=True).replace('<', '\\u003c'),
+    )
     .replace('__APP_NAME__', brand.APP_NAME)
     .replace('__TAGLINE__', brand.TAGLINE)
     .replace('__PAGE_TITLE__', brand.PAGE_TITLE)
@@ -1732,6 +1956,15 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 if not Path(target).expanduser().is_file():
                     self._send(404, {"error": f"no such file: {target}"})
                     return
+                try:
+                    compounds_of_interest = (
+                        _normalise_compounds_of_interest(body["compounds_of_interest"])
+                        if "compounds_of_interest" in body
+                        else None
+                    )
+                except ValueError as exc:
+                    self._send(400, {"error": str(exc)})
+                    return
                 if not session.reserve_open():
                     self._send(409, {"error": "the app is busy with the current file"})
                     return
@@ -1741,6 +1974,7 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                     agent_url=agent_url,
                     agent_timeout=agent_timeout,
                     reserved=True,
+                    compounds_of_interest=compounds_of_interest,
                 )
                 self._send(202, {"ok": True})
             elif route.path == "/save":
@@ -1770,6 +2004,9 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                         saved = session.save_config(body, version=version, page=page)
                     except RuntimeError as exc:
                         self._send(409, {"error": str(exc)})
+                        return
+                    except ValueError as exc:
+                        self._send(400, {"error": str(exc)})
                         return
                     except OSError as exc:
                         # Say so rather than let the request thread die: the page needs a
@@ -1812,6 +2049,10 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                 except RuntimeError as exc:
                     session.cancel_export_reservation()
                     self._send(409, {"error": str(exc)})
+                    return
+                except ValueError as exc:
+                    session.cancel_export_reservation()
+                    self._send(400, {"error": str(exc)})
                     return
                 except OSError as exc:
                     session.cancel_export_reservation()

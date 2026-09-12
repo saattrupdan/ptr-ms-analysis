@@ -748,6 +748,94 @@ def _start_screen_browser_pass() -> None:
             _browser(
                 session,
                 "eval",
+                "showInterest('/runs/context.h5'); const i=document.querySelector('#compound-input'); "
+                "i.value='acet'; i.dispatchEvent(new Event('input',{bubbles:true}));",
+            )
+            partial = _eval(
+                session,
+                "({open:!document.querySelector('#interest').hidden, "
+                "invalid:document.querySelector('#compound-input').getAttribute('aria-invalid'), "
+                "expanded:document.querySelector('#compound-input').getAttribute('aria-expanded'), "
+                "active:document.querySelector('#compound-input').getAttribute('aria-activedescendant'), "
+                "suggestions:Array.from(document.querySelectorAll('.suggestion')).map(e=>e.innerText)})",
+            )
+            _assert(
+                partial["open"]
+                and partial["invalid"] == "true"
+                and partial["expanded"] == "true"
+                and partial["active"] == "compound-option-0"
+                and any("acetone" in name for name in partial["suggestions"]),
+                "compound modal does not expose live autocomplete for a partial name",
+            )
+            _browser(
+                session,
+                "eval",
+                "const input=document.querySelector('#compound-input'); input.value='not in the library'; "
+                "input.dispatchEvent(new Event('input',{bubbles:true})); "
+                "window.__invalidTabAllowed=input.dispatchEvent(new KeyboardEvent('keydown',"
+                "{key:'Tab',bubbles:true,cancelable:true})); "
+                "window.__shiftTabAllowed=input.dispatchEvent(new KeyboardEvent('keydown',"
+                "{key:'Tab',shiftKey:true,bubbles:true,cancelable:true})); "
+                "input.value='acetone'; input.dispatchEvent(new Event('input',{bubbles:true})); "
+                "input.dispatchEvent(new KeyboardEvent('keydown',"
+                "{key:'Enter',bubbles:true,cancelable:true})); "
+                "const transfer=new DataTransfer(); "
+                "transfer.setData('text/plain','1,2-butadiene, methanol\\nnot in the library'); "
+                "input.dispatchEvent(new ClipboardEvent('paste',"
+                "{clipboardData:transfer,bubbles:true,cancelable:true}));",
+            )
+            compounds = _eval(
+                session,
+                "({chips:Array.from(document.querySelectorAll('.chip>span')).map(e=>e.textContent), "
+                "error:document.querySelector('#compound-status').innerText, "
+                "enabled:!document.querySelector('#interest-continue').disabled, "
+                "tabAllowed:window.__invalidTabAllowed,shiftTabAllowed:window.__shiftTabAllowed, "
+                "chipRoles:Array.from(document.querySelectorAll('.chip')).map(e=>e.getAttribute('role'))})",
+            )
+            _assert_eq(
+                compounds["chips"],
+                ["acetone", "1,2-butadiene", "methanol"],
+                "compound entry did not preserve autocomplete and comma-containing names",
+            )
+            _assert(
+                "Rejected: not in the library" in compounds["error"]
+                and compounds["enabled"]
+                and compounds["tabAllowed"]
+                and compounds["shiftTabAllowed"]
+                and set(compounds["chipRoles"]) == {"listitem"},
+                "bulk entry, invalid Tab handling, or chip semantics regressed",
+            )
+            _browser(
+                session,
+                "eval",
+                "openFile=(path,compounds)=>{window.__opened={path,"
+                "names:compounds&&compounds.map(c=>c.name),hasCompounds:compounds!==undefined}}; "
+                "document.querySelector('#interest-continue').click();",
+            )
+            continued = _eval(session, "window.__opened")
+            _assert_eq(
+                continued,
+                {
+                    "path": "/runs/context.h5",
+                    "names": ["acetone", "1,2-butadiene", "methanol"],
+                    "hasCompounds": True,
+                },
+                "the compound modal did not submit its validated selection",
+            )
+            _browser(
+                session,
+                "eval",
+                "showInterest('/runs/skipped.h5'); document.querySelector('#interest-skip').click();",
+            )
+            skipped = _eval(session, "window.__opened")
+            _assert_eq(
+                skipped,
+                {"path": "/runs/skipped.h5", "names": [], "hasCompounds": True},
+                "skipping the compound modal did not clear the contextual prior",
+            )
+            _browser(
+                session,
+                "eval",
                 "current({file:'/runs/2026/September/very-long-ionicon-run-name.h5'})",
             )
             for width in (320, 375):

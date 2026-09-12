@@ -98,7 +98,10 @@ writes `<name>-sniff.csv` instead of overwriting it. Opening another file closes
 current one, since a large run holds its data in memory.
 
 The opening screen is deliberately uncluttered: use **Browse this computer…** to
-choose a run in the native file dialog. Paths cannot be typed or pasted into the start
+choose a run in the native file dialog. Before analysis starts, an optional modal
+accepts recognised PTR Library compounds one at a time or as comma/newline-separated
+text; skip
+it to analyse without a contextual prior. Paths cannot be typed or pasted into the start
 screen. If a file is already open, it appears once in its own panel with **Open the
 review**. The app still remembers opened files in its local recent file store for API
 clients and diagnostics, but does not display that history in the opening screen. The
@@ -393,12 +396,18 @@ correction aligns the mass domain only after both internal references and their 
 raw-cycle persistence pass; otherwise analysis stops with a structured calibration
 error. Isolated peaks use an apex-centred resolution window;
 overlapping peaks are separated by linear Gaussian deconvolution. Time segments are
-found by log-space plateau detection on a composite VOC signal. Compound identification enumerates candidate molecular formulas offline (no
-external database) and ranks them by exact-mass error, the measured vs predicted
-¹³C(M+1)/heteroatom(M+2, e.g. S/Cl) isotope pattern, and plausibility (integer DBE,
-nitrogen rule, element ratios) — so near-isobars are told apart by composition, not
-"nearest mass". Candidate rankings cannot determine structural isomers; names and
-isomer labels come from the bundled PTR Library mapping. Proton-transfer rate constants
+found by log-space plateau detection on a composite VOC signal. Before a run starts, the
+app can accept compounds of particular interest from the bundled PTR Library. These
+names provide a modest contextual prior by doubling the matching formula's ranking
+weight; they do not force detection, prove presence, establish identity, or suppress
+other credible peaks.
+The selection remains in the saved config. Compound identification enumerates candidate
+molecular formulas offline (no external database) and ranks them by exact-mass error,
+the measured vs predicted ¹³C(M+1)/heteroatom(M+2, e.g. S/Cl) isotope pattern,
+plausibility (integer DBE, nitrogen rule, element ratios), and any declared contextual
+prior — so near-isobars are told apart by composition, not "nearest mass". Candidate
+rankings cannot determine structural isomers; names and isomer labels come from the
+bundled PTR Library mapping. Proton-transfer rate constants
 come from the bundled 218-compound table when the formula is known. The entries are
 compiled from the **PTR Library** (Pagonis, Sekimoto & de Gouw, *J. Am. Soc. Mass
 Spectrom.* 2019, doi.org/10.1007/s13361-019-02209-3; tinyurl.com/PTRLibrary), with

@@ -74,6 +74,34 @@ class IdentityLabelTest(unittest.TestCase):
         self.assertEqual(formula_id.identity_label(None, None), "")
 
 
+class ContextualPriorTest(unittest.TestCase):
+    def test_a_compound_of_interest_modestly_boosts_its_formula(self):
+        neutral_mass = 50.0
+        candidates = [
+            ({"C": 3, "H": 6, "O": 1}, neutral_mass),
+            ({"C": 2, "H": 6}, neutral_mass),
+        ]
+        with (
+            mock.patch.object(
+                formula_id, "enumerate_formulas", return_value=candidates
+            ),
+            mock.patch.object(formula_id, "_prior", return_value=1.0),
+            mock.patch.object(formula_id, "_known", return_value=None),
+        ):
+            scored = formula_id.score_peak(
+                neutral_mass + formula_id.PROTON,
+                1.0,
+                compounds_of_interest=[
+                    {"name": "acetone", "formula": "forged formula ignored"}
+                ],
+            )
+
+        self.assertEqual(scored[0]["formula"], "C3H6O")
+        self.assertEqual(scored[0]["interest_matches"], ["acetone"])
+        self.assertEqual(scored[0]["probability"], 0.667)
+        self.assertEqual(scored[1]["probability"], 0.333)
+
+
 def _payload(peaks_cfg, candidates=None):
     """Build a review payload for `peaks_cfg` from a tiny synthetic file."""
     with h5py.File("in-memory", "w", driver="core", backing_store=False) as h5:

@@ -40,6 +40,64 @@ def is_unknown_label(label):
     return bool(UNKNOWN_PLACEHOLDER.match(label or ""))
 
 
+def compound_catalogue():
+    """Return every recognised compound and isomer name in the PTR Library."""
+    global _COMPOUND_CATALOGUE
+    if _COMPOUND_CATALOGUE is not None:
+        return _COMPOUND_CATALOGUE
+
+    from . import ptrms
+
+    catalogue = []
+    seen = set()
+    table = ptrms.load_rate_constants() or {}
+    for compound in table.get("compounds", []):
+        names = [compound.get("name"), *(compound.get("isomers") or [])]
+        for name in names:
+            name = " ".join(str(name or "").split())
+            key = name.casefold()
+            if not name or key in seen:
+                continue
+            seen.add(key)
+            catalogue.append(
+                {
+                    "name": name,
+                    "formula": compound.get("formula"),
+                    "mz": compound.get("mz"),
+                }
+            )
+    _COMPOUND_CATALOGUE = sorted(
+        catalogue, key=lambda item: item["name"].casefold()
+    )
+    return _COMPOUND_CATALOGUE
+
+
+def normalise_compounds_of_interest(raw, *, strict=True):
+    """Return canonical PTR Library records for a user-supplied compound list."""
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        if strict:
+            raise ValueError("compounds of interest must be a list")
+        return []
+    known = {item["name"].casefold(): item for item in compound_catalogue()}
+    selected = []
+    seen = set()
+    for value in raw:
+        name = value.get("name") if isinstance(value, dict) else value
+        name = " ".join(str(name or "").split())
+        match = known.get(name.casefold())
+        if match is None:
+            if strict:
+                raise ValueError(f"unrecognised compound: {name or '(blank)'}")
+            continue
+        key = match["name"].casefold()
+        if key not in seen:
+            selected.append(dict(match))
+            seen.add(key)
+    return selected
+
+
 def identity_label(label, formula):
     """Return one name for a compound - never both "unknown" and a formula.
 
@@ -84,6 +142,8 @@ ISO = {
 # 13C-12C spacing; M+2 contributors (34S/37Cl/18O/2x13C) cluster near +2.004
 DM1 = 1.003355
 DM2 = 2.005
+CONTEXT_PRIOR_FACTOR = 2.0
+_COMPOUND_CATALOGUE = None
 
 # default element bounds for breath / ambient VOCs (halogens allowed but rare)
 DEFAULT_BOUNDS = {"C": 40, "N": 8, "O": 20, "S": 4, "P": 2, "Cl": 4, "Br": 2, "F": 6}
@@ -285,7 +345,13 @@ def _iso_factor(pred, obs, floor, contam):
 
 
 def score_peak(
-    mz, drift, obs_ratios=None, tol_mDa=12.0, max_candidates=5, elements=None
+    mz,
+    drift,
+    obs_ratios=None,
+    tol_mDa=12.0,
+    max_candidates=5,
+    elements=None,
+    compounds_of_interest=None,
 ):
     """Rank candidate formulas for a detected product ion at m/z.
 
@@ -294,8 +360,17 @@ def score_peak(
     Returns list of candidate dicts, best first, each with the evidence used.
     ``probability`` is a score/share normalised over the retained candidates,
     not a calibrated identification probability (a lone candidate therefore
-    must not be presented as 100% confidence).
+    must not be presented as 100% confidence). User-selected compounds of interest
+    provide a modest contextual prior for their formula; they do not assign an
+    identity or distinguish structural isomers.
     """
+    interest_by_formula = {}
+    for compound in normalise_compounds_of_interest(
+        compounds_of_interest, strict=False
+    ) or []:
+        formula = compound["formula"]
+        name = compound["name"]
+        interest_by_formula.setdefault(formula, []).append(name)
     neutral = mz / drift - PROTON
     tol = tol_mDa / 1000.0
     cands = enumerate_formulas(neutral, tol, elements=elements)
@@ -321,11 +396,15 @@ def score_peak(
                 r2p, r2o, 0.008, 0.60
             )
         prior = _prior(counts)
+        formula = formula_str(counts)
+        interest_matches = interest_by_formula.get(formula, [])
         score = p_mass * p_iso * prior
-        known = _known(formula_str(counts))
+        if interest_matches:
+            score *= CONTEXT_PRIOR_FACTOR
+        known = _known(formula)
         scored.append(
             {
-                "formula": formula_str(counts),
+                "formula": formula,
                 "name": known["name"] if known else None,
                 "ion_mz": round(ion_mz, 4),
                 "delta_mDa": round(delta_mDa, 1),
@@ -340,6 +419,11 @@ def score_peak(
                     else None
                 ),
                 "iso_used": iso_used,
+                **(
+                    {"interest_matches": interest_matches}
+                    if interest_matches
+                    else {}
+                ),
                 "score": score,
             }
         )

@@ -118,6 +118,9 @@ def build_viz_data(
     should_stop: optional callback polled between phases and, through
                  extract_traces, every block; true raises ptrms.AnalysisCancelled.
     """
+    compounds_of_interest = formula_id.normalise_compounds_of_interest(
+        (config_base or {}).get("compounds_of_interest"), strict=False
+    ) or []
     analysis_settings = analysis_settings or {
         "R": R,
         "R_phys": R_phys,
@@ -307,7 +310,12 @@ def build_viz_data(
         win_manual = p.get("window") is not None
         winL, winR = _winlr(p) if win_manual else (apex / (2.0 * R), apex / (2.0 * R))
         # scored formula candidates + isotope evidence for the review UI
-        cands = formula_id.score_peak(apex, drift, obs_ratios=obs_ratios(apex))
+        cands = formula_id.score_peak(
+            apex,
+            drift,
+            obs_ratios=obs_ratios(apex),
+            compounds_of_interest=compounds_of_interest,
+        )
         id_conf = cands[0]["probability"] if cands else None
         id_amb = bool(
             cands
@@ -394,6 +402,10 @@ def build_viz_data(
             href_default = round(float(np.median(humidity[good])), 5)
 
     config_payload = _scrub_retired_review_fields(config_base)
+    if compounds_of_interest:
+        config_payload["compounds_of_interest"] = compounds_of_interest
+    else:
+        config_payload.pop("compounds_of_interest", None)
     config_payload.setdefault("mass_axis_domain", ptrms.MASS_AXIS_CONFIG_DOMAIN)
     config_payload.setdefault("mass_axis_version", ptrms.MASS_AXIS_CONFIG_VERSION)
     return {
@@ -2173,7 +2185,12 @@ function renderId(){ const el=document.getElementById("idpanel"), conf=document.
   const status=assigned
     ? `<span class="pill assigned">assigned</span> ${esc(p.formula)}`
     : '<span class="pill unassigned">not assigned</span>';
-  const provenance='<div class="idnote"><b>Evidence:</b> candidates are inferred from measured exact mass, isotope evidence, and chemistry plausibility. Names and isomer labels come from the bundled PTR Library mapping; formula ranking cannot determine structural isomers.</div>';
+  const rawInterests=(DATA.config_base||{}).compounds_of_interest;
+  const interests=Array.isArray(rawInterests)
+    ? rawInterests.filter(c=>c&&typeof c.name==='string'):[];
+  const priorText=interests.length
+    ? ` The ${interests.length} user-selected compound${interests.length===1?'':'s'} of interest provide a modest contextual ranking prior; this is not evidence that they are present.`:'';
+  const provenance='<div class="idnote"><b>Evidence:</b> candidates are inferred from measured exact mass, isotope evidence, and chemistry plausibility.'+priorText+' Names and isomer labels come from the bundled PTR Library mapping; formula ranking cannot determine structural isomers.</div>';
   const clusterNote=p&&p.clustered
     ? '<div class="idnote warn"><b>Clustered peak:</b> Gaussian/deconvolved fitted component at a fixed model centre. It may not form a visible local maximum in every selected interval; this model centre is not a measured apex.</div>'
     : '';
@@ -2209,8 +2226,10 @@ function renderId(){ const el=document.getElementById("idpanel"), conf=document.
     const chosen=!!(p.formula&&c.formula===p.formula);
     row.className="cand"+(chosen?" chosen":"");
     const kb=c.k?(" · k="+(+c.k).toFixed(1)+(c.k_estimated?"~":"")):"";
+    const matched=(c.interest_matches||[]).map(esc);
     row.innerHTML=`<span class="f">${c.formula}</span>`+
       (c.name?`<span class="cname" title="compound name">${c.name}</span>`:``)+
+      (matched.length?`<span class="pill">of interest: ${matched.join(', ')}</span>`:``)+
       `<span class="meta">Δ${c.delta_mDa>=0?'+':''}${c.delta_mDa} mDa · DBE ${c.dbe}${kb}</span>`+
       (p.candidates.length===1?'':`<span class="bar"><span style="width:${Math.round(c.probability*100)}%"></span></span>`)+
       `<span class="p">${p.candidates.length===1?'only candidate':Math.round(c.probability*100)+'% share'}</span>`+
@@ -2628,8 +2647,12 @@ function updateMethods(){
   const conc=concentrationAvailable?"available":"unavailable (primary-ion signal or K is missing)";
   const kinetic=cfg.kinetic?"on":"off";
   const windows=cfg.wholewindows?"one whole-run window per compound":"isolated per-interval windows";
-  const mc=M.mass_axis_calibration||{applied:false,scale:1,offset_da:0,fallback_reason:"not reported"};
   const htmlText=s=>String(s).replace(/[&<>\"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
+  const rawInterests=(DATA.config_base||{}).compounds_of_interest;
+  const interests=Array.isArray(rawInterests)
+    ? rawInterests.filter(c=>c&&typeof c.name==='string'):[];
+  const interestNames=interests.map(c=>htmlText(c.name)).join(', ');
+  const mc=M.mass_axis_calibration||{applied:false,scale:1,offset_da:0,fallback_reason:"not reported"};
   const massAxis=mc.applied
     ? `applied; scale = ${Number(mc.scale).toFixed(9)}, offset = ${Number(mc.offset_da).toFixed(6)} Da; both internal anchors passed`
     : `calibration unavailable; ${htmlText(mc.fallback_reason||"internal calibration did not pass")}`;
@@ -2649,6 +2672,8 @@ function updateMethods(){
     <p><b>Windows:</b> ${windows} (${windowSource}); manual windows remain manual. Clustered components use fixed-centre
     Gaussian/deconvolution models, not interval apexes. Transmission uses ${trans}.
     Concentration is <b>${conc}</b>.</p>
+    <p><b>Contextual compound prior:</b> ${interests.length?interestNames:'none supplied'}.
+    ${interests.length?'These names double the matching formula ranking weight but do not establish presence, identity, or calibration.':'Candidate ranking uses spectral and general chemistry evidence only.'}</p>
     <h3>Authoritative export</h3>
     <p>Browser values are a preview. Live-safe controls update embedded data, but settings marked stale above need raw HDF5 re-extraction. ${exportAction()} The authoritative analysis includes Gaussian deconvolution.</p>`;
 }

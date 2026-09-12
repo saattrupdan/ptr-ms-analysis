@@ -721,6 +721,73 @@ def test_start_screen_opens_files_without_rendering_recents(server, tmp_path, mo
     assert json.loads(recent)[0]["path"] == str(h5)
 
 
+def test_open_validates_and_stores_compounds_of_interest(server, tmp_path):
+    api, _ = server
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+    with (
+        mock.patch.object(app, "auto_peaks", return_value=[]),
+        mock.patch.object(app, "auto_ranges", return_value=[]),
+        mock.patch.object(app.viz, "build_viz_data", payload_stub),
+    ):
+        code, _ = api.post(
+            "/open",
+            {"path": str(h5), "compounds_of_interest": ["Acetone", "propanal"]},
+        )
+        assert code == 202
+        state = _wait_ready(api)
+
+    assert state["status"] == "ready"
+    config = json.loads((tmp_path / "run.json").read_text(encoding="utf-8"))
+    assert config["compounds_of_interest"] == [
+        {"name": "acetone", "formula": "C3H6O", "mz": 59.0491},
+        {"name": "propanal", "formula": "C3H6O", "mz": 59.0491},
+    ]
+
+
+def test_open_rejects_an_unknown_compound_before_starting(server, tmp_path):
+    api, session = server
+    h5 = tmp_path / "run.h5"
+    make_h5(h5)
+
+    code, body = api.post(
+        "/open", {"path": str(h5), "compounds_of_interest": ["not a compound"]}
+    )
+
+    assert code == 400
+    assert body["error"] == "unrecognised compound: not a compound"
+    assert session.state()["status"] == "empty"
+    assert not (tmp_path / "run.json").exists()
+
+
+def test_save_canonicalises_compound_priors_and_rejects_unknowns(tmp_path):
+    session = app.Session()
+    session.config_path = tmp_path / "run.json"
+    session.config = {"peaks": []}
+    page = session.begin_review_page()
+
+    assert session.save_config(
+        {
+            "peaks": [],
+            "compounds_of_interest": [
+                {"name": "Acetone", "formula": "forged", "mz": -1}
+            ],
+        },
+        page=page,
+    )
+    saved = json.loads(session.config_path.read_text(encoding="utf-8"))
+    assert saved["compounds_of_interest"] == [
+        {"name": "acetone", "formula": "C3H6O", "mz": 59.0491}
+    ]
+
+    with pytest.raises(ValueError, match="unrecognised compound"):
+        session.save_config(
+            {"peaks": [], "compounds_of_interest": ["invented compound"]},
+            page=page,
+        )
+    assert json.loads(session.config_path.read_text(encoding="utf-8")) == saved
+
+
 def test_review_page_404s_until_a_file_is_open(server):
     api, _ = server
     with pytest.raises(urllib.error.HTTPError) as exc:
@@ -1631,20 +1698,33 @@ def test_browse_says_so_when_the_system_has_no_file_dialog(server, monkeypatch):
     assert body["error"] == "Native file browsing is unavailable."
 
 
-def test_the_start_screen_is_browse_only():
-    """The intro must not expose a text control or a manual-open action."""
+def test_the_start_screen_uses_browse_for_files_and_compound_input_only():
+    """The intro must not expose a manual file-path control."""
     html = app._START_HTML
     js = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[0]
 
-    assert "<input" not in html
+    assert '<input id="compound-input"' in html
     assert 'id="path"' not in html
     assert 'id="go"' not in html
     assert "Open run" not in html
-    assert "value.trim()" not in js
     assert "$('#path')" not in js
     assert "$('#go')" not in js
     assert "fetch('/browse'" in js
-    assert "openFile(body.path)" in js
+    assert "showInterest(body.path)" in js
+
+
+def test_the_start_screen_contains_the_compound_prior_modal():
+    html = app._START_HTML
+    js = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[0]
+
+    assert 'id="interest" role="dialog" aria-modal="true"' in html
+    assert 'id="compound-input"' in html
+    assert 'role="combobox"' in html and 'role="listbox"' in html
+    assert 'id="interest-skip"' in html and 'id="interest-continue"' in html
+    assert "splitCompoundBlock" in js and "addCompoundBlock" in js
+    assert "Not recognised by the bundled PTR Library." in js
+    assert "body.compounds_of_interest=compounds.map(c=>c.name)" in js
+    assert "1,2-butadiene" in js, "library isomers were not exposed to autocomplete"
 
 
 def test_the_start_screen_shows_browse_unavailable_error():
