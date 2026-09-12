@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-12
+
 ### Added
 
 - Sniff now checks GitHub Releases on startup and prompts when a compatible update is
