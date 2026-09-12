@@ -34,10 +34,15 @@ jobs:
             # WiX needs the .NET SDK, which the Windows runner image already has.
             installer: msi
             exe: dist/sniff/sniff.exe
+            smoke_args: ""
           - os: macos-latest
             label: macos-arm64
             installer: pkg
             exe: dist/Sniff.app/Contents/MacOS/sniff
+            # A bare windowed executable can stall before Python starts on hosted
+            # macOS. The explicit --window phase below still exercises pywebview;
+            # Windows CI and local macOS smoke retain the no-argument hook probe.
+            smoke_args: --headless-bare
             # An Intel Mac build would be a third entry: { os: macos-13,
             # label: macos-x86_64, exe: dist/Sniff.app/Contents/MacOS/sniff }.
 
@@ -62,7 +67,7 @@ jobs:
         run: pyinstaller --noconfirm packaging/sniff-app.spec
 
       - name: Check the bundle actually serves a review
-        run: python scripts/smoke_frozen.py "${{ matrix.exe }}"
+        run: python scripts/smoke_frozen.py "${{ matrix.exe }}" ${{ matrix.smoke_args }}
 
       - name: Build the Windows installer
         if: matrix.installer == 'msi'
@@ -123,7 +128,7 @@ jobs:
             exit 1
           fi
           echo "installed at: $installed"
-          python scripts/smoke_frozen.py "$installed/Contents/MacOS/sniff"
+          python scripts/smoke_frozen.py "$installed/Contents/MacOS/sniff" --headless-bare
 
       # Named after the installer exists: naming it before building it is a mistake
       # worth remembering, because the smoke test above passes either way.

@@ -7,6 +7,7 @@ nothing but a synthetic file and a few seconds of patience.
 
 Usage:  uv run python scripts/smoke_frozen.py dist/sniff/sniff.exe
         uv run python scripts/smoke_frozen.py "dist/Sniff.app/Contents/MacOS/sniff"
+        uv run python scripts/smoke_frozen.py ".../sniff" --headless-bare
 """
 
 from __future__ import annotations
@@ -167,10 +168,11 @@ def await_logged_url(proc, log_path, offset, timeout):
 
 
 def main(argv) -> int:
-    if len(argv) != 2:
+    if len(argv) not in (2, 3) or (len(argv) == 3 and argv[2] != "--headless-bare"):
         print(__doc__, file=sys.stderr)
         return 2
     exe = Path(argv[1]).resolve()
+    headless_bare = len(argv) == 3
     if not exe.is_file():
         print(
             f"frozen app smoke: FAIL — no such executable file: {exe}", file=sys.stderr
@@ -276,7 +278,9 @@ def main(argv) -> int:
         # Run each launch in isolation. Concurrent AppKit/pywebview processes add no
         # coverage and can stall a second windowed launch on hosted macOS runners.
         if post(base + "/shutdown") != 200:
-            print("frozen app smoke: FAIL — could not stop the first app", file=sys.stderr)
+            print(
+                "frozen app smoke: FAIL — could not stop the first app", file=sys.stderr
+            )
             return 1
         try:
             proc.wait(timeout=LAUNCH_TIMEOUT)
@@ -287,13 +291,20 @@ def main(argv) -> int:
             )
             return 1
 
-        # Second phase: the same executable with no arguments at all, which is how
-        # Finder and the Start Menu shortcut launch it. The command line would answer
-        # that with usage text and exit 2, and a windowed bundle does it invisibly.
-        # `BROWSER` keeps the page from popping open on whoever is running this.
+        # Second phase: normally use the same executable with no arguments at all,
+        # which is how Finder and the Start Menu shortcut launch it. Hosted macOS
+        # runners can stall that windowed executable before Python starts, so their
+        # workflow requests an explicit headless app launch; Windows CI, macOS local
+        # smoke and unit tests still cover the no-argument runtime hook.
         log_offset = log_path.stat().st_size
+        bare_port = free_port() if headless_bare else None
+        bare_cmd = (
+            [str(exe), "app", "--no-browser", "--port", str(bare_port)]
+            if headless_bare
+            else [str(exe)]
+        )
         bare = subprocess.Popen(
-            [str(exe)],
+            bare_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -302,13 +313,16 @@ def main(argv) -> int:
             env=dict(env, BROWSER=f"{sys.executable} -c pass"),
         )
         try:
-            bare_url, bare_lines = await_logged_url(
-                bare, log_path, log_offset, LAUNCH_TIMEOUT
-            )
+            if headless_bare:
+                bare_url, bare_lines = await_url(bare, bare_port, LAUNCH_TIMEOUT)
+            else:
+                bare_url, bare_lines = await_logged_url(
+                    bare, log_path, log_offset, LAUNCH_TIMEOUT
+                )
             if bare_url is None:
                 print(
-                    "frozen app smoke: FAIL — launched with no arguments, the bundle "
-                    "never started an app (a double-click would do nothing)",
+                    "frozen app smoke: FAIL — the start-screen launch did not start "
+                    "an app (a double-click would do nothing)",
                     file=sys.stderr,
                 )
                 print("\n".join(bare_lines), file=sys.stderr)
@@ -400,8 +414,8 @@ def main(argv) -> int:
 
         print(
             f"frozen app smoke: OK  ({os.path.getsize(exe) // 1024} KiB launcher, "
-            f"served {url}, a bare launch opened the start screen, and --window "
-            f"{windowed})"
+            f"served {url}, {'a headless frozen launch' if headless_bare else 'a bare launch'} "
+            f"opened the start screen, and --window {windowed})"
         )
         return 0
     finally:

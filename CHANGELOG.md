@@ -17,8 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- The frozen-app smoke now stops each app process before testing the next launch mode,
-  avoiding spurious macOS CI stalls from concurrent AppKit/pywebview processes.
+- The frozen-app smoke now isolates each launch mode and uses an explicit headless
+  start-screen probe on hosted macOS, where a bare windowed executable can stall before
+  Python starts. Windows CI and local macOS checks retain the no-argument launch probe.
 
 ### Changed
 
