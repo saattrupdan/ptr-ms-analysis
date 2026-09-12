@@ -695,6 +695,98 @@ def test_the_app_says_how_it_is_showing_itself(server):
         app._surface = previous
 
 
+def test_update_route_checks_once_and_opens_the_verified_installer(server, monkeypatch):
+    api, _ = server
+    available = app.updates.Update(
+        version="1.2.0",
+        asset_name="sniff-review-macos-arm64.pkg",
+        download_url=(
+            "https://github.com/saattrupdan/sniff/releases/download/"
+            "v1.2.0/sniff-review-macos-arm64.pkg"
+        ),
+        digest="sha256:" + "a" * 64,
+        release_url="https://github.com/saattrupdan/sniff/releases/tag/v1.2.0",
+    )
+    checks = []
+    opened = []
+    monkeypatch.setattr(
+        app.updates,
+        "find_update",
+        lambda version: checks.append(version) or available,
+    )
+    monkeypatch.setattr(
+        app.updates,
+        "install_update",
+        lambda candidate: opened.append(candidate),
+    )
+
+    status, body = api.get("/api/update")
+    assert status == 200
+    assert json.loads(body) == {
+        "available": True,
+        "version": "1.2.0",
+        "release_url": "https://github.com/saattrupdan/sniff/releases/tag/v1.2.0",
+    }
+    assert api.get("/api/update")[0] == 200
+    status, body = api.post("/update")
+    assert status == 200 and body == {"ok": True, "version": "1.2.0"}
+    assert checks == [app.__version__]
+    assert opened == [available]
+    assert json.loads(api.get("/api/update")[1]) == {"available": False}
+
+
+def test_install_later_defers_the_update_for_this_app_launch(server, monkeypatch):
+    api, _ = server
+    available = mock.Mock(version="1.2.0", release_url="https://example.invalid")
+    monkeypatch.setattr(app.updates, "find_update", lambda _version: available)
+
+    assert json.loads(api.get("/api/update")[1])["available"] is True
+    assert api.post("/update/later") == (200, {"ok": True})
+    assert json.loads(api.get("/api/update")[1]) == {"available": False}
+
+
+def test_cross_origin_websites_cannot_open_the_installer(server):
+    api, _ = server
+    request = urllib.request.Request(
+        api.base + "update",
+        data=b"{}",
+        headers={"Content-Type": "application/json", "Origin": "https://example.com"},
+        method="POST",
+    )
+
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(request, timeout=10)
+
+    assert caught.value.code == 403
+    assert json.loads(caught.value.read()) == {
+        "error": "cross-origin update request refused"
+    }
+
+
+def test_update_check_failure_is_quiet_for_the_start_screen(server, monkeypatch):
+    api, _ = server
+
+    def fail(_version):
+        raise OSError("offline")
+
+    monkeypatch.setattr(app.updates, "find_update", fail)
+
+    status, body = api.get("/api/update")
+
+    assert status == 200
+    assert json.loads(body) == {"available": False}
+
+
+def test_start_screen_offers_an_update_or_a_later_choice():
+    html = app._START_HTML
+
+    assert 'id="install-update"' in html and "Install update" in html
+    assert 'id="install-later"' in html and "Install later" in html
+    assert "fetch('/api/update')" in html
+    assert "fetch('/update',{method:'POST'})" in html
+    assert "fetch('/update/later',{method:'POST'})" in html
+
+
 def test_start_screen_opens_files_without_rendering_recents(server, tmp_path, monkeypatch):
     api, session = server
     h5 = tmp_path / "run.h5"

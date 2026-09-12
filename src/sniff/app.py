@@ -7,8 +7,9 @@ loads the config saved beside it or, the first time, runs the deterministic pipe
 to make one, optionally asking an agent endpoint to post-process it. Either way the
 result is a config file on disk, which is what the UI then edits.
 
-Everything here is local: files are read and written in place, and the only network
-call is to an agent endpoint the user supplied.
+Measurement files stay local: they are read and written in place. Network access is
+limited to the optional agent endpoint a user supplied and a metadata-only GitHub
+Release check on startup.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from urllib.parse import parse_qs, urlparse
 import h5py
 
 from . import __version__, brand, desktop, formula_id, ptrms, viz
+from . import update as updates
 from .analyze import (
     analyze_config_to_csv,
     auto_peaks,
@@ -1223,6 +1225,16 @@ footer{display:flex;gap:12px;align-items:center;justify-content:space-between;
   text-decoration:underline;cursor:pointer}
 .link:hover{color:var(--fg)}
 .link[hidden]{display:none}
+#update{position:fixed;inset:0;z-index:10;display:grid;place-items:center;padding:24px;
+  background:var(--scrim);overscroll-behavior:contain;
+  -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+#update[hidden]{display:none}
+.updatecard{width:min(470px,100%);background:var(--card);border:1px solid var(--line);
+  border-radius:16px;padding:24px;box-shadow:0 24px 60px -28px rgba(16,24,40,.45)}
+.updatecard h2{margin:0 0 7px;font-size:21px;letter-spacing:-.025em}
+.updatecard p{margin:0;color:var(--mut)}
+.updateactions{display:flex;justify-content:flex-end;gap:8px;margin-top:22px}
+.updateerror{margin-top:12px;color:var(--err);font-size:13px}
 #interest{position:fixed;inset:0;z-index:8;display:grid;place-items:center;padding:24px;
   background:var(--scrim);overscroll-behavior:contain;
   -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
@@ -1340,8 +1352,8 @@ html.lock,html.lock body{overflow:hidden}
     <h2>Open an IONICON run</h2>
     <button class="btn" id="browse" type="button">Browse this computer&hellip;</button>
     <div class="quick" id="quick-help"><span><i aria-hidden="true"></i>Runs locally</span>
-      <span><i aria-hidden="true"></i>No uploads</span>
-      <span><i aria-hidden="true"></i>Nothing leaves this computer</span>
+      <span><i aria-hidden="true"></i>No measurement uploads</span>
+      <span><i aria-hidden="true"></i>Measurement files stay on this computer</span>
     </div>
   </div>
 
@@ -1352,6 +1364,18 @@ html.lock,html.lock body{overflow:hidden}
     <span class="version">v__VERSION__</span>
   </footer>
 </main>
+
+<div id="update" role="dialog" aria-modal="true" aria-labelledby="update-title" hidden>
+  <div class="updatecard">
+    <h2 id="update-title">A new Sniff is ready</h2>
+    <p id="update-copy"></p>
+    <p class="updateerror" id="update-error" role="alert" hidden></p>
+    <div class="updateactions">
+      <button class="btn sec" id="install-later" type="button">Install later</button>
+      <button class="btn" id="install-update" type="button">Install update</button>
+    </div>
+  </div>
+</div>
 
 <div id="interest" role="dialog" aria-modal="true" aria-labelledby="interest-title" hidden>
   <div class="priorcard">
@@ -1426,6 +1450,21 @@ function parts(p){const s=String(p).split(SEP).join('/'),i=s.lastIndexOf('/');
   return{name:s.slice(i+1),dir:i===0?'/':s.slice(0,i)}}
 function el(tag,cls,text){const n=document.createElement(tag);
   if(cls)n.className=cls; if(text!=null)n.textContent=text; return n;}
+
+async function checkUpdate(){
+  let response;
+  try{response=await fetch('/api/update');}catch(e){return;}
+  if(!response.ok)return;
+  const available=await response.json().catch(()=>null);
+  if(!available||!available.available)return;
+  $('#update-copy').textContent='Version '+available.version+' is available. Sniff will '
+    +'download the verified installer and open it for you.';
+  $('#update').hidden=false; lock(true); $('#install-update').focus();
+}
+async function closeUpdate(){
+  try{await fetch('/update/later',{method:'POST'});}catch(e){}
+  $('#update').hidden=true;lock(false);
+}
 
 const compoundKey=s=>String(s||'').trim().replace(/\\s+/g,' ').toLowerCase();
 const COMPOUND_BY_NAME=new Map(COMPOUNDS.map(c=>[compoundKey(c.name),c]));
@@ -1711,6 +1750,25 @@ $('#interest-continue').onclick=()=>{
   beginPendingOpen(selectedCompounds.slice());
 };
 
+$('#install-later').onclick=closeUpdate;
+$('#install-update').onclick=async()=>{
+  const install=$('#install-update'),later=$('#install-later'),error=$('#update-error');
+  install.disabled=true; later.disabled=true; error.hidden=true;
+  install.textContent='Downloading…';
+  let response=null;
+  try{response=await fetch('/update',{method:'POST'});}catch(e){}
+  const body=response?await response.json().catch(()=>({})):{};
+  if(!response||!response.ok){
+    error.textContent=body.error||'Could not download the update. Try again later.';
+    error.hidden=false; install.disabled=false; later.disabled=false;
+    install.textContent='Try again'; return;
+  }
+  $('#update-title').textContent='Installer opened';
+  $('#update-copy').textContent='Close Sniff, finish the installation, then reopen Sniff '
+    +'to use version '+body.version+'.';
+  install.hidden=true; later.disabled=false; later.textContent='Close'; later.focus();
+};
+
 $('#browse').onclick=async()=>{
   const btn=$('#browse'); btn.disabled=true;
   note('Choose a file in the dialog that just opened on this computer.');
@@ -1738,6 +1796,7 @@ $('#quit').onclick=async ev=>{
   note(ok?'The app has stopped. You can close this tab.':'Could not stop the app.',!ok,false,
        !ok?true:false);
 };
+checkUpdate();
 tick();
 </script></body></html>"""
 
@@ -1890,6 +1949,28 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
     can drive the routes without blocking.
     """
     session = Session()
+    update_lock = threading.Lock()
+    update_checked = False
+    update_deferred = False
+    available_update = None
+
+    def latest_update():
+        nonlocal update_checked, available_update
+        with update_lock:
+            if update_deferred:
+                return None
+            if not update_checked:
+                try:
+                    available_update = updates.find_update(__version__)
+                except (OSError, TypeError, ValueError):
+                    available_update = None
+                update_checked = True
+            return available_update
+
+    def defer_update():
+        nonlocal update_deferred
+        with update_lock:
+            update_deferred = True
 
     class Handler(server.BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -1904,6 +1985,17 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
             self.end_headers()
             if body:
                 self.wfile.write(body)
+
+        def _same_origin(self):
+            origin = self.headers.get("Origin")
+            if not origin:
+                return True
+            parsed = urlparse(origin)
+            return (
+                parsed.scheme == "http"
+                and parsed.hostname == "127.0.0.1"
+                and parsed.port == self.server.server_address[1]
+            )
 
         def do_GET(self):
             route = urlparse(self.path)
@@ -1928,6 +2020,19 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
                     auto_tour=auto_tour_pending(),
                 )
                 self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+            elif route.path == "/api/update":
+                available = latest_update()
+                if available is None:
+                    self._send(200, {"available": False})
+                else:
+                    self._send(
+                        200,
+                        {
+                            "available": True,
+                            "version": available.version,
+                            "release_url": available.release_url,
+                        },
+                    )
             elif route.path == "/api/state":
                 self._send(200, session.state())
             elif route.path == "/status":
@@ -1950,13 +2055,31 @@ def make_server(port=8765, agent_url=None, agent_timeout=300.0):
 
         def do_POST(self):
             route = urlparse(self.path)
+            if route.path in ("/update", "/update/later") and not self._same_origin():
+                self._send(403, {"error": "cross-origin update request refused"})
+                return
             n = int(self.headers.get("Content-Length", 0) or 0)
             try:
                 body = json.loads(self.rfile.read(n) if n else b"{}")
             except (UnicodeError, json.JSONDecodeError, ValueError):
                 self._send(400, {"error": "invalid JSON"})
                 return
-            if route.path == "/open":
+            if route.path == "/update":
+                available = latest_update()
+                if available is None:
+                    self._send(409, {"error": "no compatible update is available"})
+                    return
+                try:
+                    updates.install_update(available)
+                except (OSError, TypeError, ValueError) as exc:
+                    self._send(503, {"error": f"could not open the update: {exc}"})
+                    return
+                defer_update()
+                self._send(200, {"ok": True, "version": available.version})
+            elif route.path == "/update/later":
+                defer_update()
+                self._send(200, {"ok": True})
+            elif route.path == "/open":
                 target = str(body.get("path") or "").strip()
                 if not target:
                     self._send(400, {"error": "no path given"})

@@ -18,6 +18,12 @@ installs Sniff in `Program Files`; and the Linux `.deb` installs Sniff in `/opt/
 with an application-menu entry and a `sniff` command. All three include Python, NumPy,
 h5py and the PTR reference data — no separate Python installation is needed.
 
+On startup, Sniff checks the latest GitHub Release. When a compatible newer version is
+available, choose **Install update** to download, verify and open its system installer,
+or **Install later** to dismiss the prompt until the next launch. Finish the installer,
+then reopen Sniff to use the new version. If the release service is unavailable, startup
+continues normally without an alert.
+
 On Ubuntu 22.04+, Debian 12+, and their compatible derivatives, install the downloaded
 Linux package with:
 

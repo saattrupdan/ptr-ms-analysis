@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sniff now checks GitHub Releases on startup and prompts when a compatible update is
+  available. **Install update** downloads, verifies and opens the platform installer in
+  one click; **Install later** defers the prompt until the next launch.
 - Linux x86_64 releases now include an Ubuntu/Debian `.deb` installer and a portable
   `.tar.gz` bundle, both built and smoke-tested on Ubuntu 22.04. Linux deliberately
   opens Sniff's local interface in the default browser to avoid distro-specific GUI
